@@ -127,7 +127,7 @@ const humanizeGroupSlug = (slug?: string | null): string | undefined => {
 };
 
 const mapMarketDetailPayload = (payload: any, eventId: string): MarketDetail => {
-  const eventIdValue = coerceId(payload.event_id ?? payload.eventId ?? payload.event_key ?? payload.eventKey, eventId);
+  const eventIdValue = coerceId(payload.event_id ?? payload.eventId, eventId);
   const resolutionSource = payload.resolution ?? payload.extra_data?.resolution;
   const eventKey = payload.event_key ?? payload.eventKey ?? payload.extra_data?.event_key ?? null;
   const groupSlug = payload.group_slug ?? payload.groupSlug ?? payload.extra_data?.group_slug ?? eventKey ?? null;
@@ -508,6 +508,9 @@ export async function fetchFeaturedEvents(limit = 6, options?: FetchFeaturedMark
       const markets = marketsPayload.map((market: any) => mapApiMarketToSummary(market));
       const eventKey = item.event_key ?? item.eventKey ?? null;
       const groupSlug = item.group_slug ?? item.groupSlug ?? eventKey ?? null;
+      const primaryMarketEventId =
+        markets.find((market: MarketSummary) => Boolean(market.eventId && market.eventId !== "unknown"))?.eventId ?? null;
+      const routeEventId = coerceId(primaryMarketEventId ?? item.event_id ?? item.eventId ?? "", "");
       const imageUrl = item.image_url ?? item.imageUrl ?? markets[0]?.imageUrl ?? null;
       const shouldHumanizeTitle = groupSlug && marketsPayload.length > 1;
       const title =
@@ -516,7 +519,7 @@ export async function fetchFeaturedEvents(limit = 6, options?: FetchFeaturedMark
         (shouldHumanizeTitle ? humanizeGroupSlug(groupSlug) : null) ??
         "";
       return {
-        eventId: item.event_key ?? item.eventKey ?? item.event_id ?? item.eventId ?? groupSlug ?? markets[0]?.eventId ?? "",
+        eventId: routeEventId || "unknown",
         title,
         category: item.category ?? markets[0]?.category ?? undefined,
         groupSlug: groupSlug ?? markets[0]?.groupSlug ?? null,

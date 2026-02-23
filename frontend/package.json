@@ -5,7 +5,7 @@
   "description": "Next.js frontend for Reveal Market (marketing site, app shell, docs).",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "bash ./run_build.sh",
     "start": "next start",
     "lint": "next lint",
     "test": "vitest run",
@@ -50,6 +50,7 @@
     "@types/react-dom": "^18.3.0",
     "@vitest/ui": "^4.0.8",
     "autoprefixer": "^10.4.19",
+    "baseline-browser-mapping": "^2.10.0",
     "eslint": "^9.13.0",
     "eslint-config-next": "15.4.7",
     "happy-dom": "^20.0.10",

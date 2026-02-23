@@ -10,8 +10,7 @@ type Props = {
 };
 
 const buildHref = (event: EventSummary) => {
-  const key = event.groupSlug || event.eventId;
-  return `/events/${encodeURIComponent(key)}` as Route;
+  return `/events/${encodeURIComponent(event.eventId)}` as Route;
 };
 
 const formatProbability = (value?: number | null) =>

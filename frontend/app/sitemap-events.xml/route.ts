@@ -10,13 +10,12 @@ const EVENT_ORDER_BY = "volume";
 const buildEventPath = (eventId: string): string => `/events/${encodeURIComponent(eventId)}`;
 
 const extractEventId = (item: any): string | null => {
-  const candidate =
-    item?.group_slug ??
-    item?.groupSlug ??
-    item?.event_key ??
-    item?.eventKey ??
-    item?.event_id ??
-    item?.eventId;
+  const markets = Array.isArray(item?.markets) ? item.markets : [];
+  const marketCandidate = markets.find((market: any) => {
+    const value = market?.event_id ?? market?.eventId;
+    return typeof value === "string" && value.trim();
+  });
+  const candidate = marketCandidate?.event_id ?? marketCandidate?.eventId ?? item?.event_id ?? item?.eventId;
   if (typeof candidate !== "string") {
     return null;
   }

@@ -39,6 +39,7 @@ describe("MarketFilters", () => {
       json: async () => [
         {
           event_id: "evt-alpha",
+          group_slug: "ufc",
           title: "Alpha Hedge",
           category: "Politics",
           tags: ["gov-shutdown"],

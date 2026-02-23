@@ -168,7 +168,7 @@ export function EventDetailClient({
           <div className="grid gap-6 lg:grid-cols-[1.7fr,1fr]">
             <div className="space-y-6 lg:self-start">
               <GroupedMarketSelector
-                groupSlug={market.groupSlug ?? canonicalEventId}
+                groupSlug={canonicalEventId}
                 siblings={selectorSiblings}
                 activeEventId={activeEventId}
                 onSelectAction={handleSelect}

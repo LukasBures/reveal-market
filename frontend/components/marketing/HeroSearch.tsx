@@ -1,5 +1,6 @@
 "use client";
 
+import type { Route } from "next";
 import { useRouter } from "next/navigation";
 import { useCallback, useDeferredValue, useEffect, useRef, useState, useTransition } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
@@ -12,6 +13,7 @@ const CACHE_LIMIT = 50;
 const CACHE_TTL_MS = 60_000;
 const SUGGEST_TIMEOUT_MS = 8000;
 const SUGGEST_RETRY_DELAY_MS = 400;
+const buildEventPath = (eventId: string) => `/events/${encodeURIComponent(eventId.trim())}` as Route;
 
 type Props = {
   initialSearch?: string;
@@ -142,7 +144,7 @@ export function HeroSearch({
         setHighlightedIndex((prev) => (prev <= 0 ? suggestions.length - 1 : prev - 1));
       } else if (event.key === "Enter" && highlightedIndex >= 0 && highlightedIndex < suggestions.length) {
         event.preventDefault();
-        router.push(`/events/${suggestions[highlightedIndex].groupSlug ?? suggestions[highlightedIndex].eventId}`);
+        router.push(buildEventPath(suggestions[highlightedIndex].eventId));
         setSuggestionsVisible(false);
       }
     },
@@ -153,7 +155,7 @@ export function HeroSearch({
     event.preventDefault();
     const query = search.trim();
     if (highlightedIndex >= 0 && highlightedIndex < suggestions.length) {
-      router.push(`/events/${suggestions[highlightedIndex].groupSlug ?? suggestions[highlightedIndex].eventId}`);
+      router.push(buildEventPath(suggestions[highlightedIndex].eventId));
       return;
     }
     if (!query) return;
@@ -245,7 +247,7 @@ export function HeroSearch({
                 aria-selected={index === highlightedIndex}
                 onMouseDown={(event) => {
                   event.preventDefault();
-                  router.push(`/events/${suggestion.groupSlug ?? suggestion.eventId}`);
+                  router.push(buildEventPath(suggestion.eventId));
                   setSuggestionsVisible(false);
                 }}
                 className={`flex w-full min-w-0 items-center gap-3 px-4 py-3 text-left text-sm transition ${

@@ -79,8 +79,18 @@ const resolveEventImage = (market: MarketDetail): string | undefined => {
   return undefined;
 };
 
-const getCanonicalEventId = (market: MarketDetail, fallback: string): string =>
-  market.groupSlug && market.groupSlug !== "unknown" ? market.groupSlug : fallback;
+const getCanonicalEventId = (market: MarketDetail, fallback: string): string => {
+  const directEventId = (market.eventId ?? "").trim();
+  if (directEventId && directEventId !== "unknown") {
+    return directEventId;
+  }
+  const groupedEventId =
+    market.groupMarkets?.find((item) => item.eventId && item.eventId !== "unknown")?.eventId?.trim() ?? "";
+  if (groupedEventId && groupedEventId !== "unknown") {
+    return groupedEventId;
+  }
+  return fallback;
+};
 
 const extractEventKeywords = (market: MarketDetail): string[] => {
   const source = [

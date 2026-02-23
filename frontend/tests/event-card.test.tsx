@@ -26,6 +26,28 @@ describe("EventCard", () => {
     expect(screen.getByText("No")).toBeInTheDocument();
   });
 
+  it("uses event id links even when group slug is present", () => {
+    render(
+      <EventCard
+        event={{
+          eventId: "evt-route-specific",
+          groupSlug: "ufc",
+          title: "Will it rain?",
+          markets: [
+            {
+              eventId: "evt-route-specific",
+              title: "Will it rain?",
+              outcomes: ["Yes", "No"],
+              outcomePrices: [0.62, 0.38],
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: /will it rain/i })).toHaveAttribute("href", "/events/evt-route-specific");
+  });
+
   it("renders the head-to-head card for non-yes/no binary markets", () => {
     render(
       <EventCard

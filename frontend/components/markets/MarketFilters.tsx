@@ -23,6 +23,7 @@ const SUGGESTION_CACHE_LIMIT = 50;
 const SUGGESTION_CACHE_TTL_MS = 60_000;
 const SUGGEST_TIMEOUT_MS = 8000;
 const SUGGEST_RETRY_DELAY_MS = 400;
+const buildEventPath = (eventId: string) => `/events/${encodeURIComponent(eventId.trim())}` as Route;
 const windowSuggestionCache = new Map<
   string,
   { data: MarketSummary[]; expiresAt: number }
@@ -209,7 +210,7 @@ export function MarketFilters({ initialSearch, liveMarketsCount, endedMarketsCou
       } else if (event.key === "Enter") {
         if (highlightedIndex >= 0 && highlightedIndex < suggestions.length) {
           event.preventDefault();
-      router.push(`/events/${suggestions[highlightedIndex].groupSlug ?? suggestions[highlightedIndex].eventId}`);
+          router.push(buildEventPath(suggestions[highlightedIndex].eventId));
           setSuggestionsVisible(false);
         }
       }
@@ -296,7 +297,7 @@ export function MarketFilters({ initialSearch, liveMarketsCount, endedMarketsCou
                     aria-selected={index === highlightedIndex}
                     onMouseDown={(event) => {
                       event.preventDefault();
-                      router.push(`/events/${suggestion.groupSlug ?? suggestion.eventId}`);
+                      router.push(buildEventPath(suggestion.eventId));
                       setSuggestionsVisible(false);
                     }}
                     className={`flex w-full min-w-0 items-center gap-3 px-4 py-3 text-left text-sm transition ${
