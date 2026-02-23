@@ -111,6 +111,7 @@ class RelayerConfig:
     queue_poll_seconds: float
     queue_max_attempts: int
     queue_max_payload_bytes: int
+    queue_running_ttl_seconds: int
     fee_bump_percent: float
     min_escrow_token_balance_wei: int
     min_relayer_token_allowance_wei: int
@@ -138,15 +139,23 @@ def load_config() -> RelayerConfig:
     allow_insecure_auth = _bool_env("RELAYER_ALLOW_INSECURE_AUTH", False)
     if not bearer_token and not allow_insecure_auth:
         raise RuntimeError("RELAYER_BEARER_TOKEN is required unless RELAYER_ALLOW_INSECURE_AUTH=true")
+    tx_timeout_seconds = _int_env("RELAYER_TX_TIMEOUT_SECONDS", 120)
     rate_limit_requests = _int_env("RELAYER_RATE_LIMIT_REQUESTS", 30)
     rate_limit_window_seconds = _int_env("RELAYER_RATE_LIMIT_WINDOW_SECONDS", 60)
     queue_max_payload_bytes = _int_env("RELAYER_QUEUE_MAX_PAYLOAD_BYTES", 131072)
+    queue_running_ttl_env = os.getenv("RELAYER_QUEUE_RUNNING_TTL_SECONDS")
+    if queue_running_ttl_env is None:
+        queue_running_ttl_seconds = tx_timeout_seconds + 30
+    else:
+        queue_running_ttl_seconds = int(queue_running_ttl_env)
     if rate_limit_requests < 0:
         raise RuntimeError("RELAYER_RATE_LIMIT_REQUESTS must be >= 0")
     if rate_limit_requests > 0 and rate_limit_window_seconds <= 0:
         raise RuntimeError("RELAYER_RATE_LIMIT_WINDOW_SECONDS must be > 0 when rate limiting is enabled")
     if queue_max_payload_bytes <= 0:
         raise RuntimeError("RELAYER_QUEUE_MAX_PAYLOAD_BYTES must be > 0")
+    if queue_running_ttl_seconds <= 0:
+        raise RuntimeError("RELAYER_QUEUE_RUNNING_TTL_SECONDS must be > 0")
 
     return RelayerConfig(
         rpc_url=_require_env("RPC_URL"),
@@ -161,12 +170,13 @@ def load_config() -> RelayerConfig:
         min_relayer_balance_wei=_int_env("RELAYER_MIN_BALANCE_WEI", 0),
         max_retries=_int_env("RELAYER_MAX_RETRIES", 3),
         retry_backoff_seconds=_float_env("RELAYER_RETRY_BACKOFF_SECONDS", 0.5),
-        tx_timeout_seconds=_int_env("RELAYER_TX_TIMEOUT_SECONDS", 120),
+        tx_timeout_seconds=tx_timeout_seconds,
         queue_db_path=os.getenv("RELAYER_QUEUE_DB_PATH", "relayer_queue.db"),
         queue_dsn=_queue_dsn(),
         queue_poll_seconds=_float_env("RELAYER_QUEUE_POLL_SECONDS", 1.0),
         queue_max_attempts=_int_env("RELAYER_QUEUE_MAX_ATTEMPTS", 5),
         queue_max_payload_bytes=queue_max_payload_bytes,
+        queue_running_ttl_seconds=queue_running_ttl_seconds,
         fee_bump_percent=_float_env("RELAYER_FEE_BUMP_PERCENT", 0.15),
         min_escrow_token_balance_wei=_int_env("RELAYER_MIN_ESCROW_TOKEN_BALANCE_WEI", 0),
         min_relayer_token_allowance_wei=_int_env("RELAYER_MIN_RELAYER_TOKEN_ALLOWANCE_WEI", 0),

@@ -43,6 +43,7 @@ def test_load_config_uses_defaults(monkeypatch):
     monkeypatch.delenv("RELAYER_QUEUE_POLL_SECONDS", raising=False)
     monkeypatch.delenv("RELAYER_QUEUE_MAX_ATTEMPTS", raising=False)
     monkeypatch.delenv("RELAYER_QUEUE_MAX_PAYLOAD_BYTES", raising=False)
+    monkeypatch.delenv("RELAYER_QUEUE_RUNNING_TTL_SECONDS", raising=False)
     monkeypatch.delenv("RELAYER_FEE_BUMP_PERCENT", raising=False)
     monkeypatch.delenv("RELAYER_MIN_ESCROW_TOKEN_BALANCE_WEI", raising=False)
     monkeypatch.delenv("RELAYER_MIN_RELAYER_TOKEN_ALLOWANCE_WEI", raising=False)
@@ -69,6 +70,7 @@ def test_load_config_uses_defaults(monkeypatch):
     assert cfg.queue_poll_seconds == 1.0
     assert cfg.queue_max_attempts == 5
     assert cfg.queue_max_payload_bytes == 131072
+    assert cfg.queue_running_ttl_seconds == 150
     assert cfg.fee_bump_percent == 0.15
     assert cfg.min_escrow_token_balance_wei == 0
     assert cfg.min_relayer_token_allowance_wei == 0
@@ -96,6 +98,7 @@ def test_load_config_applies_overrides(monkeypatch):
         RELAYER_QUEUE_POLL_SECONDS="2.5",
         RELAYER_QUEUE_MAX_ATTEMPTS="7",
         RELAYER_QUEUE_MAX_PAYLOAD_BYTES="2048",
+        RELAYER_QUEUE_RUNNING_TTL_SECONDS="45",
         RELAYER_FEE_BUMP_PERCENT="0.25",
         RELAYER_MIN_ESCROW_TOKEN_BALANCE_WEI="10",  # noqa: S106 - test fixture value
         RELAYER_MIN_RELAYER_TOKEN_ALLOWANCE_WEI="20",  # noqa: S106 - test fixture value
@@ -120,6 +123,7 @@ def test_load_config_applies_overrides(monkeypatch):
     assert cfg.queue_poll_seconds == 2.5
     assert cfg.queue_max_attempts == 7
     assert cfg.queue_max_payload_bytes == 2048
+    assert cfg.queue_running_ttl_seconds == 45
     assert cfg.fee_bump_percent == 0.25
     assert cfg.min_escrow_token_balance_wei == 10
     assert cfg.min_relayer_token_allowance_wei == 20

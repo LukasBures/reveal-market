@@ -64,6 +64,7 @@ queue = TxQueue(
     poll_seconds=cfg.queue_poll_seconds,
     max_attempts=cfg.queue_max_attempts,
     max_payload_bytes=cfg.queue_max_payload_bytes,
+    running_ttl_seconds=cfg.queue_running_ttl_seconds,
     fee_bump_percent=cfg.fee_bump_percent,
 )
 

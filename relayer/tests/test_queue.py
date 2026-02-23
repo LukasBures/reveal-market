@@ -207,6 +207,48 @@ def test_queue_init_preserves_running_jobs(tmp_path):
     assert row["status"] == "running"
 
 
+def test_queue_reclaims_stale_running_jobs(tmp_path):
+    db_path = tmp_path / "queue.db"
+    svc = DummyService()
+    queue = TxQueue(str(db_path), svc, start_worker=False, running_ttl_seconds=1)
+    job_id = queue._enqueue_sync("commit", {"foo": "bar"})  # noqa: SLF001
+    stale_time = int(time.time()) - 10
+    with queue._connect() as conn:  # noqa: SLF001
+        conn.execute(
+            "UPDATE jobs SET status = 'running', updated_at = ? WHERE id = ?",
+            (stale_time, job_id),
+        )
+
+    row = queue._reserve_job_sync()  # noqa: SLF001
+    assert row is not None
+    assert row["id"] == job_id
+    with queue._connect() as conn:  # noqa: SLF001
+        status_row = conn.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    assert status_row is not None
+    assert status_row["status"] == "running"
+
+
+def test_queue_deadletters_stale_running_with_tx_hash(tmp_path):
+    db_path = tmp_path / "queue.db"
+    svc = DummyService()
+    queue = TxQueue(str(db_path), svc, start_worker=False, running_ttl_seconds=1)
+    job_id = queue._enqueue_sync("commit", {"foo": "bar"})  # noqa: SLF001
+    stale_time = int(time.time()) - 10
+    with queue._connect() as conn:  # noqa: SLF001
+        conn.execute(
+            "UPDATE jobs SET status = 'running', updated_at = ?, tx_hash = ? WHERE id = ?",
+            (stale_time, "0xabc", job_id),
+        )
+
+    row = queue._reserve_job_sync()  # noqa: SLF001
+    assert row is None
+    with queue._connect() as conn:  # noqa: SLF001
+        status_row = conn.execute("SELECT status, last_error FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    assert status_row is not None
+    assert status_row["status"] == "deadletter"
+    assert status_row["last_error"] == "stale_running_with_tx_hash"
+
+
 @pytest.mark.asyncio
 async def test_worker_survives_unexpected_error(tmp_path):
     db_path = tmp_path / "queue.db"

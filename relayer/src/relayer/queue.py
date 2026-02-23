@@ -36,6 +36,7 @@ class TxQueue:
         poll_seconds: float = 1.0,
         max_attempts: int = 5,
         max_payload_bytes: int = 131072,
+        running_ttl_seconds: int = 150,
         fee_bump_percent: float = 0.15,
         start_worker: bool = True,
     ) -> None:
@@ -46,6 +47,7 @@ class TxQueue:
         self.poll_seconds = poll_seconds
         self.max_attempts = max_attempts
         self.max_payload_bytes = max_payload_bytes
+        self.running_ttl_seconds = running_ttl_seconds
         self.fee_bump_percent = fee_bump_percent
         self._lock = threading.Lock()
         self._stop = asyncio.Event()
@@ -159,8 +161,37 @@ class TxQueue:
 
     def _reserve_job_sync(self, job_id: int | None = None) -> dict[str, Any] | None:
         now = int(time.time())
+        stale_cutoff = now - int(self.running_ttl_seconds) if self.running_ttl_seconds > 0 else None
         if self.use_postgres:
+            update_depth = False
             with self._lock, self._connect() as conn:
+                reclaimed = 0
+                deadlettered = 0
+                if stale_cutoff is not None:
+                    reclaimed = int(
+                        conn.execute(
+                            """
+                            UPDATE jobs
+                            SET status = 'pending', updated_at = %s
+                            WHERE status = 'running' AND updated_at < %s AND tx_hash IS NULL
+                            """,
+                            (now, stale_cutoff),
+                        ).rowcount
+                        or 0
+                    )
+                    deadlettered = int(
+                        conn.execute(
+                            """
+                            UPDATE jobs
+                            SET status = 'deadletter', last_error = %s, updated_at = %s
+                            WHERE status = 'running' AND updated_at < %s AND tx_hash IS NOT NULL
+                            """,
+                            ("stale_running_with_tx_hash", now, stale_cutoff),
+                        ).rowcount
+                        or 0
+                    )
+                if reclaimed or deadlettered:
+                    update_depth = True
                 if job_id is None:
                     cur = conn.execute(
                         """
@@ -188,8 +219,38 @@ class TxQueue:
                         (now, job_id),
                     )
                 row = cur.fetchone()
-                return dict(row) if row else None
+            if update_depth:
+                self._update_depth()
+            return dict(row) if row else None
+        update_depth = False
         with self._lock, self._connect() as conn:
+            reclaimed = 0
+            deadlettered = 0
+            if stale_cutoff is not None:
+                reclaimed = int(
+                    conn.execute(
+                        """
+                        UPDATE jobs
+                        SET status = 'pending', updated_at = ?
+                        WHERE status = 'running' AND updated_at < ? AND tx_hash IS NULL
+                        """,
+                        (now, stale_cutoff),
+                    ).rowcount
+                    or 0
+                )
+                deadlettered = int(
+                    conn.execute(
+                        """
+                        UPDATE jobs
+                        SET status = 'deadletter', last_error = ?, updated_at = ?
+                        WHERE status = 'running' AND updated_at < ? AND tx_hash IS NOT NULL
+                        """,
+                        ("stale_running_with_tx_hash", now, stale_cutoff),
+                    ).rowcount
+                    or 0
+                )
+            if reclaimed or deadlettered:
+                update_depth = True
             target_id: int | None = None
             if job_id is None:
                 row = conn.execute("SELECT id FROM jobs WHERE status = 'pending' ORDER BY id ASC LIMIT 1").fetchone()
@@ -212,7 +273,45 @@ class TxQueue:
             claimed = conn.execute("SELECT * FROM jobs WHERE id = ?", (target_id,)).fetchone()
             if claimed is None:
                 return None
-            return {k: claimed[k] for k in claimed.keys()}
+            result = {k: claimed[k] for k in claimed.keys()}
+        if update_depth:
+            self._update_depth()
+        return result
+
+    def _touch_job_sync(self, job_id: int) -> None:
+        now = int(time.time())
+        with self._lock, self._connect() as conn:
+            if self.use_postgres:
+                conn.execute(
+                    "UPDATE jobs SET updated_at = %s WHERE id = %s AND status = 'running'",
+                    (now, job_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE jobs SET updated_at = ? WHERE id = ? AND status = 'running'",
+                    (now, job_id),
+                )
+
+    def _heartbeat_interval_seconds(self) -> float:
+        if self.running_ttl_seconds <= 0:
+            return 0.0
+        return max(5.0, min(15.0, self.running_ttl_seconds / 3))
+
+    async def _heartbeat_job(self, job_id: int, stop_event: asyncio.Event) -> None:
+        interval = self._heartbeat_interval_seconds()
+        if interval <= 0:
+            return
+        while not stop_event.is_set():
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=interval)
+            except TimeoutError:
+                pass
+            if stop_event.is_set():
+                break
+            try:
+                await asyncio.to_thread(self._touch_job_sync, job_id)
+            except Exception as exc:  # pragma: no cover - best effort
+                logger.warning("queue.job.heartbeat_failed", job_id=job_id, error=str(exc))
 
     async def process_job(self, job_id: int | None = None) -> dict[str, Any]:
         row = await asyncio.to_thread(self._reserve_job_sync, job_id)
@@ -221,6 +320,7 @@ class TxQueue:
                 return {"status": "empty"}
             raise RuntimeError(f"job {job_id} not found or not pending")
 
+        job_id = int(row["id"])
         attempts = int(row["attempts"])
         payload: dict[str, Any] = json.loads(row["payload"])
         nonce = row.get("nonce")
@@ -242,6 +342,10 @@ class TxQueue:
 
         tx_hash: str | None = None
         nonce_used: int | None = int(nonce) if nonce is not None else None
+        heartbeat_stop = asyncio.Event()
+        heartbeat_task: asyncio.Task | None = None
+        if self.running_ttl_seconds > 0:
+            heartbeat_task = asyncio.create_task(self._heartbeat_job(job_id, heartbeat_stop))
         try:
             # Drop stale commit authorizations so the queue does not get stuck retrying expired jobs.
             if row["action"] == "commit":
@@ -359,6 +463,12 @@ class TxQueue:
                 "nonce": nonce_to_store,
                 "error": str(err),
             }
+        finally:
+            if heartbeat_task is not None:
+                heartbeat_stop.set()
+                heartbeat_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await heartbeat_task
 
     def _mark_complete(self, job_id: int, tx_hash: str | None, nonce: int | None) -> None:
         now = int(time.time())
