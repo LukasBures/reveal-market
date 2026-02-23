@@ -5,7 +5,7 @@ COMPOSE_ENV_FILE := $(if $(wildcard $(ENV_FILE)),--env-file $(ENV_FILE),)
 INFRA_SERVICES ?= postgres redis
 ALL_SERVICES := postgres redis api worker hedger frontend prover streamer
 
-.PHONY: api worker hedger frontend caddy prover streamer all stack down test fmt local prod
+.PHONY: api worker hedger frontend caddy prover streamer all stack down test format fmt local prod help
 .PHONY: test-backend test-api test-worker test-frontend test-hedger test-streamer test-relayer test-contracts test-contracts-polygon test-contracts-zen test-prover
 
 api:
@@ -18,7 +18,7 @@ stack:
 	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml $(COMPOSE_ENV_FILE) up --build $(INFRA_SERVICES) api worker frontend
 
 hedger:
-	COMPOSE_PROFILES=hedger $(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml $(COMPOSE_ENV_FILE) up --build $(INFRA_SERVICES) hedger
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml $(COMPOSE_ENV_FILE) up --build $(INFRA_SERVICES) hedger
 
 frontend:
 	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml $(COMPOSE_ENV_FILE) up --build $(INFRA_SERVICES) frontend
@@ -36,7 +36,7 @@ all:
 	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml $(COMPOSE_ENV_FILE) up --build $(ALL_SERVICES)
 
 down:
-	$(COMPOSE) $(COMPOSE_ENV_FILE) down
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml $(COMPOSE_ENV_FILE) down
 
 test:
 	./run_tests.sh
@@ -75,6 +75,15 @@ test-prover:
 
 format:
 	uv run pre-commit run --all-files
+
+fmt: format
+
+help:
+	@printf "%s\n" \
+	"Targets:" \
+	"  api, worker, hedger, frontend, streamer, prover, all, stack, down" \
+	"  test, test-backend, test-frontend, test-contracts, test-prover" \
+	"  format (pre-commit), local, prod"
 
 gen-address:
 	python scripts/gen_address.py --mode random --count 1

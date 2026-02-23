@@ -53,4 +53,7 @@ COPY --from=builder /app/src ./src
 RUN chown -R ${APP_USER}:${APP_GROUP} /app
 USER ${APP_USER}
 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:${RELAYER_PORT:-8088}/healthz')"
+
 CMD ["/bin/sh", "-c", "/app/.venv/bin/python -m uvicorn relayer.main:app --host \"${RELAYER_HOST}\" --port \"${RELAYER_PORT}\""]
