@@ -13,6 +13,9 @@ class _TimeoutEth:
     def get_balance(self, _address):
         raise Web3Exception("timeout")
 
+    def get_transaction_count(self, _address, _block="latest"):
+        raise Web3Exception("timeout")
+
 
 class _TimeoutFunctions:
     def COLLATERAL_TOKEN(self):  # noqa: N802

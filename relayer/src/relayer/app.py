@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 import ipaddress
 import time
 from contextlib import asynccontextmanager
@@ -51,7 +52,7 @@ def create_app(
         if bearer_token is None:
             return
         expected = f"Bearer {bearer_token}"
-        if authorization != expected:
+        if not hmac.compare_digest(authorization or "", expected):
             token_fingerprint = None
             if authorization:
                 token_fingerprint = hashlib.sha256(authorization.encode()).hexdigest()[:12]

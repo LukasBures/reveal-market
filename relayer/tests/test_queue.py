@@ -167,7 +167,14 @@ async def test_queue_commit_expired_deadletters(tmp_path):
     svc = DummyService()
     queue = TxQueue(str(db_path), svc, start_worker=False)
 
-    job_id = await queue.enqueue("commit", {"expiry": int(time.time()) - 10})
+    # Enqueue with a valid future expiry, then patch the payload in the DB to
+    # simulate a commit that expired between enqueue and processing (the enqueue
+    # guard now rejects already-expired commits upfront).
+    job_id = await queue.enqueue("commit", {"expiry": int(time.time()) + 600})
+    expired_payload = json.dumps({"expiry": int(time.time()) - 10})
+    with queue._connect() as conn:  # noqa: SLF001
+        conn.execute("UPDATE jobs SET payload = ? WHERE id = ?", (expired_payload, job_id))
+
     result = await queue.process_job(job_id)
     assert result["status"] == "deadletter"
     assert result["error"] == "commit_expired"

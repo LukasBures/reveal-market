@@ -25,7 +25,9 @@ def _env_with_prefix(name: str) -> str | None:
             return rm_val
         if legacy_val:
             _config_logger.warning(
-                "deprecated env var %s; use %s instead", name, rm_name,
+                "deprecated env var %s; use %s instead",
+                name,
+                rm_name,
             )
             return legacy_val
         return None

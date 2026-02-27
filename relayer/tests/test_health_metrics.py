@@ -24,6 +24,9 @@ class _FailingEth:
     def get_balance(self, _address):
         raise ValueError("boom")
 
+    def get_transaction_count(self, _address, _block="latest"):
+        raise ValueError("boom")
+
 
 class _FailingWeb3:
     def __init__(self):
