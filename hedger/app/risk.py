@@ -28,7 +28,7 @@ class RiskEngine:
         market_net_usd: Decimal,
         absolute_market_usd: Decimal,
         total_absolute_usd: Decimal,
-        coverage_ratio: float,
+        coverage_ratio: Decimal | float,
         float_balance_zen: Decimal,
     ) -> list[RiskBreach]:
         breaches: list[RiskBreach] = []

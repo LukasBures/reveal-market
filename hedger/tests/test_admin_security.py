@@ -22,6 +22,7 @@ class _DummyService:
     def __init__(self, *, secret: str | None, read_only: bool = False):
         self.settings = SimpleNamespace(admin_internal_secret=secret, admin_read_only=read_only)
         self.risk_engine = _DummyRiskEngine()
+        self.wallet = None
 
     async def exposures(self):
         return []

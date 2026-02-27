@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import secrets
 from decimal import Decimal
 
@@ -60,6 +61,12 @@ async def risk(
 ):
     snapshots = await service.exposures()
     total_abs = sum([abs(s.net_usd) for s in snapshots], start=Decimal("0"))
+    float_balance_zen = Decimal("0")
+    if service.wallet is not None:
+        try:
+            float_balance_zen = Decimal(str(service.wallet.w3.eth.get_balance(service.wallet.address)))
+        except Exception:  # pragma: no cover - best-effort balance fetch
+            logging.getLogger(__name__).debug("Failed to fetch ZEN balance", exc_info=True)
     breaches = []
     for snap in snapshots:
         breaches.extend(
@@ -69,7 +76,7 @@ async def risk(
                 absolute_market_usd=abs(snap.net_usd),
                 total_absolute_usd=total_abs,
                 coverage_ratio=snap.coverage_ratio,
-                float_balance_zen=Decimal("0"),
+                float_balance_zen=float_balance_zen,
             )
         )
     return service.risk_engine.report(breaches)

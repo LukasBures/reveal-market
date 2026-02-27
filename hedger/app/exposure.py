@@ -54,10 +54,10 @@ class MarketExposure:
         return abs(self.net_usd)
 
     @property
-    def coverage_ratio(self) -> float:
+    def coverage_ratio(self) -> Decimal:
         if self.absolute_usd == 0:
-            return 1.0
-        return float(min(Decimal(1), self.hedged_usd / self.absolute_usd))
+            return Decimal("1")
+        return min(Decimal("1"), self.hedged_usd / self.absolute_usd)
 
     def snapshot(self) -> MarketExposureSnapshot:
         return MarketExposureSnapshot(

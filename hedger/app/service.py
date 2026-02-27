@@ -499,8 +499,8 @@ class HedgerService:
             if drift_pct > 5:  # 5% drift guardrail; adjust if needed
                 return False, "quote_fx_drift"
         except (RetryError, httpx.HTTPError, InvalidOperation, ValueError) as exc:
-            logger.debug(
-                "quote FX validation skipped",
+            logger.warning(
+                "FX drift check skipped — oracle unavailable; accepting quote with stale FX",
                 extra={"event": "hedger.commit.quote_fx_invalid", "error": str(exc)},
             )
 
@@ -557,6 +557,12 @@ class HedgerService:
                 return {"status": "rejected", "reason": "order_failed", "error": str(exc)}
 
             filled_size = self._extract_filled_size(order_response, instruction.size_usd)
+            if filled_size is None:
+                return {
+                    "status": "rejected",
+                    "reason": "unparseable_fill",
+                    "order": order_response,
+                }
             fill_ratio = float(filled_size / instruction.size_usd) if instruction.size_usd else 1.0
             min_fill_ratio = float(self.settings.min_fill_percent) / 100.0
             if filled_size <= 0:
@@ -674,6 +680,17 @@ class HedgerService:
                     market_id=market_id,
                     error=str(exc),
                 )
+                try:
+                    await self.repository.record_audit_log(
+                        event="settlement_failed",
+                        actor="hedger",
+                        market_id=market_id,
+                        payload={"outcome": outcome_value, "error": str(exc), "error_type": type(exc).__name__},
+                    )
+                except Exception as db_exc:  # pragma: no cover - best-effort persistence
+                    log_event(
+                        logger, logging.DEBUG, event="hedger.settlement.audit_persist_failed", error=str(db_exc),
+                    )
                 return {"status": "rejected", "reason": "settlement_failed", "error": str(exc)}
             await self.repository.record_settlement(
                 market_id=market_id,
@@ -798,6 +815,10 @@ class HedgerService:
             try:
                 parsed[key.lower()] = Decimal(str(value))
             except (InvalidOperation, TypeError):
+                logger.warning(
+                    "Dropping invalid HEDGER_RISK_CATEGORY_LIMITS entry",
+                    extra={"event": "hedger.config.invalid_category_limit", "key": key, "value": str(value)},
+                )
                 continue
         return parsed
 
@@ -875,7 +896,7 @@ class HedgerService:
         return f"{commit.market_id}:{commit.account or 'unknown'}:{commit.committed_at.isoformat()}:{commit.stake_zen}"
 
     @staticmethod
-    def _extract_filled_size(order_payload: dict, requested: Decimal) -> Decimal:
+    def _extract_filled_size(order_payload: dict, requested: Decimal) -> Decimal | None:
         """
         Extract the filled size from a polymarket order response, falling back to the requested size on missing data.
         """
@@ -898,7 +919,14 @@ class HedgerService:
                     error=str(exc),
                 )
                 continue
-        return requested
+        log_event(
+            logger,
+            logging.WARNING,
+            event="hedger.order.unparseable_fill",
+            message="no recognizable fill size key found in order payload; rejecting instead of assuming full fill",
+            payload_keys=list(order_payload.keys()),
+        )
+        return None
 
     @staticmethod
     @asynccontextmanager
@@ -927,16 +955,23 @@ class HedgerService:
             quote = await self.fx_oracle.get_quote()
         except (RetryError, httpx.HTTPError, InvalidOperation, ValueError):
             return None
-        realized = 0.0
-        unrealized = 0.0
-        expected_usdc_payout_if_win = expected_payout + Decimal(str(max(unrealized, 0.0)))
+        # Trading P&L from unwinds is already folded into net_borrow_usdc
+        # (net_borrow = borrow - unwind, so sell-side gains reduce the net cost).
+        # unrealized = 0 at settlement because all positions are being settled.
+        # realized = 0 because the only remaining delta would be actual_claim - expected_payout,
+        # which requires automated Polymarket claim tracking (not yet implemented).
+        # TODO: once Polymarket claim automation lands, compute realized = actual_claim_usdc - expected_payout
+        # TODO: implement periodic USDC/ZEN cross-chain (Polygon↔L3 ZEN) balance rebalancing
+        realized = Decimal("0")
+        unrealized = Decimal("0")
+        expected_usdc_payout_if_win = expected_payout + max(unrealized, Decimal("0"))
         pricing = self.pricing_engine.quote_bet(stake_for_calc, quote.zen_usd)
         breakdown = self.bet_processor.settlement_breakdown(
             pricing,
             hedge_cost_usdc=net_borrow_usdc,
             expected_usdc_payout_if_win=expected_usdc_payout_if_win,
             user_won=winning_stake > 0,
-            hedge_realized_pnl_usdc=Decimal(str(realized)),
+            hedge_realized_pnl_usdc=realized,
         )
         treasury_snapshot = self.treasury.apply_settlement(breakdown)
         if persist:

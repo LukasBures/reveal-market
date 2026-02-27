@@ -79,7 +79,7 @@ class MarketExposureSnapshot(BaseModel):
     net_zen: Decimal
     net_usd: Decimal
     hedged_usd: Decimal
-    coverage_ratio: float
+    coverage_ratio: Decimal
     last_update: datetime
 
 

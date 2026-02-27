@@ -105,7 +105,15 @@ class HedgerWallet:
             logger,
             logging.INFO,
             event="hedger.wallet.approve",
-            message="approved USDC spend for Polymarket exchange",
+            message="approval tx submitted; waiting for receipt",
+            tx_hash=tx_hex,
+        )
+        self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
+        log_event(
+            logger,
+            logging.INFO,
+            event="hedger.wallet.approve.confirmed",
+            message="approval tx confirmed on-chain",
             tx_hash=tx_hex,
         )
         return tx_hex

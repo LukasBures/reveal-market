@@ -177,4 +177,8 @@ class FxOracle:
             return fallback_quote
 
     def stale(self) -> bool:
-        return self._quote is None or self._is_stale(self._quote)
+        # _stale_override and _quote may be updated concurrently by async refresh tasks.
+        # Reading from a sync method is safe because bool/reference reads are atomic in CPython,
+        # but we capture both values in a single expression to avoid an inconsistent window.
+        quote = self._quote
+        return quote is None or self._is_stale(quote)
