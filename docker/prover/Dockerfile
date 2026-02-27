@@ -2,9 +2,10 @@
 
 ARG BUILDKIT_INLINE_CACHE=1
 ARG APK_REPO_URL=https://dl-cdn.alpinelinux.org/alpine
-ARG GOLANG_IMAGE=golang:1.24-alpine
-ARG NODE_IMAGE=node:20-alpine
-ARG DEBIAN_IMAGE=debian:bookworm-slim
+# Pinned 2026-02-27
+ARG GOLANG_IMAGE=golang:1.24-alpine@sha256:8bee1901f1e530bfb4a7850aa7a479d17ae3a18beb6e09064ed54cfd245b7191
+ARG NODE_IMAGE=node:20-alpine@sha256:09e2b3d9726018aecf269bd35325f46bf75046a643a66d28360ec71132750ec8
+ARG DEBIAN_IMAGE=debian:bookworm-slim@sha256:74d56e3931e0d5a1dd51f8c8a2466d21de84a271cd3b5a733b803aa91abf4421
 
 FROM ${GOLANG_IMAGE} AS builder
 ARG APK_REPO_URL

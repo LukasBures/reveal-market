@@ -3,7 +3,8 @@
 
 ARG BUILDKIT_INLINE_CACHE=1
 ARG APK_REPO_URL=https://dl-cdn.alpinelinux.org/alpine
-ARG NODE_IMAGE=node:20-alpine
+# Pinned 2026-02-27
+ARG NODE_IMAGE=node:20-alpine@sha256:09e2b3d9726018aecf269bd35325f46bf75046a643a66d28360ec71132750ec8
 
 # 1) Install dependencies
 FROM ${NODE_IMAGE} AS deps

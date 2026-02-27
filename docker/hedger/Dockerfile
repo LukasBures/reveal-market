@@ -1,8 +1,9 @@
 # syntax=docker/dockerfile:1.4
 
 ARG BUILDKIT_INLINE_CACHE=1
-ARG UV_BUILDER_IMAGE=ghcr.io/astral-sh/uv:python3.12-bookworm-slim
-ARG PYTHON_RUNTIME_IMAGE=python:3.12-slim
+# Pinned 2026-02-27
+ARG UV_BUILDER_IMAGE=ghcr.io/astral-sh/uv:python3.12-bookworm-slim@sha256:e5b65587bce7de595f299855d7385fe7fca39b8a74baa261ba1b7147afa78e58
+ARG PYTHON_RUNTIME_IMAGE=python:3.12-slim@sha256:f3fa41d74a768c2fce8016b98c191ae8c1bacd8f1152870a3f9f87d350920b7c
 ARG SERVICE_DIR=hedger
 ARG SHARED_DIR=backend/shared
 
