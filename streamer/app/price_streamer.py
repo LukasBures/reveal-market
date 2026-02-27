@@ -1,4 +1,3 @@
-# mypy: ignore-errors
 from __future__ import annotations
 
 import asyncio
@@ -173,10 +172,11 @@ class PriceStreamer:
                             "attempt": attempt,
                         },
                     )
-                    try:
-                        self.metric_ws_restarts.inc()
-                    except Exception as exc:  # pragma: no cover
-                        logger.debug("metric_ws_restarts_increment_failed", exc_info=exc)
+                    if self.metric_ws_restarts:
+                        try:
+                            self.metric_ws_restarts.inc()
+                        except Exception as exc:  # pragma: no cover
+                            logger.debug("metric_ws_restarts_increment_failed", exc_info=exc)
                     async for raw in ws:
                         if self._stop.is_set():
                             break

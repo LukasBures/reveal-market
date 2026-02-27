@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from typing import Any
 
 
 def resolve_mode() -> str:
@@ -12,7 +13,7 @@ def resolve_mode() -> str:
     return "local"
 
 
-PRESETS: dict[str, dict[str, object]] = {
+PRESETS: dict[str, dict[str, Any]] = {
     "local": {
         "api_cors_origins": [
             "http://localhost",
@@ -38,5 +39,5 @@ PRESETS: dict[str, dict[str, object]] = {
 }
 
 
-def get_preset() -> dict[str, object]:
+def get_preset() -> dict[str, Any]:
     return PRESETS.get(resolve_mode(), PRESETS["local"])

@@ -145,6 +145,9 @@ class Settings(BaseSettings):
     )
     rest_poll_seconds: int = Field(default=30, ge=5, description="CLOB REST poll interval")
     ws_reconnect_seconds: float = Field(default=5.0, ge=0.01, description="Backoff between WS reconnect attempts")
+    ws_stale_timeout_seconds: int = Field(
+        default=60, ge=10, description="Force reconnect after this many seconds of no WS data messages"
+    )
     rtds_enabled: bool = Field(default=False, description="Enable RTDS websocket ingestion (disabled by default)")
     publish_throttle_ms: int = Field(default=300, ge=50, description="Throttle for publishing ticks to Redis (ms)")
     publish_when_fx_stale: bool = Field(
@@ -184,7 +187,15 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = Field(
         default=0, ge=0, description="Optional per-client request/connection cap per minute (0 disables)"
     )
-    cors_allow_origins: list[str] = Field(default_factory=lambda: ["*"], description="CORS allow-origins list")
+    ops_secret: str | None = Field(
+        default=None,
+        description="Shared secret for admin/ops endpoints (/healthz, /subscriptions, /dashboard). "
+        "Checked via X-Ops-Secret header. Required in prod.",
+    )
+    cors_allow_origins: list[str] = Field(
+        default_factory=list,
+        description="CORS allow-origins list; must be set explicitly (wildcard disallowed in prod)",
+    )
     cors_allow_methods: list[str] = Field(default_factory=lambda: ["*"], description="CORS allow-methods list")
     cors_allow_headers: list[str] = Field(default_factory=lambda: ["*"], description="CORS allow-headers list")
     cors_allow_credentials: bool = Field(default=False, description="CORS allow-credentials flag")
@@ -226,6 +237,14 @@ class Settings(BaseSettings):
             return value
         if min_price is not None and max_price is not None and not (min_price <= value <= max_price):
             raise ValueError(f"STREAMER_FX_FALLBACK_PRICE must be between {min_price} and {max_price}")
+        return value
+
+    @field_validator("cors_allow_origins")
+    @classmethod
+    def _reject_wildcard_cors_in_prod(cls, value, info):
+        env = (info.data.get("environment") or "").lower()
+        if env in {"prod", "production"} and "*" in (value or []):
+            raise ValueError("Wildcard CORS origin ('*') is disallowed in production; set explicit origins.")
         return value
 
     @field_validator(
@@ -319,6 +338,14 @@ class Settings(BaseSettings):
                 normalized.append(trimmed)
 
         return normalized
+
+
+def redact_url(value: str) -> str:
+    """Redact URL path/query while preserving scheme and host for safe logging."""
+    parsed = urlparse(value)
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}/<redacted>"
+    return "<redacted>"
 
 
 def get_settings() -> Settings:

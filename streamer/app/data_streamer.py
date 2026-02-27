@@ -1,9 +1,9 @@
-# mypy: ignore-errors
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
+import time
 from contextlib import suppress
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -48,7 +48,7 @@ class DataStreamer:
                 logger.warning(
                     "Failed to initialise CLOB client", extra={"event": "clob.init.failed", "error": str(exc)}
                 )
-        self.metric_ticks = None
+        self.metric_ticks: Counter | None = None
         self._init_metrics()
         self._rtds_last_version: int = -1
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -79,7 +79,8 @@ class DataStreamer:
                 except (ArithmeticError, ValueError, TypeError):
                     continue
             return parsed
-        tokens = raw.get("tokens") if isinstance(raw.get("tokens"), list) else []
+        raw_tokens = raw.get("tokens")
+        tokens = raw_tokens if isinstance(raw_tokens, list) else []
         for entry in tokens:
             if not isinstance(entry, dict):
                 continue
@@ -304,12 +305,23 @@ class DataStreamer:
                         self._set_clob_ws_connected(True)
                         last_version = await self._refresh_clob_subscription(ws, last_version=-1)
                         msg_count = 0
+                        last_data_time = time.monotonic()
                         while not self._stop.is_set():
                             try:
                                 raw = await asyncio.wait_for(ws.recv(), timeout=1)
                             except TimeoutError:
+                                if time.monotonic() - last_data_time > self.settings.ws_stale_timeout_seconds:
+                                    logger.warning(
+                                        "CLOB ws stale — no data messages received, forcing reconnect",
+                                        extra={
+                                            "event": "clob.ws.stale",
+                                            "silent_seconds": self.settings.ws_stale_timeout_seconds,
+                                        },
+                                    )
+                                    break
                                 last_version = await self._refresh_clob_subscription(ws, last_version)
                                 continue
+                            last_data_time = time.monotonic()
                             self._record_clob_ws_message()
                             try:
                                 payload = json.loads(raw)
@@ -407,7 +419,7 @@ class DataStreamer:
         cursor: str | None = None
         client = await get_http_client(10)
         while True:
-            params = {"limit": CLOB_PAGE_SIZE}
+            params: dict[str, int | str] = {"limit": CLOB_PAGE_SIZE}
             if cursor:
                 # Polymarket CLOB REST expects next_cursor for pagination.
                 params["next_cursor"] = cursor
@@ -612,6 +624,53 @@ class DataStreamer:
         }
         await self.state.cache_tick(market_id, "trades", payload)
 
+    @staticmethod
+    def _extract_tokens(raw: dict) -> tuple[list[Decimal], list[str]]:
+        """Parse token prices and IDs from a raw tick payload."""
+        raw_tokens = raw.get("tokens")
+        tokens = raw_tokens if isinstance(raw_tokens, list) else []
+        token_prices: list[Decimal] = []
+        token_ids: list[str] = []
+        for entry in tokens:
+            if not isinstance(entry, dict):
+                continue
+            price_raw = entry.get("price")
+            try:
+                token_prices.append(Decimal(str(price_raw)))
+            except (ArithmeticError, ValueError, TypeError) as exc:
+                logger.debug("Invalid token price in payload: %s (%s)", price_raw, exc)
+            token_id_raw = entry.get("token_id") or entry.get("tokenId") or entry.get("id")
+            if token_id_raw is not None:
+                token_ids.append(str(token_id_raw))
+        return token_prices, token_ids
+
+    @staticmethod
+    def _extract_bid_ask(raw: dict) -> tuple[Decimal | None, Decimal | None]:
+        """Parse best bid/ask from a raw tick payload."""
+        best_bid_raw = (
+            raw.get("best_bid")
+            or raw.get("bestBid")
+            or raw.get("bestBidYes")
+            or raw.get("best_bid_yes")
+            or raw.get("bid")
+        )
+        best_ask_raw = (
+            raw.get("best_ask")
+            or raw.get("bestAsk")
+            or raw.get("bestAskYes")
+            or raw.get("best_ask_yes")
+            or raw.get("ask")
+        )
+        try:
+            best_bid_val = Decimal(str(best_bid_raw)) if best_bid_raw is not None else None
+        except (ArithmeticError, ValueError, TypeError):
+            best_bid_val = None
+        try:
+            best_ask_val = Decimal(str(best_ask_raw)) if best_ask_raw is not None else None
+        except (ArithmeticError, ValueError, TypeError):
+            best_ask_val = None
+        return best_bid_val, best_ask_val
+
     async def _normalize_and_publish(self, raw: dict, source: str) -> None:
         market_id = (
             raw.get("id")
@@ -621,22 +680,7 @@ class DataStreamer:
             or raw.get("condition_id")
         )
         raw_prices = raw.get("outcomePrices") or raw.get("prices") or raw.get("outcomes")
-        tokens = raw.get("tokens") if isinstance(raw.get("tokens"), list) else []
-        token_prices: list[Decimal] = []
-        token_ids_from_tokens: list[str] = []
-        for entry in tokens:
-            if not isinstance(entry, dict):
-                continue
-            price_raw = entry.get("price")
-            try:
-                token_price = Decimal(str(price_raw))
-                token_prices.append(token_price)
-            except (ArithmeticError, ValueError, TypeError) as exc:
-                logger.debug("Invalid token price in payload: %s (%s)", price_raw, exc)
-            token_id_raw = entry.get("token_id") or entry.get("tokenId") or entry.get("id")
-            if token_id_raw is not None:
-                token_ids_from_tokens.append(str(token_id_raw))
-
+        token_prices, token_ids_from_tokens = self._extract_tokens(raw)
         prices = self._coerce_array(raw_prices) or token_prices
         token_ids_raw = raw.get("clobTokenIds") or raw.get("clob_token_ids") or raw.get("tokenIds")
         token_ids = self._coerce_array(token_ids_raw) or token_ids_from_tokens
@@ -660,28 +704,7 @@ class DataStreamer:
         if self.stream_metrics:
             with suppress(Exception):
                 self.stream_metrics.market_staleness.labels(market_id=str(market_id)).set(0)
-        best_bid_raw = (
-            raw.get("best_bid")
-            or raw.get("bestBid")
-            or raw.get("bestBidYes")
-            or raw.get("best_bid_yes")
-            or raw.get("bid")
-        )
-        best_ask_raw = (
-            raw.get("best_ask")
-            or raw.get("bestAsk")
-            or raw.get("bestAskYes")
-            or raw.get("best_ask_yes")
-            or raw.get("ask")
-        )
-        try:
-            best_bid_val = Decimal(str(best_bid_raw)) if best_bid_raw is not None else None
-        except (ArithmeticError, ValueError, TypeError):
-            best_bid_val = None
-        try:
-            best_ask_val = Decimal(str(best_ask_raw)) if best_ask_raw is not None else None
-        except (ArithmeticError, ValueError, TypeError):
-            best_ask_val = None
+        best_bid_val, best_ask_val = self._extract_bid_ask(raw)
         fx = await self.state.get_fx()
         if fx.stale and not self.settings.publish_when_fx_stale:
             logger.warning(
@@ -732,9 +755,10 @@ class DataStreamer:
                 "status": raw.get("status") or raw.get("state"),
             }
             try:
-                self.metric_ticks.labels(
-                    source=source, market=str(market_id), outcome=str(idx), stale=str(fx.stale)
-                ).inc()
+                if self.metric_ticks:
+                    self.metric_ticks.labels(
+                        source=source, market=str(market_id), outcome=str(idx), stale=str(fx.stale)
+                    ).inc()
             except Exception as exc:
                 logger.debug(
                     "failed to emit metric_ticks",

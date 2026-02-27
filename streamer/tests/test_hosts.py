@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+from pydantic import ValidationError
+
 from app.config import Settings
 from app.main import _compute_cors_host_warnings
 
@@ -18,26 +21,7 @@ def test_compute_host_warnings_missing_cors_origin():
     assert any(w.get("reason") == "public_not_in_cors" for w in warnings)
 
 
-def test_cors_prod_overrides_wildcard(monkeypatch):
-    monkeypatch.setenv("RM_ENVIRONMENT", "prod")
-    from app import main
-
-    monkeypatch.setattr(
-        main,
-        "PRESETS",
-        {
-            "prod": {
-                "api_cors_origins": ["*"],
-                "streamer_public": "https://stream.revealmarket.xyz",
-                "streamer_internal": "https://stream.revealmarket.xyz",
-            }
-        },
-    )
-    monkeypatch.setattr(
-        "app.main.get_settings",
-        lambda: Settings(
-            environment="prod", cors_allow_origins=["*"], public_base_url="https://stream.revealmarket.xyz"
-        ),
-    )
-    app = main.create_app()
-    assert "*" not in app.state.cors_origins
+def test_cors_wildcard_rejected_at_config_level_in_prod():
+    """Wildcard CORS is now rejected by the Pydantic validator (M13), not at create_app time."""
+    with pytest.raises(ValidationError, match="Wildcard CORS"):
+        Settings(environment="prod", cors_allow_origins=["*"], public_base_url="https://stream.revealmarket.xyz")

@@ -1,4 +1,3 @@
-# mypy: ignore-errors
 from __future__ import annotations
 
 import asyncio
@@ -21,7 +20,7 @@ from redis.asyncio import Redis
 from websockets import connect
 from websockets.exceptions import InvalidStatus
 
-from .config import Settings, get_settings
+from .config import Settings, get_settings, redact_url
 from .subscriptions import SubscriptionManager
 
 if TYPE_CHECKING:
@@ -136,6 +135,28 @@ class StreamState:
             )
         await self._load_cache_snapshot()
         await self.refresh_fx()
+
+    _MAX_TRACKING_ENTRIES = 5000
+    _STALE_ENTRY_TTL = timedelta(hours=1)
+
+    def evict_stale_entries(self) -> int:
+        """Remove entries older than 1 hour from tracking dicts. Returns eviction count."""
+        now = datetime.now(UTC)
+        cutoff = now - self._STALE_ENTRY_TTL
+        evicted = 0
+        for d in (self.last_seen, self.last_published, self._history_last_ts):
+            stale_keys = [k for k, v in d.items() if v < cutoff]
+            for k in stale_keys:
+                d.pop(k, None)
+                evicted += 1
+        # Cap non-timestamped dicts by size
+        for sized_d in (self.tick_sizes, self.market_tokens):
+            if len(sized_d) > self._MAX_TRACKING_ENTRIES:
+                excess = len(sized_d) - self._MAX_TRACKING_ENTRIES
+                for k in list(sized_d)[:excess]:
+                    sized_d.pop(k, None)
+                    evicted += 1
+        return evicted
 
     async def shutdown(self) -> None:
         if self.redis:
@@ -346,10 +367,10 @@ class StreamState:
         if self.settings.signing_secret:
             mapping["sig"] = self._sign_payload(mapping)
         try:
-            await self.redis.hset(key, mapping=mapping)
+            await self.redis.hset(key, mapping=mapping)  # type: ignore[misc]
             if self.settings.cache_ttl_seconds > 0:
-                await self.redis.expire(key, self.settings.cache_ttl_seconds)
-            await self.redis.publish(channel, json.dumps(mapping))
+                await self.redis.expire(key, self.settings.cache_ttl_seconds)  # type: ignore[misc]
+            await self.redis.publish(channel, json.dumps(mapping))  # type: ignore[misc]
         except Exception as exc:
             logger.warning(
                 "cache tick failed",
@@ -388,8 +409,8 @@ class StreamState:
                 return
         try:
             serialized = json.dumps(payload, default=str)
-            await self.redis.lpush(history_key, serialized)
-            await self.redis.ltrim(history_key, 0, max(self.settings.history_limit - 1, 0))
+            await self.redis.lpush(history_key, serialized)  # type: ignore[misc]
+            await self.redis.ltrim(history_key, 0, max(self.settings.history_limit - 1, 0))  # type: ignore[misc]
             if self.settings.history_ttl_seconds > 0:
                 await self.redis.expire(history_key, self.settings.history_ttl_seconds)
             self._history_last_ts[history_key] = now
@@ -407,10 +428,7 @@ class StreamState:
 
     @staticmethod
     def _redact_url(url: AnyHttpUrl) -> str:
-        parsed = urlparse(str(url))
-        if parsed.scheme and parsed.netloc:
-            return f"{parsed.scheme}://{parsed.netloc}/<redacted>"
-        return "<redacted>"
+        return redact_url(str(url))
 
     def _is_self_fx_url(self, url: AnyHttpUrl) -> bool:
         parsed = urlparse(str(url))
@@ -586,7 +604,7 @@ class StreamState:
         if not self.redis:
             return []
         history_key = f"{self.settings.history_prefix}:{market_id}:{outcome}"
-        raw = await self.redis.lrange(history_key, 0, max(0, limit - 1))
+        raw = await self.redis.lrange(history_key, 0, max(0, limit - 1))  # type: ignore[misc]
         records = []
         for item in raw:
             try:
@@ -604,7 +622,7 @@ class StreamState:
         if not self.redis:
             return {}
         key = f"{self.settings.cache_prefix}:{market_id}:{outcome}"
-        data = await self.redis.hgetall(key)
+        data = await self.redis.hgetall(key)  # type: ignore[misc]
         return data or {}
 
     async def get_bootstrap_payloads(self, market_id: str, *, max_outcomes: int = 6) -> list[str]:

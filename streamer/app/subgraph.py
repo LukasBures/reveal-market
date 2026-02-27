@@ -1,4 +1,3 @@
-# mypy: ignore-errors
 from __future__ import annotations
 
 import logging
@@ -26,7 +25,7 @@ SubgraphNotConfigured = SubgraphNotConfiguredError
 class SubgraphClient:
     """Lightweight GraphQL client for Polymarket subgraphs (Goldsky-backed)."""
 
-    def __init__(self, settings: Settings, *, transport: httpx.BaseTransport | None = None):
+    def __init__(self, settings: Settings, *, transport: httpx.AsyncBaseTransport | None = None):
         self.settings = settings
         self._transport = transport
 

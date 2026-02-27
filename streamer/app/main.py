@@ -1,9 +1,9 @@
-# mypy: ignore-errors
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
+import threading
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
-from .config import get_settings
+from .config import get_settings, redact_url
 from .data_streamer import DataStreamer
 from .env_presets import PRESETS, get_preset, resolve_mode
 from .logging_utils import setup_logging, start_heartbeat
@@ -45,21 +45,14 @@ def _compute_cors_host_warnings(
     return warnings
 
 
-def _redact_url_value(value: str) -> str:
-    parsed = urlparse(value)
-    if parsed.scheme and parsed.netloc:
-        return f"{parsed.scheme}://{parsed.netloc}/<redacted>"
-    return "<redacted>"
-
-
 def _sanitize_config_value(key: str, value: Any) -> Any:
     lowered = key.lower()
     if isinstance(value, str):
         if "url" in lowered:
-            return _redact_url_value(value)
+            return redact_url(value)
         parsed = urlparse(value)
         if parsed.scheme and parsed.netloc:
-            return _redact_url_value(value)
+            return redact_url(value)
     if isinstance(value, list):
         return [_sanitize_config_value(key, item) for item in value]
     return value
@@ -200,9 +193,27 @@ def create_app() -> FastAPI:
                 extra={"event": "streamer.price.start_failed", "error": str(exc)},
             )
         logger.info("streamer ready", extra={"event": "streamer.ready"})
+
+        async def _periodic_eviction():
+            while True:
+                await asyncio.sleep(300)  # every 5 minutes
+                try:
+                    evicted = state.evict_stale_entries()
+                    if evicted > 0:
+                        logger.info(
+                            "evicted stale tracking entries",
+                            extra={"event": "streamer.eviction", "evicted": evicted},
+                        )
+                except Exception as exc:
+                    logger.warning("eviction failed", extra={"event": "streamer.eviction.failed", "error": str(exc)})
+
+        eviction_task = asyncio.create_task(_periodic_eviction())
         try:
             yield
         finally:
+            eviction_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await eviction_task
             heartbeat_stop.set()
             with suppress(Exception):
                 await data_streamer.stop()
@@ -213,6 +224,7 @@ def create_app() -> FastAPI:
     app_instance.state.cors_origins = cors_allow_origins
 
     client_connections: dict[str, int] = {}
+    _conn_lock = threading.RLock()
 
     def _client_key(client_id: str, access_token: str | None) -> str:
         if access_token:
@@ -220,36 +232,38 @@ def create_app() -> FastAPI:
         return client_id
 
     def _acquire_connection(client_id: str, access_token: str | None) -> None:
-        state.active_connections += 1
-        client_key = _client_key(client_id, access_token)
-        client_connections[client_key] = client_connections.get(client_key, 0) + 1
-        if state.active_connections > settings.max_active_connections:
-            _release_connection(client_id, access_token)
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="too many connections",
-                headers={"Retry-After": "3"},
-            )
-        if (
-            settings.max_connections_per_client > 0
-            and client_connections[client_key] > settings.max_connections_per_client
-        ):
-            _release_connection(client_id, access_token)
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="too many connections for client",
-                headers={"Retry-After": "3"},
-            )
+        with _conn_lock:
+            state.active_connections += 1
+            client_key = _client_key(client_id, access_token)
+            client_connections[client_key] = client_connections.get(client_key, 0) + 1
+            if state.active_connections > settings.max_active_connections:
+                _release_connection(client_id, access_token)
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="too many connections",
+                    headers={"Retry-After": "3"},
+                )
+            if (
+                settings.max_connections_per_client > 0
+                and client_connections[client_key] > settings.max_connections_per_client
+            ):
+                _release_connection(client_id, access_token)
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="too many connections for client",
+                    headers={"Retry-After": "3"},
+                )
 
     def _release_connection(client_id: str, access_token: str | None) -> None:
-        state.active_connections = max(0, state.active_connections - 1)
-        client_key = _client_key(client_id, access_token)
-        if client_key in client_connections:
-            next_val = client_connections[client_key] - 1
-            if next_val <= 0:
-                client_connections.pop(client_key, None)
-            else:
-                client_connections[client_key] = next_val
+        with _conn_lock:
+            state.active_connections = max(0, state.active_connections - 1)
+            client_key = _client_key(client_id, access_token)
+            if client_key in client_connections:
+                next_val = client_connections[client_key] - 1
+                if next_val <= 0:
+                    client_connections.pop(client_key, None)
+                else:
+                    client_connections[client_key] = next_val
 
     def _is_valid_access_token(token: str | None) -> bool:
         return not settings.access_token or token == settings.access_token
@@ -415,7 +429,8 @@ def create_app() -> FastAPI:
         }
 
     @app_instance.get("/healthz")
-    async def healthz() -> dict:
+    async def healthz(x_ops_secret: str | None = Header(default=None)) -> dict:
+        _require_ops_secret(x_ops_secret)
         snapshot = state.cached_health_snapshot()
         return snapshot or await _health_payload()
 
@@ -523,7 +538,7 @@ def create_app() -> FastAPI:
         await _fx_ws_stream(ws)
 
     @app_instance.get("/metrics")
-    async def metrics() -> Response:
+    async def prometheus_metrics() -> Response:
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     @app_instance.get("/subgraph/markets")
@@ -818,6 +833,13 @@ def create_app() -> FastAPI:
             first=first,
             skip=skip,
         )
+
+    def _require_ops_secret(header_value: str | None) -> None:
+        """Gate admin endpoints behind X-Ops-Secret when configured."""
+        if not settings.ops_secret:
+            return  # not configured — allow unauthenticated access (e.g. local dev)
+        if header_value != settings.ops_secret:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="invalid or missing ops secret")
 
     def _require_control_token(control_header: str | None) -> None:
         if not settings.control_token:
@@ -1179,7 +1201,8 @@ def create_app() -> FastAPI:
         return {"market_id": market_id, "outcome": outcome, "count": len(records), "data": records}
 
     @app_instance.get("/subscriptions")
-    async def subscriptions():
+    async def subscriptions(x_ops_secret: str | None = Header(default=None)):
+        _require_ops_secret(x_ops_secret)
         return {
             "assets": sorted(state.subscriptions.assets),
             "symbols": sorted(state.rtds_symbols),
@@ -1188,7 +1211,8 @@ def create_app() -> FastAPI:
         }
 
     @app_instance.get("/dashboard")
-    async def dashboard():
+    async def dashboard(x_ops_secret: str | None = Header(default=None)):
+        _require_ops_secret(x_ops_secret)
         fx = await _fx_payload()
         stale_markets = state.stale_markets(settings.market_stale_seconds)
         last_published = {k: v.isoformat() for k, v in state.last_published.items()}
