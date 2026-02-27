@@ -36,7 +36,7 @@ class HealthResponse(BaseModel):
     version: str
     timestamp: datetime
     components: dict[str, HealthComponent]
-    cache_stats: dict[str, float] | None = None
+    cache_stats: dict[str, int] | None = None
 
 
 class HeartbeatMetrics(BaseModel):
@@ -350,6 +350,7 @@ class PricingQuoteResponse(BaseModel):
     expires_at: datetime | None = None
     expiry_ts: int = 0
     signature: str | None = None
+    signature_version: str | None = None
     signer: str | None = None
     market_id: str | None = None
     user_id: str | None = None

@@ -278,7 +278,7 @@ async def _enqueue_backfill_proof_jobs(redis_client: Redis | None) -> int:
         last_market_id = getattr(rows[-1][0], "id", None)
         if last_market_id is not None:
             try:
-                await redis_client.set(cursor_key, str(last_market_id))
+                await redis_client.set(cursor_key, str(last_market_id), ex=86400)
             except Exception as exc:  # pragma: no cover - best effort
                 log_event(
                     logger,
@@ -894,7 +894,7 @@ async def _record_polymarket_cursor(
         return
     cursor_value = f"{last_seen_ts or ''}|{last_seen_id or ''}"
     try:
-        await redis_client.set(runtime.settings.polymarket_sync_cursor_key, cursor_value)
+        await redis_client.set(runtime.settings.polymarket_sync_cursor_key, cursor_value, ex=86400)
     except Exception as exc:  # pragma: no cover - best effort
         log_event(
             logger,
@@ -936,7 +936,7 @@ async def _record_polymarket_updated_at(redis_client: Redis | None, last_seen_ts
         return
     if redis_client is not None:
         try:
-            await redis_client.set(runtime.settings.polymarket_updated_at_cutoff_key, str(last_seen_ts))
+            await redis_client.set(runtime.settings.polymarket_updated_at_cutoff_key, str(last_seen_ts), ex=86400)
         except Exception as exc:  # pragma: no cover - defensive
             log_event(
                 logger,
@@ -994,7 +994,7 @@ async def _mark_closed_reconcile_run(redis_client: Redis | None) -> None:
     now = str(time.time())
     if redis_client is not None:
         try:
-            await redis_client.set(runtime.settings.closed_markets_reconcile_last_key, now)
+            await redis_client.set(runtime.settings.closed_markets_reconcile_last_key, now, ex=86400)
         except Exception as exc:  # pragma: no cover - defensive
             log_event(
                 logger,
@@ -1534,7 +1534,7 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
 async def _dispatch_proof_jobs(
     redis_client: Redis | None,
     context: WorkerContext,
-    summary: "SyncSummary",
+    summary: SyncSummary,
     run_fn: Any,
 ) -> None:
     """Dispatch proof jobs via Redis queue or background task depending on availability."""

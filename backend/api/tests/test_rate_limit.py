@@ -4,6 +4,7 @@ import asyncio
 
 import app.server as api_main
 from app.rate_limit import RATE_LIMIT_COUNTER
+from app.routes import pricing as pricing_module
 
 
 def enable_rate_limit(
@@ -96,3 +97,25 @@ def test_rate_limit_untrusted_proxy_ignores_forwarded_for(client, monkeypatch):
 
     assert client.get("/events", headers=headers_a).status_code == 200
     assert client.get("/events", headers=headers_b).status_code == 429
+
+
+def test_preview_rate_limit_blocks_after_threshold(client, monkeypatch):
+    """The /pricing/preview endpoint enforces its own per-IP rate limit."""
+    monkeypatch.setattr(pricing_module, "_PREVIEW_RL_LIMIT", 3)
+    monkeypatch.setattr(pricing_module, "_preview_rl_buckets", {})
+
+    preview_payload = {
+        "stake_zen": "1.0",
+        "market_id": "test-market",
+        "wallet_address": "0x" + "a" * 40,
+        "outcome_id": 0,
+    }
+    statuses = []
+    for _ in range(4):
+        resp = client.post("/pricing/preview", json=preview_payload)
+        statuses.append(resp.status_code)
+
+    # First 3 requests pass the rate limiter (may fail later in handler, e.g. 400/503)
+    assert all(s != 429 for s in statuses[:3])
+    # The 4th request is blocked by the preview rate limiter
+    assert statuses[3] == 429

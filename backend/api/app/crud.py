@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 from shared import repository_async as shared_repository
-from sqlalchemy import func, literal, or_, select
+from sqlalchemy import func, literal, or_, over, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -332,6 +333,86 @@ async def _get_markets_by_total_volume(
             -_updated_timestamp(market),
         )
     )
+    return rows
+
+
+async def get_grouped_events(
+    session: AsyncSession,
+    *,
+    status: str | None = None,
+    category: str | None = None,
+    oracle: str | None = None,
+    search: str | None = None,
+    featured: bool | None = None,
+    limit: int = 20,
+    offset: int = 0,
+    order_by: str | None = None,
+    closes_after: datetime | None = None,
+    closes_before: datetime | None = None,
+) -> list[models.Market]:
+    """Fetch one representative market per group using SQL window functions.
+
+    This avoids the 3-4x over-fetch by selecting the best candidate per group
+    at the DB level (via ``ROW_NUMBER() OVER (PARTITION BY group_key)``),
+    paginating those, then eagerly loading relationships only for survivors.
+    """
+    group_expr = _volume_group_expression()
+    volume_expr = _volume_value_expression()
+
+    # Determine ordering for the representative selection (within each group).
+    inner_order: tuple[Any, ...]
+    if order_by == "volume":
+        inner_order = (volume_expr.desc(), models.Market.updated_at.desc())
+    else:
+        inner_order = (models.Market.created_at.desc(),)
+
+    # Build an inner query that numbers rows within each group.
+    inner = (
+        select(
+            models.Market.id,
+            group_expr.label("_grp"),
+            over(
+                func.row_number(),
+                partition_by=group_expr,
+                order_by=inner_order,
+            ).label("_rn"),
+        )
+        .select_from(models.Market)
+        .outerjoin(models.MarketGammaMetadata, models.MarketGammaMetadata.market_id == models.Market.id)
+    )
+    inner = _apply_common_filters(inner, status=status, category=category, oracle=oracle, featured=featured)
+    inner = _apply_text_search(session, inner, search, apply_default_order=False)
+    if closes_after or closes_before:
+        inner = inner.where(models.Market.closes_at.isnot(None))
+        if closes_after:
+            inner = inner.where(models.Market.closes_at >= closes_after)
+        if closes_before:
+            inner = inner.where(models.Market.closes_at <= closes_before)
+    inner = inner.subquery("ranked")
+
+    # Select only the best representative per group (_rn == 1) and paginate.
+    winner_ids_stmt = select(inner.c.id).where(inner.c._rn == 1).order_by(inner.c._grp).offset(offset).limit(limit)
+    id_rows = await session.execute(winner_ids_stmt)
+    winner_ids = [row[0] for row in id_rows]
+    if not winner_ids:
+        return []
+
+    # Fetch full market objects with relationships only for winners.
+    stmt = (
+        select(models.Market)
+        .options(
+            selectinload(models.Market.outcomes_rel),
+            selectinload(models.Market.tags_rel),
+            selectinload(models.Market.clob_tokens_rel),
+        )
+        .where(models.Market.id.in_(winner_ids))
+    )
+    result = await session.execute(stmt)
+    rows: list[models.Market] = list(result.unique().scalars().all())
+
+    # Preserve the paginated order.
+    id_order = {mid: idx for idx, mid in enumerate(winner_ids)}
+    rows.sort(key=lambda m: id_order.get(m.id, len(id_order)))
     return rows
 
 

@@ -208,6 +208,10 @@ class Settings(BaseSettings):
     run_migrations_on_startup: bool = Field(default=True)
     pricing_signer_private_key: SecretStr | None = Field(default=None)
     pricing_chain_id: int | None = Field(default=2651420, ge=1, description="Chain id used for quote signatures")
+    pricing_verifying_contract: str = Field(
+        default="0x0000000000000000000000000000000000000000",
+        description="EIP-712 verifyingContract address for quote signatures",
+    )
     pricing_quote_ttl_seconds: int = Field(default=120, ge=15, le=600)
     pricing_quote_signature_required: bool = Field(
         default=True,

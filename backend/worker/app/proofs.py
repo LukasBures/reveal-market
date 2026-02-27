@@ -10,9 +10,9 @@ from typing import Any, TypeVar
 
 from redis.asyncio import Redis
 from shared import cache_async as shared_cache
-from shared.async_utils import resolve_awaitable as _resolve_awaitable
 from shared import models as shared_models
 from shared import repository_async as shared_repository
+from shared.async_utils import resolve_awaitable as _resolve_awaitable
 from shared.cache_keys import proof_receipt_cache_key
 from shared.logging import log_event
 from sqlalchemy import select

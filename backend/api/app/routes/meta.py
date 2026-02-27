@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
@@ -24,7 +25,7 @@ def _verify_internal_secret(secret_header: str | None) -> None:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="internal_secret_not_configured",
         )
-    if secret_header != settings.internal_api_secret.get_secret_value():
+    if not hmac.compare_digest(secret_header or "", settings.internal_api_secret.get_secret_value()):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_internal_secret")
 
 

@@ -144,6 +144,7 @@ EXPECTED_SCHEMAS = {
             "remaining_market_stake_zen",
             "remaining_user_stake_zen",
             "signature",
+            "signature_version",
             "signer",
             "stake_wei",
             "stake_zen",

@@ -16,12 +16,12 @@ from fastapi import FastAPI
 from shared.indexers import AsyncGoldskyClient
 from shared.logging import log_event
 
+from app import runtime as _runtime
 from app.http_middleware import attach_request_context, configure_http_middleware
 from app.pricing import fetch_fx_quote
 from app.rate_limit import RateLimiter
 from app.routes import markets, meta, pricing, profiling, proofs, trade, treasury
-from app.routes.pricing import build_quote_digest
-from app import runtime as _runtime
+from app.routes.pricing import build_eip712_quote_message, build_quote_digest
 from app.runtime import cache_client, is_production, logger, mode_env, settings
 from app.services.cache_client import get_cache_client
 from app.services.markets import hydrate_markets_cache
@@ -170,6 +170,7 @@ __all__ = [
     "settings",
     "cache_client",
     "fetch_fx_quote",
+    "build_eip712_quote_message",
     "build_quote_digest",
     "get_cache_client",
     "hydrate_markets_cache",

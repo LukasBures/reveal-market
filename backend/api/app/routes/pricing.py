@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import logging
+import time
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_DOWN, Decimal
 from secrets import token_hex
+from threading import Lock
 from typing import TypedDict, Unpack, cast
 
 import httpx
 from eth_account import Account
-from eth_account.messages import encode_defunct
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from eth_account.messages import encode_defunct, encode_typed_data
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import SecretStr
 from shared import models as shared_models
 from shared.logging import get_request_id, log_event
@@ -36,6 +39,28 @@ _PRESET_CFG: dict[str, object] | None = None
 _PRESET_CFG_LOCK = asyncio.Lock()
 _QUOTE_NONCE_FALLBACK: dict[str, datetime] = {}
 _QUOTE_NONCE_FALLBACK_LOCK = asyncio.Lock()
+
+_PREVIEW_RL_LIMIT = 30
+_PREVIEW_RL_WINDOW = 60.0
+_preview_rl_buckets: dict[str, list[float]] = {}
+_preview_rl_lock = Lock()
+
+
+def _check_preview_rate_limit(request: Request) -> None:
+    """Enforce 30 req/min per IP on the preview endpoint."""
+    client_host = request.client.host if request.client else "anonymous"
+    now = time.time()
+    with _preview_rl_lock:
+        bucket = _preview_rl_buckets.get(client_host, [])
+        bucket = [ts for ts in bucket if now - ts < _PREVIEW_RL_WINDOW]
+        if len(bucket) >= _PREVIEW_RL_LIMIT:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="preview_rate_limit_exceeded",
+                headers={"Retry-After": "60"},
+            )
+        bucket.append(now)
+        _preview_rl_buckets[client_host] = bucket
 
 
 class _PricingUnavailableFields(TypedDict, total=False):
@@ -261,12 +286,68 @@ def build_quote_digest(
     )
 
 
+_EIP712_QUOTE_TYPES = {
+    "EIP712Domain": [
+        {"name": "name", "type": "string"},
+        {"name": "version", "type": "string"},
+        {"name": "chainId", "type": "uint256"},
+        {"name": "verifyingContract", "type": "address"},
+    ],
+    "Quote": [
+        {"name": "marketAddress", "type": "address"},
+        {"name": "walletAddress", "type": "address"},
+        {"name": "outcomeId", "type": "uint256"},
+        {"name": "stakeWei", "type": "uint256"},
+        {"name": "zenUsdScaled", "type": "uint256"},
+        {"name": "expiryTs", "type": "uint256"},
+        {"name": "quoteId", "type": "bytes32"},
+    ],
+}
+
+
+def build_eip712_quote_message(
+    chain_id: int,
+    verifying_contract: str,
+    market_address: str,
+    wallet_address: str,
+    outcome_id: int,
+    stake_wei: int,
+    zen_usd_scaled: int,
+    expiry_ts: int,
+    quote_id_hex: str,
+) -> dict:
+    """Build the EIP-712 typed data dict for a QUOTE_V1 signature."""
+
+    quote_bytes = bytes.fromhex(_strip_0x(quote_id_hex))
+    if len(quote_bytes) != 32:
+        raise ValueError("quote_id must be 32 bytes hex")
+    return {
+        "types": _EIP712_QUOTE_TYPES,
+        "primaryType": "Quote",
+        "domain": {
+            "name": "RevealMarket",
+            "version": "1",
+            "chainId": int(chain_id),
+            "verifyingContract": Web3.to_checksum_address(verifying_contract),
+        },
+        "message": {
+            "marketAddress": Web3.to_checksum_address(market_address),
+            "walletAddress": Web3.to_checksum_address(wallet_address),
+            "outcomeId": int(outcome_id),
+            "stakeWei": int(stake_wei),
+            "zenUsdScaled": int(zen_usd_scaled),
+            "expiryTs": int(expiry_ts),
+            "quoteId": quote_bytes,
+        },
+    }
+
+
 def _is_internal_caller(internal_secret: str | None) -> bool:
     if not internal_secret:
         return False
     if not settings.internal_api_secret:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="internal_secret_not_configured")
-    if internal_secret != settings.internal_api_secret.get_secret_value():
+    if not hmac.compare_digest(internal_secret, settings.internal_api_secret.get_secret_value()):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_internal_secret")
     return True
 
@@ -564,8 +645,9 @@ async def pricing_quote(
         signer_address: str | None = None
         if ensured_market_address:
             try:
-                digest = build_quote_digest(
+                eip712_msg = build_eip712_quote_message(
                     settings.pricing_chain_id,
+                    settings.pricing_verifying_contract,
                     ensured_market_address,
                     payload.wallet_address,
                     int(payload.outcome_id),
@@ -576,7 +658,7 @@ async def pricing_quote(
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-            message = encode_defunct(hexstr=digest.hex())
+            message = encode_typed_data(full_message=eip712_msg)
             signed = Account.sign_message(message, signer_account.key)
             signature = signed.signature.hex()
             signer_address = signer_account.address
@@ -596,6 +678,7 @@ async def pricing_quote(
                 "fx_stale": False,
                 "fx_received_at": fx_received_at,
                 "signature": signature,
+                "signature_version": "eip712_v1" if signature else None,
                 "signer": signer_address,
                 "market_id": payload.market_id,
                 "user_id": user_id,
@@ -703,7 +786,12 @@ async def pricing_quote(
         raise
 
 
-@router.post("/pricing/preview", response_model=schemas.PricingQuoteResponse, tags=["pricing"])
+@router.post(
+    "/pricing/preview",
+    response_model=schemas.PricingQuoteResponse,
+    tags=["pricing"],
+    dependencies=[Depends(_check_preview_rate_limit)],
+)
 async def pricing_quote_preview(
     payload: schemas.PricingQuoteRequest,
     session: AsyncSession = Depends(get_session),
@@ -913,8 +1001,9 @@ async def pricing_submit(
             )
         if not quote.signature:
             try:
-                digest = build_quote_digest(
+                eip712_msg = build_eip712_quote_message(
                     settings.pricing_chain_id,
+                    settings.pricing_verifying_contract,
                     quote.market_address,
                     quote.wallet_address,
                     int(quote.outcome_id),
@@ -923,7 +1012,7 @@ async def pricing_submit(
                     expiry_ts,
                     quote_id,
                 )
-                signed = Account.sign_message(encode_defunct(hexstr=digest.hex()), signer_account.key)
+                signed = Account.sign_message(encode_typed_data(full_message=eip712_msg), signer_account.key)
                 quote.signature = signed.signature.hex()
                 quote.signer = signer_account.address
             except Exception as exc:
@@ -932,8 +1021,9 @@ async def pricing_submit(
                     status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid signature: {exc}"
                 ) from exc
         try:
-            digest = build_quote_digest(
+            eip712_msg = build_eip712_quote_message(
                 settings.pricing_chain_id,
+                settings.pricing_verifying_contract,
                 quote.market_address,
                 quote.wallet_address,
                 int(quote.outcome_id),
@@ -942,7 +1032,7 @@ async def pricing_submit(
                 expiry_ts,
                 quote_id,
             )
-            recovered = Account.recover_message(encode_defunct(hexstr=digest.hex()), signature=quote.signature)
+            recovered = Account.recover_message(encode_typed_data(full_message=eip712_msg), signature=quote.signature)
         except Exception as exc:
             PRICING_COUNTER.labels(event="submit", result="bad_signature").inc()
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid signature: {exc}") from exc

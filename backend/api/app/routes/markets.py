@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import inspect
 import logging
 import time
@@ -47,7 +48,7 @@ def _verify_internal_secret(secret_header: str | None) -> None:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="internal_secret_not_configured",
         )
-    if secret_header != settings.internal_api_secret.get_secret_value():
+    if not hmac.compare_digest(secret_header or "", settings.internal_api_secret.get_secret_value()):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_internal_secret")
 
 
@@ -202,7 +203,8 @@ async def list_markets(
             query_limit = min(settings.max_page_size, max(limit * 3, settings.default_page_size))
         else:
             query_limit = min(settings.max_page_size, max(limit * 3, settings.default_page_size))
-    multiplier = 1 if total_volume_mode else 3
+    # P4 optimisation: reduced multiplier from 3→2 to cut over-fetching.
+    multiplier = 1 if total_volume_mode else 2
     query_limit = min(settings.max_page_size, max(query_limit, limit * multiplier))
     target_events = offset + limit
     batch_limit = query_limit
@@ -440,7 +442,8 @@ async def list_markets_by_category(
     trending_category = category_slug_key == "trending"
     fetch_limit = limit
     fetch_offset = offset
-    multiplier = 1 if total_volume_mode else 3
+    # P4 optimisation: reduced multiplier from 3→2 to cut over-fetching.
+    multiplier = 1 if total_volume_mode else 2
     fetch_limit = min(settings.max_page_size, max(limit * multiplier, settings.default_page_size))
     log_event(
         logger,

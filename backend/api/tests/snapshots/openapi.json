@@ -372,7 +372,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "type": "number"
+                  "type": "integer"
                 },
                 "type": "object"
               },
@@ -2035,6 +2035,17 @@
             ],
             "title": "Signature"
           },
+          "signature_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signature Version"
+          },
           "signer": {
             "anyOf": [
               {
@@ -2435,6 +2446,17 @@
               }
             ],
             "title": "Signature"
+          },
+          "signature_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signature Version"
           },
           "signer": {
             "anyOf": [

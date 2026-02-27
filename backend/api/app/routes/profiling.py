@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import io
 from contextlib import contextmanager
 
@@ -17,7 +18,7 @@ def _verify_internal_secret(secret_header: str | None) -> None:
     secret = settings.internal_api_secret.get_secret_value() if settings.internal_api_secret else None
     if not secret:
         raise HTTPException(status_code=403, detail={"error": "internal_api_secret_not_configured"})
-    if secret_header != secret:
+    if not hmac.compare_digest(secret_header or "", secret):
         raise HTTPException(status_code=401, detail={"error": "invalid_internal_secret"})
 
 

@@ -7,7 +7,7 @@ import json
 import logging
 import secrets
 import time
-from collections.abc import Sequence
+from collections.abc import Awaitable, Sequence
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -1128,8 +1128,13 @@ async def _build_merkle_proof_for_commitment(
     market_db_id: int,
     settlement: shared_models.Settlement,
     commitment: shared_models.Commitment,
+    all_commitments: list[shared_models.Commitment] | None = None,
 ) -> list[str]:
-    """Return stored merkle path or recompute from existing leaves."""
+    """Return stored merkle path or recompute from existing leaves.
+
+    When *all_commitments* is provided the redundant per-commitment query
+    is skipped (batch-load optimisation for P3).
+    """
 
     path_rows = list(
         (
@@ -1168,7 +1173,11 @@ async def _build_merkle_proof_for_commitment(
     if index_in_batch >= count:
         return []
 
-    commitments = await shared_repository.list_commitments_by_market(session, market_db_id)
+    commitments = (
+        all_commitments
+        if all_commitments is not None
+        else await shared_repository.list_commitments_by_market(session, market_db_id)
+    )
     leaves: list[bytes | None] = [None] * count
     for idx, row in enumerate(commitments):
         leaf_bytes = _hex_to_bytes(row.leaf or row.ticket_hash)
@@ -1220,7 +1229,9 @@ async def _build_relayer_claim_payloads(
                 commitment_id=getattr(commitment, "id", None),
             )
             continue
-        merkle_proof = await _build_merkle_proof_for_commitment(session, market.id, settlement, commitment)
+        merkle_proof = await _build_merkle_proof_for_commitment(
+            session, market.id, settlement, commitment, all_commitments=commitments
+        )
         if not merkle_proof:
             log_event(
                 logger,
@@ -1294,6 +1305,7 @@ async def _enqueue_relayer_claims(
         }
         try:
             await cast(Awaitable[Any], redis_client.lpush(runtime.settings.relayer_queue_key, json.dumps(body)))
+            await cast(Awaitable[Any], redis_client.ltrim(runtime.settings.relayer_queue_key, 0, 9999))
             enqueued += 1
         except Exception as exc:  # pragma: no cover - redis failures are non-fatal
             log_event(

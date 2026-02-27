@@ -150,15 +150,16 @@ def test_pricing_quote_and_submit_signature_roundtrip(client, monkeypatch):
 
 def test_pricing_quote_signature_recovers_signer(client, monkeypatch):
     import app.runtime as runtime
-    from app.server import build_quote_digest
+    from app.server import build_eip712_quote_message
     from eth_account import Account
-    from eth_account.messages import encode_defunct
+    from eth_account.messages import encode_typed_data
     from pydantic import SecretStr
 
     signer = Account.create()
     user = Account.create()
     settings = runtime.settings
     monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_verifying_contract", "0x" + "0" * 40, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 10, raising=False)
     monkeypatch.setattr(settings, "haircut_percent", 0.12, raising=False)
@@ -184,9 +185,11 @@ def test_pricing_quote_signature_recovers_signer(client, monkeypatch):
     resp = client.post("/pricing/quote", json=quote_payload)
     assert resp.status_code == 200
     quote = resp.json()
+    assert quote["signature_version"] == "eip712_v1"
 
-    digest = build_quote_digest(
+    eip712_msg = build_eip712_quote_message(
         settings.pricing_chain_id,
+        settings.pricing_verifying_contract,
         quote["market_address"],
         quote["wallet_address"],
         int(quote["outcome_id"]),
@@ -195,7 +198,7 @@ def test_pricing_quote_signature_recovers_signer(client, monkeypatch):
         int(quote["expiry_ts"]),
         quote["quote_id"],
     )
-    recovered = Account.recover_message(encode_defunct(hexstr=digest.hex()), signature=quote["signature"])
+    recovered = Account.recover_message(encode_typed_data(full_message=eip712_msg), signature=quote["signature"])
     assert recovered.lower() == signer.address.lower()
 
 
