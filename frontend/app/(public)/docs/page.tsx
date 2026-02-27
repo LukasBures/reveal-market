@@ -5,7 +5,7 @@ import { docsMetadata } from "@/lib/seo";
 export const metadata: Metadata = {
   ...docsMetadata("overview"),
   description:
-    "Docs for Reveal Market: how it works, what we share with users, and the stage-by-stage flow.",
+    "Learn the Reveal Market flow: access, request a quote, commit privately, then verify outcomes with settlement receipts and claim payouts after resolution.",
   keywords: [
     "prediction markets docs",
     "how it works",
@@ -26,7 +26,9 @@ export default function DocsOverview() {
       </p>
       <div className="space-y-8">
         <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
-          <p className="text-sm uppercase tracking-[0.3em] text-slate-400">How It Works</p>
+          <h2 className="text-sm uppercase tracking-[0.3em] text-slate-400 !text-sm !text-slate-400 !font-normal">
+            How It Works
+          </h2>
           <p className="mt-3 text-slate-200">
             Reveal Market uses a staged flow to keep participation private while markets are live, then publishes
             clear settlement receipts once outcomes are final.
@@ -54,7 +56,9 @@ export default function DocsOverview() {
         </section>
 
         <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
-          <p className="text-sm uppercase tracking-[0.3em] text-slate-400">What We Share With You</p>
+          <h2 className="text-sm uppercase tracking-[0.3em] text-slate-400 !text-sm !text-slate-400 !font-normal">
+            What We Share With You
+          </h2>
           <ul className="mt-3 list-disc space-y-3 pl-6 text-slate-200">
             <li>Market status, rules, and the available outcomes before you commit.</li>
             <li>Signed quotes that show the ticket price, caps, and expiry window.</li>
@@ -64,7 +68,9 @@ export default function DocsOverview() {
         </section>
 
         <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
-          <p className="text-sm uppercase tracking-[0.3em] text-slate-400">Privacy, By Design</p>
+          <h2 className="text-sm uppercase tracking-[0.3em] text-slate-400 !text-sm !text-slate-400 !font-normal">
+            Privacy, By Design
+          </h2>
           <ul className="mt-3 list-disc space-y-3 pl-6 text-slate-200">
             <li>Commits are private while the market is live.</li>
             <li>Order flow is not broadcast in real time.</li>
@@ -73,7 +79,9 @@ export default function DocsOverview() {
         </section>
 
         <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
-          <p className="text-sm uppercase tracking-[0.3em] text-slate-400">How To Participate</p>
+          <h2 className="text-sm uppercase tracking-[0.3em] text-slate-400 !text-sm !text-slate-400 !font-normal">
+            How To Participate
+          </h2>
           <ul className="mt-3 list-disc space-y-3 pl-6 text-slate-200">
             <li>Connect a wallet and review a market’s rules and status.</li>
             <li>Request a quote for a fixed ticket size and confirm the expiry window.</li>
@@ -83,7 +91,9 @@ export default function DocsOverview() {
         </section>
 
         <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
-          <p className="text-sm uppercase tracking-[0.3em] text-slate-400">Why This Flow</p>
+          <h2 className="text-sm uppercase tracking-[0.3em] text-slate-400 !text-sm !text-slate-400 !font-normal">
+            Why This Flow
+          </h2>
           <ul className="mt-3 list-disc space-y-3 pl-6 text-slate-200">
             <li>Reduces information leakage while markets are live.</li>
             <li>Provides consistent pricing with signed quotes and caps.</li>
@@ -92,7 +102,9 @@ export default function DocsOverview() {
         </section>
 
         <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
-          <p className="text-sm uppercase tracking-[0.3em] text-slate-400">What We Don’t Do</p>
+          <h2 className="text-sm uppercase tracking-[0.3em] text-slate-400 !text-sm !text-slate-400 !font-normal">
+            What We Don’t Do
+          </h2>
           <ul className="mt-3 list-disc space-y-3 pl-6 text-slate-200">
             <li>We don’t custody your funds.</li>
             <li>We don’t guarantee outcomes, liquidity, or profits.</li>

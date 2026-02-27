@@ -28,7 +28,7 @@ export async function FeaturedEventsSection({
   onlyActive = true,
 }: Props = {}) {
   const orderBy = sortBy === "recent" ? "recent" : sortBy === "popularity" ? "popularity" : "volume";
-  const initialMarkets = await fetchFeaturedEvents(pageSize, {
+  const { data: initialMarkets } = await fetchFeaturedEvents(pageSize, {
     searchQuery,
     category: categoryFilter,
     status,

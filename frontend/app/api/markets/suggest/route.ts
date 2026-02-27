@@ -8,6 +8,6 @@ export async function GET(request: Request) {
   const parsedLimit = Number(url.searchParams.get("limit"));
   const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 10) : 5;
 
-  const suggestions = await fetchMarketSuggestions(query, limit);
+  const { data: suggestions } = await fetchMarketSuggestions(query, limit);
   return NextResponse.json(suggestions);
 }

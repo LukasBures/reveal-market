@@ -210,10 +210,15 @@ const readJsonBodyWithLimit = async (request: Request, maxBytes: number): Promis
   return parsed as Record<string, unknown>;
 };
 
+const DISCORD_WEBHOOK_PATH_RE = /^\/api\/webhooks\/\d+\/[\w-]+$/;
+
 async function sendDiscord(webhookUrl: string, body: { name: string; email?: string; message: string }) {
   const parsed = new URL(webhookUrl);
   if (parsed.protocol !== "https:" || !isAllowedDiscordHost(parsed.hostname)) {
     throw new Error("webhook_host_not_allowed");
+  }
+  if (!DISCORD_WEBHOOK_PATH_RE.test(parsed.pathname)) {
+    throw new Error("webhook_path_invalid");
   }
   const name = body.name ? body.name : "Anonymous";
   const contact = body.email ? body.email : "Not provided";

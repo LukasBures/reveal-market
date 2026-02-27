@@ -18,7 +18,7 @@ export async function GET(request: Request) {
   const trending = params.get("trending");
   const trendingFlag = trending === "1" || trending?.toLowerCase() === "true";
 
-  const events = await fetchFeaturedEvents(limit, {
+  const { data: events } = await fetchFeaturedEvents(limit, {
     searchQuery,
     category,
     offset,

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/api", () => ({
-  fetchFeaturedEvents: vi.fn().mockResolvedValue([]),
+  fetchFeaturedEvents: vi.fn().mockResolvedValue({ data: [] }),
 }));
 
 import HomePage from "@/app/(public)/page";

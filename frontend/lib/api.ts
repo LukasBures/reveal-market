@@ -15,6 +15,12 @@ import { mapApiMarketToSummary } from "./marketMapper";
 import { getServerEnv } from "./serverEnv";
 import { fetchMarketTokens, fetchOpenInterest, fetchOrderbookAggregates } from "./streamer-data";
 
+/** Discriminated union for single-item API results. */
+export type ApiResult<T> = { data: T; error?: undefined } | { data: null; error: string };
+
+/** Wrapper for list-returning API functions. An empty `data` with `error` set means the request failed. */
+export type ApiListResult<T> = { data: T[]; error?: string };
+
 const resolvedEnv = getServerEnv();
 export const DEFAULT_API_BASE = resolvedEnv.apiBaseUrl;
 const IS_BUILD_TIME = process.env.NEXT_PHASE === "phase-production-build";
@@ -32,15 +38,15 @@ const logOfflineAwareError = (scope: string, error: unknown, meta?: Record<strin
   const normalized = message.toLowerCase();
   const isFetchFailure = normalized.includes("fetch failed") || normalized.includes("failed to fetch");
   const event = isFetchFailure ? "unreachable" : "error";
-  const clientWarn = typeof (logger as any).clientWarn === "function" ? (logger as any).clientWarn : null;
+  const loggerExt = logger as Record<string, unknown>;
+  const clientWarn = typeof loggerExt.clientWarn === "function" ? (loggerExt.clientWarn as typeof logger.warn) : null;
   if (IS_BROWSER && clientWarn) {
     clientWarn(`${scope}:${event}`, payload);
     return;
   }
+  const methodName = event === "error" ? "error" : "warn";
   const serverLogger =
-    typeof (logger as any)[event === "error" ? "error" : "warn"] === "function"
-      ? (logger as any)[event === "error" ? "error" : "warn"]
-      : logger.warn;
+    typeof loggerExt[methodName] === "function" ? (loggerExt[methodName] as typeof logger.warn) : logger.warn;
   serverLogger(`${scope}:${event}`, payload);
 };
 
@@ -58,17 +64,17 @@ const fetchWithTimeout = async (url: string, options: NextFetchOptions, timeoutM
   }
 };
 
-const coerceNumber = (value: any): number | undefined => {
+const coerceNumber = (value: unknown): number | undefined => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
 };
 
-const coerceId = (value: any, fallback?: string): string => {
+const coerceId = (value: unknown, fallback?: string): string => {
   const raw = value ?? fallback ?? "";
   return typeof raw === "string" ? raw.trim() : String(raw);
 };
 
-const normalizeClobTokenIds = (value: any): string[] | undefined => {
+const normalizeClobTokenIds = (value: unknown): string[] | undefined => {
   if (Array.isArray(value)) return value.map((v) => String(v));
   if (typeof value === "string") {
     try {
@@ -82,7 +88,7 @@ const normalizeClobTokenIds = (value: any): string[] | undefined => {
   return undefined;
 };
 
-const normalizeStringArray = (value: any): string[] | undefined => {
+const normalizeStringArray = (value: unknown): string[] | undefined => {
   if (Array.isArray(value)) return value.map((v) => String(v));
   if (typeof value === "string") {
     try {
@@ -96,7 +102,7 @@ const normalizeStringArray = (value: any): string[] | undefined => {
   return undefined;
 };
 
-const normalizeNumberArray = (value: any): number[] | undefined => {
+const normalizeNumberArray = (value: unknown): number[] | undefined => {
   if (Array.isArray(value)) {
     const parsed = value.map((v) => Number(v)).filter((v) => Number.isFinite(v));
     return parsed.length ? parsed : undefined;
@@ -126,6 +132,7 @@ const humanizeGroupSlug = (slug?: string | null): string | undefined => {
     .join(" ");
 };
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic API response; typed via MarketDetail return
 const mapMarketDetailPayload = (payload: any, eventId: string): MarketDetail => {
   const eventIdValue = coerceId(payload.event_id ?? payload.eventId, eventId);
   const resolutionSource = payload.resolution ?? payload.extra_data?.resolution;
@@ -402,9 +409,9 @@ const mapMarketDetailPayload = (payload: any, eventId: string): MarketDetail => 
 };
 
 
-export async function fetchFeaturedEvents(limit = 6, options?: FetchFeaturedMarketsOptions): Promise<EventSummary[]> {
+export async function fetchFeaturedEvents(limit = 6, options?: FetchFeaturedMarketsOptions): Promise<ApiListResult<EventSummary>> {
   if (maybeShortCircuitOffline("fetchFeaturedEvents")) {
-    return [];
+    return { data: [], error: "offline" };
   }
   if (IS_BUILD_TIME) {
     logger.info("fetchFeaturedEvents:skipped_build", {
@@ -412,7 +419,7 @@ export async function fetchFeaturedEvents(limit = 6, options?: FetchFeaturedMark
       category: options?.category,
       searchQuery: options?.searchQuery,
     });
-    return [];
+    return { data: [] };
   }
   try {
     const onlyFeatured = options?.onlyFeatured ?? false;
@@ -445,7 +452,7 @@ export async function fetchFeaturedEvents(limit = 6, options?: FetchFeaturedMark
       if (trimmedSearch.length >= 2) {
         params.set("search", trimmedSearch);
       } else if (trimmedSearch.length > 0) {
-        return [];
+        return { data: [] };
       }
     }
     const fetchTags: string[] = [];
@@ -490,7 +497,7 @@ export async function fetchFeaturedEvents(limit = 6, options?: FetchFeaturedMark
         endpoint: url.toString(),
         baseUrl: DEFAULT_API_BASE,
       });
-      return [];
+      return { data: [], error: `fetch failed (${response.status})` };
     }
 
     const payload = await response.json();
@@ -503,7 +510,7 @@ export async function fetchFeaturedEvents(limit = 6, options?: FetchFeaturedMark
       orderBy,
       cacheTags: fetchTags,
     });
-    return items.map((item: any) => {
+    return { data: items.map((item: any) => {
       const marketsPayload = Array.isArray(item.markets) ? item.markets : [];
       const markets = marketsPayload.map((market: any) => mapApiMarketToSummary(market));
       const eventKey = item.event_key ?? item.eventKey ?? null;
@@ -537,10 +544,10 @@ export async function fetchFeaturedEvents(limit = 6, options?: FetchFeaturedMark
           }, 0),
         aggregateLiquidityUsd: coerceNumber(item.aggregate_liquidity_usd ?? item.aggregateLiquidityUsd) ?? null,
       } as EventSummary;
-    });
+    }) };
   } catch (error) {
     logOfflineAwareError("fetchFeaturedEvents", error);
-    return [];
+    return { data: [], error: error instanceof Error ? error.message : "unknown" };
   }
 }
 
@@ -548,13 +555,13 @@ export async function fetchMarketSuggestions(
   query: string,
   limit = 5,
   options?: { revalidate?: number },
-): Promise<MarketSummary[]> {
+): Promise<ApiListResult<MarketSummary>> {
   if (maybeShortCircuitOffline("fetchMarketSuggestions")) {
-    return [];
+    return { data: [], error: "offline" };
   }
   const trimmed = query.trim();
   if (trimmed.length < 2) {
-    return [];
+    return { data: [] };
   }
   const normalized = trimmed.toLowerCase();
   const url = new URL("/events/suggest", DEFAULT_API_BASE);
@@ -580,18 +587,18 @@ export async function fetchMarketSuggestions(
     );
     if (!response.ok) {
       logger.error("fetchMarketSuggestions:failed", { status: response.status, endpoint: url.toString() });
-      return [];
+      return { data: [], error: `fetch failed (${response.status})` };
     }
     const payload = await response.json();
     if (!Array.isArray(payload)) {
-      return [];
+      return { data: [] };
     }
     const mapped = payload.map(mapApiMarketToSummary);
     logger.debug("fetchMarketSuggestions:success", { query: trimmed, count: mapped.length });
-    return mapped;
+    return { data: mapped };
   } catch (error) {
     logOfflineAwareError("fetchMarketSuggestions", error);
-    return [];
+    return { data: [], error: error instanceof Error ? error.message : "unknown" };
   }
 }
 
@@ -651,12 +658,12 @@ async function fetchMarketStatsFrom(
   }
 }
 
-export async function fetchMarketStatsBreakdown(): Promise<MarketStatusStat[]> {
+export async function fetchMarketStatsBreakdown(): Promise<ApiListResult<MarketStatusStat>> {
   if (maybeShortCircuitOffline("fetchMarketStatsBreakdown")) {
-    return [];
+    return { data: [], error: "offline" };
   }
   const primaryStats = await fetchMarketStatsFrom(DEFAULT_API_BASE, "fetchMarketStatsBreakdown");
-  return primaryStats ?? [];
+  return { data: primaryStats ?? [] };
 }
 
 type ProofReceiptFilters = {
@@ -846,9 +853,9 @@ export async function fetchProofReceipts(
   }
 }
 
-export async function fetchMarketByEventId(eventId: string, eventKey?: string | null): Promise<MarketDetail | null> {
+export async function fetchMarketByEventId(eventId: string, eventKey?: string | null): Promise<ApiResult<MarketDetail>> {
   if (maybeShortCircuitOffline("fetchMarketByEventId")) {
-    return null;
+    return { data: null, error: "offline" };
   }
   try {
     const lookupKey = (eventKey ?? eventId).trim();
@@ -863,7 +870,7 @@ export async function fetchMarketByEventId(eventId: string, eventKey?: string | 
     );
     if (response.status === 404) {
       logger.warn("fetchMarketByEventId:not_found", { eventId });
-      return null;
+      return { data: null, error: "not_found" };
     }
     if (!response.ok) {
       logger.error("fetchMarketByEventId:failed", {
@@ -872,7 +879,7 @@ export async function fetchMarketByEventId(eventId: string, eventKey?: string | 
         endpoint: detailUrl,
         baseUrl: DEFAULT_API_BASE,
       });
-      return null;
+      return { data: null, error: `fetch failed (${response.status})` };
     }
     const payload = await response.json();
     const groupTitle =
@@ -935,9 +942,9 @@ export async function fetchMarketByEventId(eventId: string, eventKey?: string | 
       logger.warn("fetchMarketByEventId:subgraph_enrich_failed", { eventId, error: (err as Error).message });
     }
     logger.info("fetchMarketByEventId:success", { eventId });
-    return detail;
+    return { data: detail };
   } catch (error) {
     logOfflineAwareError("fetchMarketByEventId", error, { eventId });
-    return null;
+    return { data: null, error: error instanceof Error ? error.message : "unknown" };
   }
 }

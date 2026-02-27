@@ -6,7 +6,7 @@ import { docsMetadata } from "@/lib/seo";
 export const metadata: Metadata = {
   ...docsMetadata("privacy-security"),
   description:
-    "Privacy and security at Reveal Market: private commits and published settlement receipts for every resolved market.",
+    "Reveal Market keeps participation private during live markets and publishes settlement receipts after resolution so outcomes and payouts stay transparent.",
   keywords: [
     "private commits",
     "settlement receipts",

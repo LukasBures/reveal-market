@@ -28,7 +28,7 @@ const DocsNavPanel = dynamic(
 export const metadata: Metadata = {
   title: {
     default: "Reveal Market Docs",
-    template: "%s | Reveal Market Docs",
+    template: "%s | Docs",
   },
 };
 

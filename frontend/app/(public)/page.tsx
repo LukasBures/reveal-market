@@ -6,9 +6,9 @@ import { buildMetadata } from "@/lib/seo";
 import { parseCategorySlug } from "@/lib/slugs";
 
 export const metadata: Metadata = buildMetadata({
-  title: "Private Prediction Markets",
+  title: "Private Prediction Markets With Verified Settlements",
   description:
-    "Private prediction markets with fixed ticket size, signed quotes, and clear settlement receipts when outcomes post. Claim payouts once markets settle.",
+    "Keep order flow private while markets are live. Reveal Market publishes settlement receipts so you can verify outcomes, confirm payouts, and claim securely.",
   path: "/",
   keywords: [
     "private prediction markets",
@@ -50,6 +50,7 @@ export default async function HomePage({ searchParams }: PageProps) {
   })();
   return (
     <div className="mx-auto max-w-7xl px-4 pt-4 pb-16 text-white pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
+      <h1 className="sr-only">Reveal Market private prediction markets</h1>
       <div>
         <Suspense fallback={<FeaturedEventsSkeleton />}>
           <FeaturedEventsSection

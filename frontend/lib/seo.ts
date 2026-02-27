@@ -264,9 +264,9 @@ const docsMeta: Record<
   { title: string; description: string; keywords?: string[] }
 > = {
   overview: {
-    title: "How Reveal Market Works",
+    title: "How Reveal Market Works: Private Prediction Flow Guide",
     description:
-      "How Reveal Market works: stage-by-stage flow, what we share with users, and how to participate.",
+      "Learn the Reveal Market flow: access, request a quote, commit privately, then verify outcomes with settlement receipts and claim payouts after resolution.",
     keywords: [
       "reveal market overview",
       "prediction market docs",
@@ -275,18 +275,21 @@ const docsMeta: Record<
     ],
   },
   "getting-started": {
-    title: "Getting Started",
-    description: "Step-by-step guide for getting access, committing, and claiming after settlement.",
+    title: "Start Trading on Reveal Market: Access, Quote, Commit",
+    description:
+      "Get access, connect a wallet, request a signed quote, commit a ticket, and claim after settlement. A quick start guide for new participants ready to begin.",
     keywords: ["getting started", "commit", "claim", "settlement"],
   },
   "privacy-security": {
-    title: "Privacy & Security",
-    description: "How private commits work and how settlement receipts keep outcomes verifiable.",
+    title: "Privacy & Security in Reveal Market | Private Commits",
+    description:
+      "Reveal Market keeps participation private during live markets and publishes settlement receipts after resolution so outcomes and payouts stay transparent.",
     keywords: ["private commits", "settlement receipts", "privacy", "security"],
   },
   faq: {
-    title: "Reveal Market FAQ",
-    description: "Quick answers about participation, settlement, and claims.",
+    title: "Reveal Market FAQ: Participation, Settlement, Claims",
+    description:
+      "Quick answers on participation, quotes, settlement receipts, and claims so you can trade private prediction markets with confidence and clarity every day.",
     keywords: ["faq", "settlement", "claims", "how it works"],
   },
 };

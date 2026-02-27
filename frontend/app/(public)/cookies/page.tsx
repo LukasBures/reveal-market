@@ -32,7 +32,7 @@ export default function CookiesPage() {
         </p>
         <div className="space-y-6">
           <div>
-            <p className="text-sm uppercase tracking-[0.3em] text-slate-400">Types of Cookies We Use</p>
+            <h2 className="text-sm uppercase tracking-[0.3em] text-slate-400">Types of Cookies We Use</h2>
             <ul className="mt-3 list-disc space-y-3 pl-6 text-slate-200">
               <li>
                 <strong>Essential.</strong> Required for core functionality and security, such as session state and
@@ -52,7 +52,7 @@ export default function CookiesPage() {
             </ul>
           </div>
           <div>
-            <p className="text-sm uppercase tracking-[0.3em] text-slate-400">Your Controls</p>
+            <h2 className="text-sm uppercase tracking-[0.3em] text-slate-400">Your Controls</h2>
             <ul className="mt-3 list-disc space-y-3 pl-6 text-slate-200">
               <li>Adjust browser settings to block or delete cookies.</li>
               <li>Use private browsing modes to limit storage between sessions.</li>
@@ -60,7 +60,7 @@ export default function CookiesPage() {
             </ul>
           </div>
           <div>
-            <p className="text-sm uppercase tracking-[0.3em] text-slate-400">Do Not Track</p>
+            <h2 className="text-sm uppercase tracking-[0.3em] text-slate-400">Do Not Track</h2>
             <p className="mt-3 text-slate-200">
               Some browsers send “Do Not Track” signals. We currently do not respond to these signals because there is
               no consistent industry standard.

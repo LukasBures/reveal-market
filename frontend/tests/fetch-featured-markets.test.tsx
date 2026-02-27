@@ -41,6 +41,6 @@ describe("fetchFeaturedEvents", () => {
   it("returns an empty list when the network request fails", async () => {
     fetchMock.mockRejectedValueOnce(new Error("offline"));
     const result = await fetchFeaturedEvents(4);
-    expect(result).toEqual([]);
+    expect(result).toEqual({ data: [], error: "offline" });
   });
 });

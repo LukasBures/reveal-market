@@ -32,14 +32,14 @@ export default function DisclaimerPage() {
         </p>
         <div className="space-y-6">
           <div>
-            <p className="text-sm uppercase tracking-[0.3em] text-slate-400">No Advice or Recommendations</p>
+            <h2 className="text-sm uppercase tracking-[0.3em] text-slate-400">No Advice or Recommendations</h2>
             <p className="mt-3 text-slate-200">
               Any data, analytics, or commentary is provided for informational purposes only. You are solely
               responsible for your decisions and should consult qualified professionals where appropriate.
             </p>
           </div>
           <div>
-            <p className="text-sm uppercase tracking-[0.3em] text-slate-400">Market and Technology Risks</p>
+            <h2 className="text-sm uppercase tracking-[0.3em] text-slate-400">Market and Technology Risks</h2>
             <ul className="mt-3 list-disc space-y-3 pl-6 text-slate-200">
               <li>Markets may be volatile, thinly traded, or unavailable.</li>
               <li>Smart contracts and integrations can fail or be exploited.</li>
@@ -47,14 +47,14 @@ export default function DisclaimerPage() {
             </ul>
           </div>
           <div>
-            <p className="text-sm uppercase tracking-[0.3em] text-slate-400">No Custody, No Guarantees</p>
+            <h2 className="text-sm uppercase tracking-[0.3em] text-slate-400">No Custody, No Guarantees</h2>
             <p className="mt-3 text-slate-200">
               Reveal Market does not hold or control user funds. We do not guarantee uptime, liquidity, outcomes,
               or payouts. All interactions with wallets or smart contracts occur at your own risk.
             </p>
           </div>
           <div>
-            <p className="text-sm uppercase tracking-[0.3em] text-slate-400">Jurisdiction and Eligibility</p>
+            <h2 className="text-sm uppercase tracking-[0.3em] text-slate-400">Jurisdiction and Eligibility</h2>
             <p className="mt-3 text-slate-200">
               You are responsible for understanding whether you may access or use the services. Use may be restricted
               or prohibited in certain jurisdictions.

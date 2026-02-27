@@ -10,9 +10,9 @@ export const revalidate = 60;
 export const dynamic = "force-static";
 
 export const metadata: Metadata = buildMetadata({
-  title: "Search Events | Reveal Market",
+  title: "Search Prediction Events and Categories | Reveal Market",
   description:
-    "Browse live and settled private prediction events with fixed ticket size. Search by category or status and claim after settlement.",
+    "Browse private prediction events across categories and statuses, then verify outcomes with settlement receipts and claim payouts when markets resolve.",
   path: "/search",
   keywords: [
     "private prediction events",
@@ -53,12 +53,12 @@ export default async function MarketsSearchPage({ searchParams }: PageProps) {
   const initialStatus = (normalizedStatus ?? fallbackStatus) as "any" | "active" | "locked" | "settled" | "cancelled";
   const shouldFetch = effectiveQuery.length >= 2 || Boolean(initialCategory) || hasStatusParam;
   const initialResults = shouldFetch
-    ? await fetchFeaturedEvents(DEFAULT_PAGE_SIZE, {
+    ? (await fetchFeaturedEvents(DEFAULT_PAGE_SIZE, {
         searchQuery: effectiveQuery || undefined,
         status: initialStatus,
         category: initialCategory ?? undefined,
         orderBy: "volume",
-      })
+      })).data
     : [];
 
   return (

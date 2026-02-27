@@ -46,7 +46,7 @@ describe("SearchEventsClient", () => {
   });
 
   it("applies category and status filters when searching", async () => {
-    vi.mocked(loadFeaturedEventsAction).mockResolvedValue([]);
+    vi.mocked(loadFeaturedEventsAction).mockResolvedValue({ data: [] });
 
     render(<SearchEventsClient initialResults={[]} />);
 
@@ -99,7 +99,7 @@ describe("SearchEventsClient", () => {
   });
 
   it("stores recent searches and re-runs them", async () => {
-    vi.mocked(loadFeaturedEventsAction).mockResolvedValue([]);
+    vi.mocked(loadFeaturedEventsAction).mockResolvedValue({ data: [] });
 
     render(<SearchEventsClient initialResults={[]} />);
 

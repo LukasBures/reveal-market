@@ -36,12 +36,14 @@ describe("fetchMarketStatsBreakdown", () => {
         next: expect.objectContaining({ revalidate: 60 }),
       }),
     );
-    expect(stats).toEqual([
-      { status: "live", count: 3 },
-      { status: "ended", count: 1 },
-      { status: "finalized", count: 1 },
-      { status: "total", count: 4 },
-    ]);
+    expect(stats).toEqual({
+      data: [
+        { status: "live", count: 3 },
+        { status: "ended", count: 1 },
+        { status: "finalized", count: 1 },
+        { status: "total", count: 4 },
+      ],
+    });
   });
 
   it("returns primary stats when data is present", async () => {
@@ -60,12 +62,14 @@ describe("fetchMarketStatsBreakdown", () => {
     const stats = await fetchMarketStatsBreakdown();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(stats).toEqual([
-      { status: "live", count: 2 },
-      { status: "ended", count: 5 },
-      { status: "finalized", count: 5 },
-      { status: "total", count: 7 },
-    ]);
+    expect(stats).toEqual({
+      data: [
+        { status: "live", count: 2 },
+        { status: "ended", count: 5 },
+        { status: "finalized", count: 5 },
+        { status: "total", count: 7 },
+      ],
+    });
   });
 
   it("does not fallback when no secondary API is configured", async () => {
@@ -82,12 +86,14 @@ describe("fetchMarketStatsBreakdown", () => {
     const stats = await fetchMarketStatsBreakdown();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(stats).toEqual([
-      { status: "live", count: 0 },
-      { status: "ended", count: 0 },
-      { status: "finalized", count: 0 },
-      { status: "total", count: 0 },
-    ]);
+    expect(stats).toEqual({
+      data: [
+        { status: "live", count: 0 },
+        { status: "ended", count: 0 },
+        { status: "finalized", count: 0 },
+        { status: "total", count: 0 },
+      ],
+    });
   });
 
   it("does not fallback when RM_ENVIRONMENT is prod", async () => {
@@ -104,11 +110,13 @@ describe("fetchMarketStatsBreakdown", () => {
     const stats = await fetchMarketStatsBreakdown();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(stats).toEqual([
-      { status: "live", count: 9 },
-      { status: "ended", count: 0 },
-      { status: "finalized", count: 0 },
-      { status: "total", count: 9 },
-    ]);
+    expect(stats).toEqual({
+      data: [
+        { status: "live", count: 9 },
+        { status: "ended", count: 0 },
+        { status: "finalized", count: 0 },
+        { status: "total", count: 9 },
+      ],
+    });
   });
 });

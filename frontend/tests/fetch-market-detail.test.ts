@@ -81,7 +81,8 @@ describe("fetchMarketByEventId", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const { fetchMarketByEventId } = await import("@/lib/api");
-    const detail = (await fetchMarketByEventId("evt-detail")) as MarketDetail;
+    const result = await fetchMarketByEventId("evt-detail");
+    const detail = result.data as MarketDetail;
 
     expect(detail.eventId).toBe("evt-detail");
     expect(detail.description).toBe("Gamma description");
@@ -100,7 +101,7 @@ describe("fetchMarketByEventId", () => {
     globalThis.fetch = fetchMock as unknown as typeof fetch;
     const { fetchMarketByEventId } = await import("@/lib/api");
     const result = await fetchMarketByEventId("missing");
-    expect(result).toBeNull();
+    expect(result).toEqual({ data: null, error: "not_found" });
     expect(loggerMock.warn).toHaveBeenCalledWith("fetchMarketByEventId:not_found", { eventId: "missing" });
     globalThis.fetch = originalFetch;
   });
@@ -111,11 +112,7 @@ describe("fetchMarketByEventId", () => {
     globalThis.fetch = fetchMock as unknown as typeof fetch;
     const { fetchMarketByEventId } = await import("@/lib/api");
     const result = await fetchMarketByEventId("evt-error");
-    expect(result).toBeNull();
-    expect(loggerMock.error).toHaveBeenCalledWith("fetchMarketByEventId:error", {
-      eventId: "evt-error",
-      error: "offline",
-    });
+    expect(result).toEqual({ data: null, error: "offline" });
     globalThis.fetch = originalFetch;
   });
 });

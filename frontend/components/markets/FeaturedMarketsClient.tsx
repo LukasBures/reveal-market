@@ -52,6 +52,7 @@ export function FeaturedEventsClient({
   const [fetchHint, setFetchHint] = useState<"auto" | "manual" | null>(null);
   const [intersectionSupported, setIntersectionSupported] = useState(false);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const observerRef = useRef<IntersectionObserver | null>(null);
   const setSentinel = useCallback((node: HTMLDivElement | null) => {
     sentinelRef.current = node;
   }, []);
@@ -111,8 +112,8 @@ export function FeaturedEventsClient({
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteQuery({
     queryKey,
-    queryFn: ({ pageParam = 0 }) =>
-      fetchFeaturedEvents(batchSize, {
+    queryFn: async ({ pageParam = 0 }) => {
+      const { data } = await fetchFeaturedEvents(batchSize, {
         searchQuery,
         category: normalizedCategory,
         offset: pageParam,
@@ -120,7 +121,9 @@ export function FeaturedEventsClient({
         trending,
         orderBy,
         closesWithinHours,
-      }),
+      });
+      return data;
+    },
     initialPageParam: 0,
     initialData: {
       pages: [initialMarkets],
@@ -202,27 +205,31 @@ export function FeaturedEventsClient({
   const showManualButton = events.length > 0 && hasNextPage && !showLoadingIndicator && !isAutoFetching;
 
   useEffect(() => {
+    observerRef.current?.disconnect();
+    observerRef.current = null;
     if (!canAutoLoad || isBusy) {
       return;
     }
     const target = sentinelRef.current;
-    if (!target) {
-      return;
-    }
-    if (typeof IntersectionObserver === "undefined") {
+    if (!target || typeof IntersectionObserver === "undefined") {
       return;
     }
     const observer = new IntersectionObserver((entries) => {
       for (const entry of entries) {
         if (entry.isIntersecting) {
           observer.disconnect();
+          observerRef.current = null;
           handleLoadMore("auto");
           break;
         }
       }
     }, { rootMargin: "400px" });
     observer.observe(target);
-    return () => observer.disconnect();
+    observerRef.current = observer;
+    return () => {
+      observer.disconnect();
+      observerRef.current = null;
+    };
   }, [canAutoLoad, handleLoadMore, isBusy, events.length]);
 
   useEffect(() => {
@@ -257,7 +264,7 @@ export function FeaturedEventsClient({
               <a
                 key={category}
                 href={`/?category=${encodeURIComponent(slug)}`}
-                className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-white/70 transition hover:border-brand-400/60 hover:text-white"
+                className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.25em] text-white/70 transition hover:border-brand-400/60 hover:text-white sm:py-1"
               >
                 {category}
               </a>

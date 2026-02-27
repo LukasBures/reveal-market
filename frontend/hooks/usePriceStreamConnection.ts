@@ -51,6 +51,7 @@ type StreamConnection = {
   wsDisabled: boolean;
   idleCloseTimer: ReturnType<typeof setTimeout> | null;
   notifyTimer: ReturnType<typeof setTimeout> | null;
+  reconnectTimer: ReturnType<typeof setTimeout> | null;
   lastNotifiedAt: number;
   cleanup?: () => void;
 };
@@ -141,6 +142,7 @@ function startConnection(marketId: string, tokenIds: string[] = []) {
     wsDisabled: !shouldUseStreamerWs(),
     idleCloseTimer: null,
     notifyTimer: null,
+    reconnectTimer: null,
     lastNotifiedAt: 0,
   };
 
@@ -153,6 +155,10 @@ function startConnection(marketId: string, tokenIds: string[] = []) {
     if (conn.notifyTimer) {
       clearTimeout(conn.notifyTimer);
       conn.notifyTimer = null;
+    }
+    if (conn.reconnectTimer) {
+      clearTimeout(conn.reconnectTimer);
+      conn.reconnectTimer = null;
     }
     if (conn.ws) {
       const closedState =
@@ -382,8 +388,14 @@ function startConnection(marketId: string, tokenIds: string[] = []) {
 
   function scheduleReconnect() {
     if (conn.cancelled) return;
+    if (conn.reconnectTimer) {
+      clearTimeout(conn.reconnectTimer);
+    }
     const delay = Math.min(conn.backoff, 30_000);
-    setTimeout(connectTransport, delay);
+    conn.reconnectTimer = setTimeout(() => {
+      conn.reconnectTimer = null;
+      connectTransport();
+    }, delay);
     conn.backoff = Math.min(conn.backoff * 2, 30_000);
   }
 

@@ -210,9 +210,9 @@ function HomeFiltersBar() {
   const hasActiveFilters = Boolean(parsedCategory) || Boolean(effectiveSearchQuery);
 
   return (
-    <div className="h-[48px] border-t border-white/5 bg-black/80 text-xs text-white/80 backdrop-blur">
-      <div className="mx-auto flex h-full w-full max-w-7xl items-center px-4">
-        <div className="flex w-full flex-wrap items-center gap-3">
+    <div className="border-t border-white/5 bg-black/80 text-xs text-white/80 backdrop-blur">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 py-2 sm:h-[48px] sm:flex-row sm:items-center sm:py-0">
+        <div className="flex w-full flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
           <div className="relative flex-1">
             <div className="pointer-events-none absolute left-0 top-0 h-full w-10 bg-gradient-to-r from-black/80 to-transparent opacity-90" />
             <div className="pointer-events-none absolute right-0 top-0 h-full w-10 bg-gradient-to-l from-black/80 to-transparent opacity-90" />
@@ -239,7 +239,7 @@ function HomeFiltersBar() {
                   <Link
                     key={category}
                     href={href}
-                    className={`relative snap-start rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] transition ${
+                    className={`relative snap-start rounded-full border px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.25em] transition sm:py-1 ${
                       isActive
                         ? "border-brand-400/80 bg-brand-400/20 text-white"
                         : "border-white/10 bg-white/5 text-white/80 hover:border-brand-400/60 hover:text-white hover:bg-white/10"
@@ -251,7 +251,7 @@ function HomeFiltersBar() {
               })}
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
             {[
               { label: "Trending", value: "trending", active: sortBy === "popularity" },
               { label: "Volume", value: "volume", active: sortBy === "totalVolume" },
@@ -272,7 +272,7 @@ function HomeFiltersBar() {
                 <Link
                   key={pill.value}
                   href={href}
-                  className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] transition ${
+                  className={`rounded-full border px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.25em] transition sm:py-1 ${
                     pill.active
                       ? "border-emerald-400/70 bg-emerald-400/20 text-emerald-100"
                       : "border-white/10 bg-white/5 text-white/70 hover:border-emerald-300/60 hover:text-white"
@@ -285,7 +285,7 @@ function HomeFiltersBar() {
             {hasActiveFilters ? (
               <Link
                 href="/"
-                className="rounded-full border border-red-400/60 bg-red-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-red-100 transition hover:border-red-300 hover:text-white hover:bg-red-500/20"
+                className="rounded-full border border-red-400/60 bg-red-500/10 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.25em] text-red-100 transition hover:border-red-300 hover:text-white hover:bg-red-500/20 sm:py-1"
               >
                 Clear
               </Link>

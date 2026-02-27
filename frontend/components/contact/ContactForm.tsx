@@ -16,6 +16,7 @@ const MAX_EMAIL_LENGTH = 100;
 type Turnstile = {
   render: (element: HTMLElement, options: Record<string, unknown>) => string;
   reset: (widgetId?: string) => void;
+  remove: (widgetId: string) => void;
 };
 
 export function ContactForm({ siteKey }: ContactFormProps) {
@@ -51,7 +52,10 @@ export function ContactForm({ siteKey }: ContactFormProps) {
     const renderTurnstile = () => {
       const turnstile = getTurnstile();
       if (!turnstile || !containerRef.current) return;
-      containerRef.current.innerHTML = "";
+      if (widgetRef.current != null) {
+        try { turnstile.remove(widgetRef.current); } catch { /* widget already removed */ }
+        widgetRef.current = null;
+      }
       widgetRef.current = turnstile.render(containerRef.current, {
         sitekey: siteKey,
         size: "flexible",

@@ -22,6 +22,12 @@ RUN apk del .build-deps
 
 # 2) Build stage – all NEXT_PUBLIC_* must be passed as build args
 FROM ${NODE_IMAGE} AS builder
+ARG APK_REPO_URL
+RUN --mount=type=cache,target=/var/cache/apk set -eux; \
+    ALPINE_VERSION="$(cut -d. -f1,2 /etc/alpine-release)"; \
+    echo "${APK_REPO_URL}/v${ALPINE_VERSION}/main" > /etc/apk/repositories; \
+    echo "${APK_REPO_URL}/v${ALPINE_VERSION}/community" >> /etc/apk/repositories; \
+    apk add --no-cache bash
 WORKDIR /app/frontend
 
 COPY --from=deps /app/frontend/node_modules ./node_modules

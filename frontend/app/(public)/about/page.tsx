@@ -39,7 +39,7 @@ export default function AboutPage() {
         </p>
         <div className="mt-10 grid gap-6 md:grid-cols-2">
           <div className="rounded-2xl border border-white/10 p-5">
-            <h3 className="text-xl font-semibold text-white">What’s live</h3>
+            <h2 className="text-xl font-semibold text-white">What’s live</h2>
             <ul className="mt-4 list-disc space-y-2 pl-5 text-slate-300">
               <li>FastAPI read/write surface with Redis-backed caching.</li>
               <li>Worker daemon syncing external feeds alongside on-chain deployments.</li>
@@ -47,7 +47,7 @@ export default function AboutPage() {
             </ul>
           </div>
           <div className="rounded-2xl border border-white/10 p-5">
-            <h3 className="text-xl font-semibold text-white">What’s next</h3>
+            <h2 className="text-xl font-semibold text-white">What’s next</h2>
             <ul className="mt-4 list-disc space-y-2 pl-5 text-slate-300">
               <li>Wallet-native onboarding with Wagmi + RainbowKit.</li>
               <li>Horizen and Polygon deployment presets.</li>

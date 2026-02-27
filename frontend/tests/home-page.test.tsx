@@ -19,22 +19,24 @@ vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return {
     ...actual,
-    fetchFeaturedEvents: vi.fn().mockResolvedValue([
-      {
-        eventId: "evt-1",
-        title: "Sample event",
-        category: "Politics",
-        markets: [
-          {
-            eventId: "evt-1",
-            title: "Sample market",
-            category: "Politics",
-            outcomes: ["Yes", "No"],
-            outcomePrices: [0.7, 0.3],
-          },
-        ],
-      },
-    ]),
+    fetchFeaturedEvents: vi.fn().mockResolvedValue({
+      data: [
+        {
+          eventId: "evt-1",
+          title: "Sample event",
+          category: "Politics",
+          markets: [
+            {
+              eventId: "evt-1",
+              title: "Sample market",
+              category: "Politics",
+              outcomes: ["Yes", "No"],
+              outcomePrices: [0.7, 0.3],
+            },
+          ],
+        },
+      ],
+    }),
   };
 });
 

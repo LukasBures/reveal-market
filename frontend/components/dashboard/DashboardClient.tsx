@@ -1050,7 +1050,7 @@ export function DashboardClient() {
                     type="button"
                     onClick={() => setStatusFilter(filter)}
                     className={clsx(
-                      "rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide transition",
+                      "rounded-full px-3 py-2 text-xs font-semibold uppercase tracking-wide transition sm:py-1",
                       statusFilter === filter
                         ? "bg-white/80 text-black shadow"
                         : "bg-white/10 text-white hover:bg-white/20"
@@ -1068,7 +1068,7 @@ export function DashboardClient() {
                   name="positionsSort"
                   value={sortBy}
                   onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-                  className="appearance-none rounded-full border border-white/20 bg-white/10 px-3 py-1 pr-8 text-xs font-semibold uppercase tracking-wide text-white shadow shadow-black/30 transition focus:border-white/60 focus:outline-none"
+                  className="appearance-none rounded-full border border-white/20 bg-white/10 px-3 py-2 pr-8 text-xs font-semibold uppercase tracking-wide text-white shadow shadow-black/30 transition focus:border-white/60 focus:outline-none sm:py-1"
                 >
                   <option value="recent">Most recent</option>
                   <option value="stake">Stake size</option>
@@ -1259,7 +1259,7 @@ export function DashboardClient() {
                             bundle ? (
                               <button
                                 type="button"
-                                className="rounded-full bg-emerald-500 px-3 py-1 font-semibold text-white hover:bg-emerald-400 disabled:cursor-not-allowed"
+                                className="rounded-full bg-emerald-500 px-3 py-2 font-semibold text-white hover:bg-emerald-400 disabled:cursor-not-allowed sm:py-1"
                                 disabled={
                                   chainMismatch ||
                                   claimingTickets.has(bundleKey)
@@ -1275,7 +1275,7 @@ export function DashboardClient() {
                             ) : (
                               <button
                                 type="button"
-                                className="rounded-full bg-emerald-500 px-3 py-1 font-semibold text-white hover:bg-emerald-400 disabled:cursor-not-allowed"
+                                className="rounded-full bg-emerald-500 px-3 py-2 font-semibold text-white hover:bg-emerald-400 disabled:cursor-not-allowed sm:py-1"
                                 disabled={
                                   chainMismatch ||
                                   preparingBundles.has(bundleKey)
@@ -1291,13 +1291,13 @@ export function DashboardClient() {
                             )
                           ) : null}
                           <Link
-                            className="rounded-full bg-white/10 px-3 py-1 text-white hover:bg-white/20"
+                            className="rounded-full bg-white/10 px-3 py-2 text-white hover:bg-white/20 sm:py-1"
                             href={`/events/${encodeURIComponent(p.market_id)}`}
                           >
                             View market
                           </Link>
                           <Link
-                            className="rounded-full bg-white/10 px-3 py-1 text-white hover:bg-white/20"
+                            className="rounded-full bg-white/10 px-3 py-2 text-white hover:bg-white/20 sm:py-1"
                             href={
                               p.merkle_root
                                 ? `/proofs?eventId=${encodeURIComponent(
@@ -1314,7 +1314,7 @@ export function DashboardClient() {
                           </Link>
                           {p.tx_hash && txHref ? (
                             <a
-                              className="rounded-full bg-white/10 px-3 py-1 text-white hover:bg-white/20"
+                              className="rounded-full bg-white/10 px-3 py-2 text-white hover:bg-white/20 sm:py-1"
                               href={txHref}
                               target="_blank"
                               rel="noreferrer"

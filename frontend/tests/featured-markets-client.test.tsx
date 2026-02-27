@@ -88,7 +88,7 @@ describe("FeaturedEventsClient", () => {
       ],
     };
     const fetchMock = vi.mocked(fetchFeaturedEvents);
-    fetchMock.mockResolvedValue([nextEvent]);
+    fetchMock.mockResolvedValue({ data: [nextEvent] });
 
     renderWithClient(
       <FeaturedEventsClient
@@ -124,24 +124,24 @@ describe("FeaturedEventsClient", () => {
   it("keeps the load more button when a short page arrives mid-pagination", async () => {
     const fetchMock = vi.mocked(fetchFeaturedEvents);
     fetchMock
-      .mockResolvedValueOnce(
-        Array.from({ length: 10 }, (_, idx) =>
+      .mockResolvedValueOnce({
+        data: Array.from({ length: 10 }, (_, idx) =>
           buildEvent({
             eventId: `evt-gap-${idx}`,
             title: `Gap Market ${idx}`,
             category: "Sports",
           }),
         ),
-      )
-      .mockResolvedValueOnce(
-        Array.from({ length: 5 }, (_, idx) =>
+      })
+      .mockResolvedValueOnce({
+        data: Array.from({ length: 5 }, (_, idx) =>
           buildEvent({
             eventId: `evt-gap-next-${idx}`,
             title: `Gap Market Next ${idx}`,
             category: "Politics",
           }),
         ),
-      );
+      });
 
     const initialBatch = Array.from({ length: 10 }, (_, idx) =>
       buildEvent({
@@ -182,15 +182,15 @@ describe("FeaturedEventsClient", () => {
     const fetchMock = vi.mocked(fetchFeaturedEvents);
     fetchMock.mockImplementation((limit = 0, _options) => {
       callCount += 1;
-      return Promise.resolve(
-        Array.from({ length: limit }, (_, idx) =>
+      return Promise.resolve({
+        data: Array.from({ length: limit }, (_, idx) =>
           buildEvent({
             eventId: `evt-auto-${callCount}-${idx}`,
             title: `Auto Market ${callCount}-${idx}`,
             category: "Auto",
           }),
         ),
-      );
+      });
     });
 
     class InstantIntersectionObserver {
@@ -242,15 +242,15 @@ describe("FeaturedEventsClient", () => {
     fetchMock.mockImplementation((limit = 0, _options) => {
       return new Promise((resolve) => {
         resolveFetch = () =>
-          resolve(
-            Array.from({ length: limit }, (_, idx) =>
+          resolve({
+            data: Array.from({ length: limit }, (_, idx) =>
               buildEvent({
                 eventId: `evt-lazy-${idx}`,
                 title: `Lazy Market ${idx}`,
                 category: "Politics",
               }),
             ),
-          );
+          });
       });
     });
 

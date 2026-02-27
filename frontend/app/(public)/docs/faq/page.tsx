@@ -7,7 +7,7 @@ import { buildFaqJsonLd, docsMetadata } from "@/lib/seo";
 export const metadata: Metadata = {
   ...docsMetadata("faq"),
   description:
-    "FAQ for Reveal Market: participation, settlement, and claims.",
+    "Quick answers on participation, quotes, settlement receipts, and claims so you can trade private prediction markets with confidence and clarity every day.",
   keywords: [
     "faq",
     "settlement",

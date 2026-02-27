@@ -247,7 +247,7 @@ export function SearchEventsClient({
         return;
       }
       try {
-        const data = await loadFeaturedEventsAction(pageSize, {
+        const { data } = await loadFeaturedEventsAction(pageSize, {
           searchQuery: effectiveQuery || undefined,
           status: nextStatus,
           category: nextCategory ?? undefined,
@@ -265,7 +265,7 @@ export function SearchEventsClient({
           options?.updateMode ?? "replace",
         );
       } catch (err) {
-        setError((err as Error).message || "Search failed. Please retry.");
+        setError(err instanceof Error ? err.message : "Search failed. Please retry.");
       }
     },
     [
@@ -327,7 +327,7 @@ export function SearchEventsClient({
     <div className="space-y-6">
       <div className="rounded-3xl border border-white/10 bg-slate-950/70 p-4 shadow-lg shadow-black/40">
         <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Search events</p>
-        <h1 className="mt-2 text-3xl font-semibold text-white">Find an event</h1>
+        <h2 className="mt-2 text-3xl font-semibold text-white">Find an event</h2>
         <p className="mt-2 text-sm text-slate-400">
           Results are cached per query and include resolved/finalized events. Active events stay prioritized on the homepage and category pages.
         </p>
@@ -365,7 +365,7 @@ export function SearchEventsClient({
               <button
                 type="button"
                 onClick={() => setCategoryFilter(null)}
-                className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] transition ${
+                className={`rounded-full px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] transition sm:py-1 ${
                   !categoryFilter ? "bg-white text-slate-900" : "bg-white/10 text-white/80 hover:bg-white/20"
                 }`}
               >
@@ -376,7 +376,7 @@ export function SearchEventsClient({
                   key={category}
                   type="button"
                   onClick={() => setCategoryFilter(category)}
-                  className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] transition ${
+                  className={`rounded-full px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] transition sm:py-1 ${
                     categoryFilter === category
                       ? "bg-brand-400 text-slate-900"
                       : "bg-white/10 text-white/80 hover:bg-white/20"
@@ -398,7 +398,7 @@ export function SearchEventsClient({
                     statusTouchedRef.current = true;
                     setStatusFilter(status.value);
                   }}
-                  className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] transition ${
+                  className={`rounded-full px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] transition sm:py-1 ${
                     statusFilter === status.value
                       ? "bg-white text-slate-900"
                       : "bg-white/10 text-white/80 hover:bg-white/20"
@@ -432,7 +432,7 @@ export function SearchEventsClient({
                         void runSearch(term, { updateMode: "push" });
                       });
                     }}
-                    className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-white/80 transition hover:bg-white/20"
+                    className="rounded-full bg-white/10 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-white/80 transition hover:bg-white/20 sm:py-1"
                   >
                     {term}
                   </button>

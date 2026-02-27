@@ -36,7 +36,10 @@ const SCHEMA_EVENT_STATUS_MAP: Record<string, string> = {
   voided: "https://schema.org/EventCancelled",
 };
 
-const loadEvent = cache(async (eventId: string) => fetchMarketByEventId(eventId));
+const loadEvent = cache(async (eventId: string) => {
+  const { data } = await fetchMarketByEventId(eventId);
+  return data;
+});
 
 const buildEventPath = (eventId: string): string => `/events/${encodeURIComponent(eventId)}`;
 
@@ -169,7 +172,7 @@ export type GenerateStaticParams = () => Promise<MarketDetailParams[]>;
 
 export const generateStaticParams: GenerateStaticParams = async () => {
   try {
-    const events = await fetchFeaturedEvents(12);
+    const { data: events } = await fetchFeaturedEvents(12);
     return events
       .map((event) => event.eventId)
       .filter((eventId): eventId is string => Boolean(eventId && eventId !== "unknown"))

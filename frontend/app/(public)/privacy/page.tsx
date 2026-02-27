@@ -33,7 +33,7 @@ export default function PrivacyPage() {
         </p>
         <div className="space-y-6">
           <div>
-            <p className="text-sm uppercase tracking-[0.3em] text-slate-400">Information We Collect</p>
+            <h2 className="text-sm uppercase tracking-[0.3em] text-slate-400">Information We Collect</h2>
             <ul className="mt-3 list-disc space-y-3 pl-6 text-slate-200">
               <li>
                 <strong>Operational and security logs.</strong> Server logs capture timestamps, request metadata, error
@@ -54,7 +54,7 @@ export default function PrivacyPage() {
             </ul>
           </div>
           <div>
-            <p className="text-sm uppercase tracking-[0.3em] text-slate-400">How We Use Data</p>
+            <h2 className="text-sm uppercase tracking-[0.3em] text-slate-400">How We Use Data</h2>
             <ul className="mt-3 list-disc space-y-3 pl-6 text-slate-200">
               <li>Provide, secure, and maintain the services.</li>
               <li>Monitor performance, troubleshoot issues, and prevent abuse.</li>
@@ -62,7 +62,7 @@ export default function PrivacyPage() {
             </ul>
           </div>
           <div>
-            <p className="text-sm uppercase tracking-[0.3em] text-slate-400">Data Sharing</p>
+            <h2 className="text-sm uppercase tracking-[0.3em] text-slate-400">Data Sharing</h2>
             <ul className="mt-3 list-disc space-y-3 pl-6 text-slate-200">
               <li>
                 We do not sell personal information.
@@ -78,14 +78,14 @@ export default function PrivacyPage() {
             </ul>
           </div>
           <div>
-            <p className="text-sm uppercase tracking-[0.3em] text-slate-400">Data Retention</p>
+            <h2 className="text-sm uppercase tracking-[0.3em] text-slate-400">Data Retention</h2>
             <p className="mt-3 text-slate-200">
               We keep data only as long as needed for operations, security, and compliance. Retention periods vary by
               data type and legal obligations.
             </p>
           </div>
           <div>
-            <p className="text-sm uppercase tracking-[0.3em] text-slate-400">Your Choices</p>
+            <h2 className="text-sm uppercase tracking-[0.3em] text-slate-400">Your Choices</h2>
             <ul className="mt-3 list-disc space-y-3 pl-6 text-slate-200">
               <li>Block cookies through your browser settings. See the Cookie Policy for details.</li>
               <li>Choose whether to share information through the contact form.</li>
@@ -93,7 +93,7 @@ export default function PrivacyPage() {
             </ul>
           </div>
           <div>
-            <p className="text-sm uppercase tracking-[0.3em] text-slate-400">International Use</p>
+            <h2 className="text-sm uppercase tracking-[0.3em] text-slate-400">International Use</h2>
             <p className="mt-3 text-slate-200">
               The services are available globally. By using them, you understand that data may be processed where our
               infrastructure providers operate.
