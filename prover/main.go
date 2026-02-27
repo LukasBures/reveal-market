@@ -202,7 +202,7 @@ func main() {
 	if bs := report.Hashes.BatchSize; bs > 0 && bs != settlementBatchSize {
 		logLine("error", "prover.batch_size.mismatch", map[string]any{
 			"circuit_batch_size": bs,
-			"expected":          settlementBatchSize,
+			"expected":           settlementBatchSize,
 		})
 		os.Exit(1)
 	} else if bs == 0 {
