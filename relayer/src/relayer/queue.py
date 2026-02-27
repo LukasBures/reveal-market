@@ -92,7 +92,7 @@ class TxQueue:
         with self._lock, self._connect() as conn:
             param = "%s" if self.use_postgres else "?"
             row = conn.execute(
-                f"SELECT MAX(nonce) AS max_nonce FROM jobs WHERE status = {param} AND nonce IS NOT NULL",
+                f"SELECT MAX(nonce) AS max_nonce FROM jobs WHERE status = {param} AND nonce IS NOT NULL",  # noqa: S608
                 ("complete",),
             ).fetchone()
             if row is None:

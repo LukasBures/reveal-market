@@ -1,10 +1,19 @@
 import asyncio
 import json
 import time
+from types import SimpleNamespace
 
 import pytest
 from relayer.queue import TxQueue
 from relayer.service import IngestDeliveryError, TxSendError
+
+
+def _stub_web3_account():
+    """Return minimal web3/account stubs for queue nonce validation."""
+    eth = SimpleNamespace(get_transaction_count=lambda _addr, _block="latest": 0)
+    web3 = SimpleNamespace(eth=eth)
+    account = SimpleNamespace(address="0x" + "0" * 40)
+    return web3, account
 
 
 class DummyService:
@@ -51,6 +60,7 @@ class ExplodingService:
     def __init__(self):
         self.called = asyncio.Event()
         self.tx_timeout_seconds = 1
+        self.web3, self.account = _stub_web3_account()
 
     async def commit(self, payload, **kwargs):
         self.called.set()

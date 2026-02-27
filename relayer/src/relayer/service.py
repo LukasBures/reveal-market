@@ -379,19 +379,19 @@ class RelayerService:
         return cast(TxParams, {**base, **fee_params})
 
     async def _build_fee_params(self, bump_factor: float = 1.0) -> dict[str, int]:
-        _MAX_FEE_WEI = 500 * 10**9  # 500 gwei absolute cap
+        max_fee_wei = 500 * 10**9  # 500 gwei absolute cap
 
         def _calc() -> dict[str, int]:
             try:
                 latest_block: BlockData = self.web3.eth.get_block("latest")
                 base_fee = latest_block.get("baseFeePerGas")
                 if base_fee is not None:
-                    priority_fee = min(int(self.web3.eth.max_priority_fee * bump_factor), _MAX_FEE_WEI)
-                    max_fee = min(int(base_fee * 2 * bump_factor + priority_fee), _MAX_FEE_WEI)
+                    priority_fee = min(int(self.web3.eth.max_priority_fee * bump_factor), max_fee_wei)
+                    max_fee = min(int(base_fee * 2 * bump_factor + priority_fee), max_fee_wei)
                     return {"maxPriorityFeePerGas": priority_fee, "maxFeePerGas": max_fee}
             except (Web3Exception, ValueError, TypeError) as err:
                 logger.warning("relayer.fee_params.fallback", error=str(err))
-            gas_price = min(int(self.web3.eth.gas_price * bump_factor), _MAX_FEE_WEI)
+            gas_price = min(int(self.web3.eth.gas_price * bump_factor), max_fee_wei)
             return {"gasPrice": gas_price}
 
         return await asyncio.to_thread(_calc)
