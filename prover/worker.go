@@ -113,13 +113,15 @@ func processWorkerQueueOnce(a *app, queuePath string) (bool, error) {
 			})
 			continue
 		}
+		proofCtx, proofCancel := context.WithTimeout(context.Background(), a.cfg.ProofTimeout)
 		_, err := a.generateProofResponse(
-			context.Background(),
+			proofCtx,
 			job.Payload,
 			job.RequestID,
 			-1,
 			job.RequestID,
 		)
+		proofCancel()
 		if err != nil {
 			job.Attempts++
 			if job.Attempts < workerMaxAttempts {

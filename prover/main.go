@@ -199,6 +199,18 @@ func main() {
 		})
 	}
 	report := requireArtifactsOrExit(cfg)
+	if bs := report.Hashes.BatchSize; bs > 0 && bs != settlementBatchSize {
+		logLine("error", "prover.batch_size.mismatch", map[string]any{
+			"circuit_batch_size": bs,
+			"expected":          settlementBatchSize,
+		})
+		os.Exit(1)
+	} else if bs == 0 {
+		logLine("warn", "prover.batch_size.missing", map[string]any{
+			"message":  "batchSize not declared in settlement_hashes.json; assuming correct",
+			"expected": settlementBatchSize,
+		})
+	}
 	verifiedCircuitHash := report.Hashes.CircuitHash
 	if cfg.ManualCircuitHash != "" {
 		matches, err := equalHex(cfg.ManualCircuitHash, verifiedCircuitHash)

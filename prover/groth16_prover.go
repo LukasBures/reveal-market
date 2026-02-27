@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math/big"
 	"os"
 	"os/exec"
@@ -377,7 +378,9 @@ func terminateProcessGroup(cmd *exec.Cmd) {
 	if cmd.Process == nil {
 		return
 	}
-	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
+		log.Printf("WARN | terminateProcessGroup: failed to kill process group %d: %v", cmd.Process.Pid, err)
+	}
 }
 
 func witnessMode(settings groth16Settings) string {
@@ -484,6 +487,10 @@ func readCgroupValue(paths []string) (uint64, bool) {
 }
 
 func requireCommand(name string) error {
+	cleaned := filepath.Clean(name)
+	if cleaned != name && !strings.Contains(name, "/") {
+		return fmt.Errorf("binary path contains suspicious components: %s", name)
+	}
 	if _, err := exec.LookPath(name); err != nil {
 		return fmt.Errorf("command not found: %s", name)
 	}
@@ -1000,7 +1007,7 @@ func fieldElement(value *big.Int) *big.Int {
 func mustBigInt(raw string) *big.Int {
 	num, ok := new(big.Int).SetString(raw, 10)
 	if !ok {
-		panic("invalid big integer constant")
+		log.Fatalf("FATAL | mustBigInt: invalid big integer constant: %q", raw)
 	}
 	return num
 }

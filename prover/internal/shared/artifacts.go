@@ -29,6 +29,7 @@ type CircuitHashes struct {
 	CircuitHash         string `json:"circuitHash"`
 	CircuitName         string `json:"circuitName"`
 	CircuitVersion      string `json:"circuitVersion"`
+	BatchSize           int    `json:"batchSize,omitempty"`
 }
 
 type ArtifactReport struct {

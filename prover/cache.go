@@ -58,9 +58,17 @@ func (c *proofCache) set(key string, resp settlementProofResponse) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if len(c.entries) >= c.maxEntries {
-		for k := range c.entries {
-			delete(c.entries, k)
-			break
+		// Evict the oldest entry to approximate LRU behaviour.
+		oldestKey := ""
+		oldestTime := time.Now().Add(time.Hour)
+		for k, v := range c.entries {
+			if v.storedAt.Before(oldestTime) {
+				oldestKey = k
+				oldestTime = v.storedAt
+			}
+		}
+		if oldestKey != "" {
+			delete(c.entries, oldestKey)
 		}
 	}
 	c.entries[key] = cacheEntry{response: resp, storedAt: time.Now().UTC()}
