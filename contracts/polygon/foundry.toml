@@ -6,7 +6,7 @@ remappings = [
     "@openzeppelin/=lib/openzeppelin-contracts/",
     "forge-std/=lib/forge-std/src/"
 ]
-solc = "0.8.25"
+solc = "0.8.33"
 optimizer = true
 optimizer_runs = 200
 evm_version = "cancun"
