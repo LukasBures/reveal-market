@@ -53,8 +53,8 @@ async def _acquire_settlement_submission_lock(
     key_prefix = str(runtime.settings.settlement_submission_lock_key_prefix).strip() or "settlement_submit_lock"
     lock_key = f"{key_prefix}:{market_id}"
     lock_token = secrets.token_hex(16)
-    _CLOCK_SKEW_BUFFER = 5
-    ttl_seconds = max(int(runtime.settings.settlement_submission_lock_ttl_seconds), 30) + _CLOCK_SKEW_BUFFER
+    clock_skew_buffer = 5
+    ttl_seconds = max(int(runtime.settings.settlement_submission_lock_ttl_seconds), 30) + clock_skew_buffer
     try:
         acquired = await _resolve_awaitable(redis_client.set(lock_key, lock_token, nx=True, ex=ttl_seconds))
     except Exception as exc:  # pragma: no cover - defensive
@@ -222,7 +222,7 @@ def _build_batch_roots_from_commitments(
     if not commitments:
         raise LockBatchDataError("no_commitments")
 
-    _MAX_LEAF_INDEX = BATCH_SIZE * 1024  # upper bound sanity check
+    max_leaf_index = BATCH_SIZE * 1024  # upper bound sanity check
 
     leaves_by_index: dict[int, bytes] = {}
     max_index = -1
@@ -232,7 +232,7 @@ def _build_batch_roots_from_commitments(
         leaf_index = int(commitment.leaf_index)
         if leaf_index < 0:
             raise LockBatchDataError("invalid_leaf_index")
-        if leaf_index > _MAX_LEAF_INDEX:
+        if leaf_index > max_leaf_index:
             raise LockBatchDataError("leaf_index_exceeds_maximum")
         if leaf_index in leaves_by_index:
             raise LockBatchDataError("duplicate_leaf_index")

@@ -7,7 +7,7 @@ from typing import TypeVar, cast
 T = TypeVar("T")
 
 
-async def resolve_awaitable(value: Awaitable[T] | T) -> T:
+async def resolve_awaitable(value: Awaitable[T] | T) -> T:  # noqa: UP047
     """Resolve a value that may or may not be awaitable.
 
     Redis async clients sometimes return ``Awaitable[T] | T`` depending on

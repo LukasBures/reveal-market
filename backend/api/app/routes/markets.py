@@ -211,8 +211,8 @@ async def list_markets(
     batch_offset = 0
     collected: list[schemas.MarketResponse] = []
     seen_groups: set[str] = set()
-    _MAX_PAGINATION_ROUNDS = 20
-    for _round in range(_MAX_PAGINATION_ROUNDS):
+    max_pagination_rounds = 20
+    for _round in range(max_pagination_rounds):
         batch = await crud.get_markets(
             session,
             status=status,
