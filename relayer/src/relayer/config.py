@@ -1,4 +1,5 @@
 import ipaddress
+import logging
 import os
 from dataclasses import dataclass
 
@@ -6,28 +7,50 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+_config_logger = logging.getLogger("reveal_market.relayer.config")
+
 IPAllowEntry = ipaddress.IPv4Address | ipaddress.IPv6Address | ipaddress.IPv4Network | ipaddress.IPv6Network
+
+# Env vars that should use the RM_ prefix for cross-service consistency.
+_RM_PREFIX_VARS = {"RPC_URL", "CHAIN_ID"}
+
+
+def _env_with_prefix(name: str) -> str | None:
+    """Read an env var, preferring RM_ prefix. Warn if only the legacy name is set."""
+    if name in _RM_PREFIX_VARS:
+        rm_name = f"RM_{name}"
+        rm_val = os.getenv(rm_name)
+        legacy_val = os.getenv(name)
+        if rm_val:
+            return rm_val
+        if legacy_val:
+            _config_logger.warning(
+                "deprecated env var %s; use %s instead", name, rm_name,
+            )
+            return legacy_val
+        return None
+    return os.getenv(name)
 
 
 def _require_env(name: str) -> str:
-    val = os.getenv(name)
+    val = _env_with_prefix(name)
     if not val:
         raise RuntimeError(f"Missing env var: {name}")
     return val
 
 
 def _int_env(name: str, default: int) -> int:
-    val = os.getenv(name)
+    val = _env_with_prefix(name)
     return int(val) if val else default
 
 
 def _float_env(name: str, default: float) -> float:
-    val = os.getenv(name)
+    val = _env_with_prefix(name)
     return float(val) if val else default
 
 
 def _bool_env(name: str, default: bool = False) -> bool:
-    val = os.getenv(name)
+    val = _env_with_prefix(name)
     if val is None:
         return default
     normalized = val.strip().lower()

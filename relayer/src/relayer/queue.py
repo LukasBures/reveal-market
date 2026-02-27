@@ -60,8 +60,45 @@ class TxQueue:
             return
         if self._worker and not self._worker.done():
             return
+        await self._validate_nonce_on_startup()
         self._stop.clear()
         self._worker = asyncio.create_task(self._run_async())
+
+    async def _validate_nonce_on_startup(self) -> None:
+        """Compare the last stored nonce with on-chain state and warn if desynchronized."""
+        try:
+            on_chain_nonce = await asyncio.to_thread(
+                self.service.web3.eth.get_transaction_count, self.service.account.address, "latest"
+            )
+            stored_nonce = self._get_last_stored_nonce()
+            if stored_nonce is not None and stored_nonce != on_chain_nonce:
+                logger.warning(
+                    "relayer.queue.nonce_desync",
+                    stored_nonce=stored_nonce,
+                    on_chain_nonce=on_chain_nonce,
+                    message="stored nonce differs from on-chain; new jobs will use on-chain nonce",
+                )
+            else:
+                logger.info(
+                    "relayer.queue.nonce_validated",
+                    on_chain_nonce=on_chain_nonce,
+                    stored_nonce=stored_nonce,
+                )
+        except (Web3Exception, ValueError, TimeoutError) as exc:
+            logger.warning("relayer.queue.nonce_validation_failed", error=str(exc))
+
+    def _get_last_stored_nonce(self) -> int | None:
+        """Return the highest nonce from completed jobs, or None if no jobs exist."""
+        with self._lock, self._connect() as conn:
+            param = "%s" if self.use_postgres else "?"
+            row = conn.execute(
+                f"SELECT MAX(nonce) AS max_nonce FROM jobs WHERE status = {param} AND nonce IS NOT NULL",
+                ("complete",),
+            ).fetchone()
+            if row is None:
+                return None
+            val = row["max_nonce"] if isinstance(row, dict) else row[0]
+            return int(val) if val is not None else None
 
     async def stop(self) -> None:
         self._stop.set()
@@ -123,6 +160,10 @@ class TxQueue:
 
     def _enqueue_sync(self, action: str, payload: Mapping[str, Any]) -> int:
         now = int(time.time())
+        if action == "commit":
+            expiry = payload.get("expiry")
+            if expiry is not None and int(expiry) < now:
+                raise ValueError("commit_already_expired")
         payload_json = json.dumps(payload)
         if len(payload_json.encode("utf-8")) > self.max_payload_bytes:
             raise ValueError("payload_too_large")
@@ -192,6 +233,18 @@ class TxQueue:
                     )
                 if reclaimed or deadlettered:
                     update_depth = True
+                    if reclaimed:
+                        logger.info(
+                            "relayer.queue.reclaimed_stale",
+                            count=reclaimed,
+                            reason="running_without_tx_hash",
+                        )
+                    if deadlettered:
+                        logger.warning(
+                            "relayer.queue.deadlettered_stale",
+                            count=deadlettered,
+                            reason="running_with_tx_hash",
+                        )
                 if job_id is None:
                     cur = conn.execute(
                         """
@@ -251,6 +304,18 @@ class TxQueue:
                 )
             if reclaimed or deadlettered:
                 update_depth = True
+                if reclaimed:
+                    logger.info(
+                        "relayer.queue.reclaimed_stale",
+                        count=reclaimed,
+                        reason="running_without_tx_hash",
+                    )
+                if deadlettered:
+                    logger.warning(
+                        "relayer.queue.deadlettered_stale",
+                        count=deadlettered,
+                        reason="running_with_tx_hash",
+                    )
             target_id: int | None = None
             if job_id is None:
                 row = conn.execute("SELECT id FROM jobs WHERE status = 'pending' ORDER BY id ASC LIMIT 1").fetchone()

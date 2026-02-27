@@ -139,6 +139,10 @@ class RelayerService:
         self._api_client_started_at = now
         return self._api_client
 
+    def _invalidate_api_client(self) -> None:
+        """Force the next ``_get_api_client`` call to create a fresh connection."""
+        self._api_client_started_at = None
+
     def _rpc_circuit_open(self) -> bool:
         open_now = time.time() < self.rpc_circuit_open_until
         try:
@@ -364,7 +368,7 @@ class RelayerService:
             raise TxSendError("rpc_circuit_open", kind="circuit", permanent=False)
         nonce = nonce_override
         if nonce is None:
-            nonce = await asyncio.to_thread(self.web3.eth.get_transaction_count, self.account.address, "pending")
+            nonce = await asyncio.to_thread(self.web3.eth.get_transaction_count, self.account.address, "latest")
         base: dict[str, int | str | Wei] = {
             "from": self.account.address,
             "nonce": nonce,
@@ -375,17 +379,19 @@ class RelayerService:
         return cast(TxParams, {**base, **fee_params})
 
     async def _build_fee_params(self, bump_factor: float = 1.0) -> dict[str, int]:
+        _MAX_FEE_WEI = 500 * 10**9  # 500 gwei absolute cap
+
         def _calc() -> dict[str, int]:
             try:
                 latest_block: BlockData = self.web3.eth.get_block("latest")
                 base_fee = latest_block.get("baseFeePerGas")
                 if base_fee is not None:
-                    priority_fee = int(self.web3.eth.max_priority_fee * bump_factor)
-                    max_fee = int(base_fee * 2 * bump_factor + priority_fee)
+                    priority_fee = min(int(self.web3.eth.max_priority_fee * bump_factor), _MAX_FEE_WEI)
+                    max_fee = min(int(base_fee * 2 * bump_factor + priority_fee), _MAX_FEE_WEI)
                     return {"maxPriorityFeePerGas": priority_fee, "maxFeePerGas": max_fee}
             except (Web3Exception, ValueError, TypeError) as err:
                 logger.warning("relayer.fee_params.fallback", error=str(err))
-            gas_price = int(self.web3.eth.gas_price * bump_factor)
+            gas_price = min(int(self.web3.eth.gas_price * bump_factor), _MAX_FEE_WEI)
             return {"gasPrice": gas_price}
 
         return await asyncio.to_thread(_calc)
@@ -779,6 +785,18 @@ class RelayerService:
                 api_status = "error"
                 issues.append("api_health_failed")
                 self._api_health_last_failure_ts = time.time()
+                self._invalidate_api_client()
+
+        nonce_on_chain: int | None = None
+        try:
+            nonce_on_chain = await asyncio.wait_for(
+                asyncio.to_thread(self.web3.eth.get_transaction_count, self.account.address, "latest"),
+                timeout=rpc_timeout,
+            )
+        except (TimeoutError, Web3Exception, ValueError) as err:
+            if "nonce_fetch_failed" not in issues:
+                issues.append("nonce_fetch_failed")
+            logger.warning("relayer.health.nonce_fetch_failed", error=str(err))
 
         status = "ok" if connected and not issues else "degraded"
         payload = {
@@ -790,6 +808,7 @@ class RelayerService:
             "latestBlock": block_number,
             "blockAgeSeconds": block_age,
             "relayerBalanceWei": relayer_balance,
+            "nonceOnChain": nonce_on_chain,
             "issues": issues,
             "connected": connected,
             "escrowOwner": escrow_owner,
@@ -879,6 +898,7 @@ class RelayerService:
             client = await self._get_api_client()
             resp = await client.post(f"{self.api_base_url}/internal/commitments/sync", json=body, headers=headers)
         except Exception as err:
+            self._invalidate_api_client()
             raise IngestDeliveryError(f"commit_ingest_request_failed:{err}") from err
         if resp.status_code >= 400:
             raise IngestDeliveryError(f"commit_ingest_http_{resp.status_code}")
@@ -938,6 +958,7 @@ class RelayerService:
             client = await self._get_api_client()
             resp = await client.post(f"{self.api_base_url}/internal/settlements/ingest", json=body, headers=headers)
         except Exception as err:
+            self._invalidate_api_client()
             raise IngestDeliveryError(f"settlement_ingest_request_failed:{err}") from err
         if resp.status_code >= 400:
             raise IngestDeliveryError(f"settlement_ingest_http_{resp.status_code}")
