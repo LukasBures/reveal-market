@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
-
 from app.config import Settings
 from app.main import _compute_cors_host_warnings
+from pydantic import ValidationError
 
 
 def test_compute_host_warnings_env_mismatch():

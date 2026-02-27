@@ -177,7 +177,10 @@ class Settings(BaseSettings):
         default=1000, ge=1, description="Maximum concurrent SSE/WS connections (process-local guard)"
     )
     max_connections_per_client: int = Field(
-        default=0, ge=0, description="Optional max concurrent SSE/WS connections per client (0 disables)"
+        default=5, ge=0, description="Max concurrent SSE/WS connections per client IP (0 disables)"
+    )
+    ws_max_messages_per_second: int = Field(
+        default=100, ge=1, le=10000, description="Max inbound WebSocket messages per second per connection"
     )
     sse_max_events: int = Field(
         default=0,

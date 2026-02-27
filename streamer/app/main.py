@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
 import os
 import threading
@@ -279,6 +280,30 @@ def create_app() -> FastAPI:
             return False
         return True
 
+    def _validate_ws_origin(ws: WebSocket) -> bool:
+        """Check the Origin header against the resolved CORS origins.
+
+        Uses ``cors_allow_origins`` (the closure variable built from all
+        presets) so WebSocket validation is consistent with the CORS
+        middleware.  In production, missing or non-matching origins are
+        rejected.  In non-prod environments, missing Origin is allowed
+        for local dev tooling (browsers always send it, but CLI tools
+        may not).
+        """
+        origin = ws.headers.get("origin")
+        is_prod = settings.environment.lower() in {"prod", "production"}
+
+        if not origin:
+            return not is_prod
+
+        if not cors_allow_origins:
+            return not is_prod
+        if "*" in cors_allow_origins:
+            return True
+
+        normalized = origin.rstrip("/")
+        return normalized in cors_allow_origins
+
     rl_buckets: dict[str, list[float]] = {}
     rl_last_cleanup = 0.0
 
@@ -480,6 +505,9 @@ def create_app() -> FastAPI:
     async def _fx_ws_stream(ws: WebSocket):
         access_token = ws.headers.get("x-access-token")
         if not _is_valid_access_token(access_token):
+            await ws.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+        if not _validate_ws_origin(ws):
             await ws.close(code=status.WS_1008_POLICY_VIOLATION)
             return
         client_id = ws.client.host if ws.client else "unknown"
@@ -838,7 +866,7 @@ def create_app() -> FastAPI:
         """Gate admin endpoints behind X-Ops-Secret when configured."""
         if not settings.ops_secret:
             return  # not configured — allow unauthenticated access (e.g. local dev)
-        if header_value != settings.ops_secret:
+        if not hmac.compare_digest(header_value or "", settings.ops_secret):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="invalid or missing ops secret")
 
     def _require_control_token(control_header: str | None) -> None:
@@ -847,7 +875,7 @@ def create_app() -> FastAPI:
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="control token not configured",
             )
-        if control_header != settings.control_token:
+        if not hmac.compare_digest(control_header or "", settings.control_token):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="invalid control token")
 
     def _require_cache() -> None:
@@ -895,6 +923,9 @@ def create_app() -> FastAPI:
         access_token = ws.headers.get("x-access-token")
         connection_acquired = False
         if not await _require_ws_access_token(ws):
+            return
+        if not _validate_ws_origin(ws):
+            await ws.close(code=status.WS_1008_POLICY_VIOLATION)
             return
         try:
             _acquire_connection(client_id, access_token)
@@ -1048,6 +1079,9 @@ def create_app() -> FastAPI:
             return
         access_token = websocket.headers.get("x-access-token")
         if not _is_valid_access_token(access_token):
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+        if not _validate_ws_origin(websocket):
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
         if not state.redis:
