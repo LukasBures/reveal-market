@@ -120,11 +120,17 @@ Commitments use **Poseidon hashing** (BN254) with `BATCH_SIZE=256` and `MERKLE_D
 - **Default chain**: Horizen Testnet, chain ID `2651420`, RPC `https://horizen-testnet.rpc.caldera.xyz/http`
 - **Python version**: 3.12 (exactly)
 - **Node version**: >=20.0.0, <21.0.0
+- **Go version**: 1.24.0 (prover)
+- **Solidity**: solc 0.8.33, optimizer 200 runs, EVM `cancun`, `via_ir` enabled
+- **Foundry fuzz**: 32 runs locally, 256 in CI (`FOUNDRY_FUZZ_RUNS`)
 - **Package manager (Python)**: `uv` with per-service virtual envs at `<service>/.venv`
+- **Ruff**: pinned to 0.15.1 across all hooks and configs
 - **Line length**: 120 chars (Python); ruff enforces E/F/W/B/I/N/UP/S rules; banned `requests` → use `httpx.AsyncClient`
 - **Async**: all Python services use `asyncio_mode = auto`; pytest workers default to `cpu_count - 2`
 - **Logging format**: `timestamp | LEVEL | logger | file:line | event | request_id` — maintain this across all services
 - **Prover**: refuses to start if artifacts under `prover/circuits/build` are missing; seed from `prover/artifacts` or `PROVER_ARTIFACTS_URL`
+- **Database drivers**: `RM_DATABASE_URL` (psycopg2, used by Alembic migrations) and `RM_DATABASE_ASYNC_URL` (asyncpg, used at runtime); API runs migrations on startup when `RM_RUN_MIGRATIONS_ON_STARTUP=true`
+- **Environment**: `.env.example` (500+ lines) documents all env vars across services; copy to `.env` and fill in secrets
 
 ### Security Headers
 
@@ -138,7 +144,8 @@ All services expose `/metrics` (Prometheus) and `/health`. The unified logging f
 
 - **Before large tasks**: review per-service `TODO.md` files (`backend/TODO.md`, `frontend/TODO.md`, `contracts/zen/TODO.md`, etc.) for prioritized work.
 - **Shared helpers first**: prefer `backend/shared/onchain/`, `lib/seo.ts`, existing cache helpers over new abstractions.
-- **Pre-commit hooks** run ruff format+lint, mypy (per service), gofmt, and forge gas snapshots automatically. Run `make format` before committing.
+- **Pre-commit hooks** run ruff format+lint, mypy (per service), gofmt, and forge gas snapshots automatically. Run `make format` before committing. Gas snapshot hook skips when no contract files changed.
+- **Pytest markers**: `slow`, `integration`, `unit`, `live` (requires network). All test functions must start with `test_`.
 - **OpenAPI snapshot test** (`backend/api/tests/test_openapi_snapshot.py`) runs as part of `make test-backend` — update the snapshot when changing API shapes.
 - **Frontend API/build**: tests and builds only enforce backend `/health` when `FRONTEND_REQUIRE_API=true`; otherwise they warn and proceed.
 - **CORS in streamer**: set `STREAMER_CORS_ALLOW_ORIGINS` to the frontend origin; wildcard CORS is disallowed in prod (`RM_ENVIRONMENT=prod`).
