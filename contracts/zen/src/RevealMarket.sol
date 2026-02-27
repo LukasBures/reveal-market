@@ -111,9 +111,9 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     uint256 private currentBatchProofEpoch;
 
     event Committed(uint256 indexed ticketId, bytes32 commitment, uint256 totalEscrow);
-    event Locked(bytes32 commitmentsRoot, uint256 ticketCount);
+    event Locked(bytes32 indexed commitmentsRoot, uint256 ticketCount);
     event ResultPosted(uint256 indexed winningOutcomeId);
-    event Settled(uint256 totalLiability, uint256 rakeAmount, uint256 protocolTopUp, uint256 poolYes, uint256 poolNo);
+    event Settled(uint256 indexed totalLiability, uint256 rakeAmount, uint256 protocolTopUp, uint256 poolYes, uint256 poolNo);
     event Claimed(address indexed relayer, address indexed user, uint256 indexed ticketId, uint256 amount);
     event ClaimDeadlineExtended(uint256 newDeadline);
     event ClaimsSwept(address indexed recipient, uint256 amount);
