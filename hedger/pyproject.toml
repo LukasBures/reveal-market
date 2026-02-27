@@ -1,6 +1,6 @@
 [project]
 name = "reveal-market-hedger"
-version = "0.4.0"
+version = "0.5.0"
 description = "Off-chain hedger coordinating RevealMarket exposure, liquidity, and settlements."
 readme = "README.md"
 authors = [{ name = "Reveal Market", email = "dev@revealmarket.xyz" }]

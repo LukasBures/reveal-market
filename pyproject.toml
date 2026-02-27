@@ -1,6 +1,6 @@
 [project]
 name = "reveal-market"
-version = "0.4.0"
+version = "0.5.0"
 description = "Reveal Market delivers private, commit-and-reveal prediction markets with live odds streaming, signed quotes, and end-to-end settlement built for institutional-grade trading."
 authors = [
     {name = "Lukas Bures, Ph.D.",email = "me@lukasbures.com"}
@@ -75,14 +75,8 @@ module = ["app.local_logging", "app.logging_config"]
 ignore_errors = true
 
 [[tool.mypy.overrides]]
-module = ["streamer.*"]
-ignore_errors = true
-follow_imports = "skip"
-
-[[tool.mypy.overrides]]
-module = ["streamer.app.*"]
-ignore_errors = true
-follow_imports = "skip"
+module = ["streamer.*", "streamer.app.*"]
+ignore_missing_imports = true
 
 [build-system]
 requires = ["hatchling>=1.8.0"]

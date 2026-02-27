@@ -962,7 +962,7 @@ wheels = [
 
 [[package]]
 name = "reveal-market-worker"
-version = "0.4.0"
+version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },
