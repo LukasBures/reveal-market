@@ -115,7 +115,7 @@ class ExposureLedger:
             market.hedged_usd = hedged_usd
             market.last_update = last_update
             self._markets[market_id] = market
-            update_exposure_metrics(market_id, float(yes_usd), float(no_usd), market.coverage_ratio)
+            update_exposure_metrics(market_id, float(yes_usd), float(no_usd), float(market.coverage_ratio))
 
     async def set_float_balance(self, balance_zen: Decimal) -> None:
         async with self._lock:
@@ -147,7 +147,9 @@ class ExposureLedger:
                 float_balance_zen=self._float_balance_zen,
             )
             instruction = self._plan_instruction(market, commit=commit)
-            update_exposure_metrics(commit.market_id, float(market.yes_usd), float(market.no_usd), coverage_ratio)
+            update_exposure_metrics(
+                commit.market_id, float(market.yes_usd), float(market.no_usd), float(coverage_ratio)
+            )
 
         if self.repository and persist:
             await self.repository.record_commit(commit, stake_usd, idempotency_key=idempotency_key)
@@ -260,7 +262,9 @@ class ExposureLedger:
             if not market:
                 return None
             market.register_fill(size_usd, is_unwind=is_unwind)
-            update_exposure_metrics(market_id, float(market.yes_usd), float(market.no_usd), market.coverage_ratio)
+            update_exposure_metrics(
+                market_id, float(market.yes_usd), float(market.no_usd), float(market.coverage_ratio)
+            )
             return market.snapshot()
 
     async def snapshot(self) -> list[MarketExposureSnapshot]:

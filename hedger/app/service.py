@@ -689,7 +689,10 @@ class HedgerService:
                     )
                 except Exception as db_exc:  # pragma: no cover - best-effort persistence
                     log_event(
-                        logger, logging.DEBUG, event="hedger.settlement.audit_persist_failed", error=str(db_exc),
+                        logger,
+                        logging.DEBUG,
+                        "hedger.settlement.audit_persist_failed",
+                        str(db_exc),
                     )
                 return {"status": "rejected", "reason": "settlement_failed", "error": str(exc)}
             await self.repository.record_settlement(
