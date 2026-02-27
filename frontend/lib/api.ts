@@ -132,7 +132,6 @@ const humanizeGroupSlug = (slug?: string | null): string | undefined => {
     .join(" ");
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic API response; typed via MarketDetail return
 const mapMarketDetailPayload = (payload: any, eventId: string): MarketDetail => {
   const eventIdValue = coerceId(payload.event_id ?? payload.eventId, eventId);
   const resolutionSource = payload.resolution ?? payload.extra_data?.resolution;
