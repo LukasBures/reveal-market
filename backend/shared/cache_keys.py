@@ -14,6 +14,11 @@ CLOB_PRICES_HISTORY_PREFIX = f"{CACHE_VERSION}:clob:prices-history"
 EVENTS_COUNT_PREFIX = f"{CACHE_VERSION}:events:count"
 
 
+def _escape_pipe(value: str) -> str:
+    """Escape pipe characters in cache key segments to prevent key collisions."""
+    return value.replace("|", "%7C")
+
+
 def markets_list_cache_key(
     status: str | None,
     category: str | None,
@@ -29,17 +34,17 @@ def markets_list_cache_key(
 ) -> str:
     """Build the cache key used for /markets list responses."""
 
-    normalized_search = (search or "").strip().lower() or "*"
+    normalized_search = _escape_pipe((search or "").strip().lower() or "*")
     parts = [
-        f"status={status or '*'}",
-        f"category={category or '*'}",
-        f"oracle={oracle or '*'}",
+        f"status={_escape_pipe(status or '*')}",
+        f"category={_escape_pipe(category or '*')}",
+        f"oracle={_escape_pipe(oracle or '*')}",
         f"search={normalized_search}",
         f"limit={limit}",
         f"offset={offset}",
     ]
     if order_by:
-        parts.append(f"order_by={order_by}")
+        parts.append(f"order_by={_escape_pipe(order_by)}")
     if trending is not None:
         parts.append(f"trending={int(bool(trending))}")
     if featured is not None:
@@ -64,7 +69,7 @@ def category_cache_key(
 
 
 def suggest_cache_key(query: str, limit: int) -> str:
-    normalized = (query or "*").strip().lower() or "*"
+    normalized = _escape_pipe((query or "*").strip().lower() or "*")
     return f"{SUGGEST_PREFIX}:{normalized}|limit={limit}"
 
 
@@ -115,11 +120,11 @@ def events_count_cache_key(
     search: str | None,
     featured: bool | None = None,
 ) -> str:
-    normalized_search = (search or "").strip().lower() or "*"
+    normalized_search = _escape_pipe((search or "").strip().lower() or "*")
     parts = [
-        f"status={status or '*'}",
-        f"category={category or '*'}",
-        f"oracle={oracle or '*'}",
+        f"status={_escape_pipe(status or '*')}",
+        f"category={_escape_pipe(category or '*')}",
+        f"oracle={_escape_pipe(oracle or '*')}",
         f"search={normalized_search}",
     ]
     if featured is not None:

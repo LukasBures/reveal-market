@@ -59,6 +59,6 @@ def decode_known_logs(web3: Web3, receipt: Any) -> list[dict[str, Any]]:
                 }
             )
         except Exception as exc:
-            _LOGGER.debug("Failed to decode log", exc_info=exc)
+            _LOGGER.warning("Failed to decode log", exc_info=exc)
             continue
     return decoded

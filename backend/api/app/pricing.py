@@ -14,6 +14,7 @@ from app.schemas import FxQuoteResponse, PricingQuoteResponse
 
 MAX_PERCENT = Decimal("0.25")
 _FX_CACHE: dict[str, Decimal | bool | float | str | None] = {}
+_FX_CACHE_LOCK = asyncio.Lock()
 
 
 @dataclass
@@ -240,23 +241,26 @@ async def fetch_fx_quote(settings: Settings, *, use_cache_on_error: bool = True)
         if raw is None:
             raise ValueError("FX feed response missing zen_usd/price")
         zen_usd = raw
-        _FX_CACHE.update(
-            {
-                "zen_usd": zen_usd,
-                "stale": stale,
-                "expires_at": now + cache_ttl,
-                "received_at": received_at.isoformat() if received_at else None,
-            }
-        )
+        async with _FX_CACHE_LOCK:
+            _FX_CACHE.update(
+                {
+                    "zen_usd": zen_usd,
+                    "stale": stale,
+                    "expires_at": now + cache_ttl,
+                    "received_at": received_at.isoformat() if received_at else None,
+                }
+            )
         return FxQuoteResponse(zen_usd=zen_usd, stale=stale, received_at=received_at)
     except (httpx.HTTPError, ValueError, InvalidOperation, TypeError) as exc:
         if use_cache_on_error and "zen_usd" in _FX_CACHE:
-            _FX_CACHE.update({"stale": True, "expires_at": now + cache_ttl})
-            fetch_fx_quote._cache_state = dict(_FX_CACHE)  # type: ignore[attr-defined]
-            cached_ts = _FX_CACHE.get("received_at")
+            async with _FX_CACHE_LOCK:
+                _FX_CACHE.update({"stale": True, "expires_at": now + cache_ttl})
+                fetch_fx_quote._cache_state = dict(_FX_CACHE)  # type: ignore[attr-defined]
+                cached_ts = _FX_CACHE.get("received_at")
+                cached_zen = Decimal(str(_FX_CACHE["zen_usd"]))
             parsed_ts = datetime.fromisoformat(str(cached_ts)) if cached_ts else None
             return FxQuoteResponse(
-                zen_usd=Decimal(str(_FX_CACHE["zen_usd"])),
+                zen_usd=cached_zen,
                 stale=True,
                 received_at=parsed_ts,
             )
@@ -264,15 +268,16 @@ async def fetch_fx_quote(settings: Settings, *, use_cache_on_error: bool = True)
         if not use_cache_on_error:
             raise exc
 
-        _FX_CACHE.update(
-            {
-                "zen_usd": Decimal(str(settings.fx_fallback_price)),
-                "stale": True,
-                "expires_at": now + cache_ttl,
-                "received_at": datetime.now(tz=UTC).isoformat(),
-            }
-        )
-        fetch_fx_quote._cache_state = dict(_FX_CACHE)  # type: ignore[attr-defined]
+        async with _FX_CACHE_LOCK:
+            _FX_CACHE.update(
+                {
+                    "zen_usd": Decimal(str(settings.fx_fallback_price)),
+                    "stale": True,
+                    "expires_at": now + cache_ttl,
+                    "received_at": datetime.now(tz=UTC).isoformat(),
+                }
+            )
+            fetch_fx_quote._cache_state = dict(_FX_CACHE)  # type: ignore[attr-defined]
         return FxQuoteResponse(
             zen_usd=Decimal(str(settings.fx_fallback_price)),
             stale=True,
@@ -311,5 +316,13 @@ def build_quote_audit_payload(
 def fetch_fx_price_sync(settings: Settings) -> tuple[Decimal | None, bool, datetime | None]:
     """Synchronous wrapper around the async FX fetcher to preserve legacy call sites."""
 
+    try:
+        asyncio.get_running_loop()
+        raise RuntimeError(
+            "fetch_fx_price_sync cannot be called from an async context; use 'await fetch_fx_quote(settings)' instead"
+        )
+    except RuntimeError as exc:
+        if "no current event loop" not in str(exc) and "no running event loop" not in str(exc):
+            raise
     fx_quote = asyncio.run(fetch_fx_quote(settings))
     return fx_quote.zen_usd, fx_quote.stale, fx_quote.received_at

@@ -23,7 +23,16 @@ from app.logging_config import setup_logging
 from app.metrics import classify_latency_bucket
 from app.metrics_registry import CACHE_REQUESTS, DB_QUERY_COUNT, DB_QUERY_MAX_MS, DB_QUERY_TIME_MS, REQUEST_LATENCY
 from app.rate_limit import RateLimiter, RateLimitMiddleware
-from app.runtime import instrumentator, is_production, load_shed_state, logger, preset, sanitized_config, settings
+from app.runtime import (
+    instrumentator,
+    is_production,
+    load_shed_state,
+    logger,
+    preset,
+    request_metrics,
+    sanitized_config,
+    settings,
+)
 from app.security import SecurityHeadersMiddleware
 from app.services.cache_client import get_cache_client
 from app.utils.requests import estimate_response_bytes, extract_cache_metadata
@@ -194,8 +203,6 @@ def _log_request_completion(
             "cache_key": cache_meta.get("cache_key"),
         },
     )
-    from app.runtime import request_metrics  # local to avoid cycle
-
     request_metrics.record(
         status_code=response.status_code,
         duration_ms=duration_ms,
@@ -270,7 +277,7 @@ def attach_request_context(app: FastAPI) -> None:
                 REQUEST_LATENCY.labels(
                     method=request.method, path=metric_path, status_code=str(exc.status_code)
                 ).observe(duration_ms / 1000.0)
-            except Exception as metric_exc:  # pragma: no cover
+            except Exception as metric_exc:  # pragma: no cover - defensive metrics guard
                 log_event(
                     logger,
                     logging.DEBUG,
@@ -292,8 +299,6 @@ def attach_request_context(app: FastAPI) -> None:
                 cache_source=cache_meta["cache_source"],
                 cache_key=cache_meta["cache_key"],
             )
-            from app.runtime import request_metrics  # local import to prevent cycles
-
             request_metrics.record(
                 status_code=exc.status_code,
                 duration_ms=duration_ms,
@@ -310,7 +315,7 @@ def attach_request_context(app: FastAPI) -> None:
                 REQUEST_LATENCY.labels(method=request.method, path=metric_path, status_code="500").observe(
                     duration_ms / 1000.0
                 )
-            except Exception as metric_exc:  # pragma: no cover
+            except Exception as metric_exc:  # pragma: no cover - defensive metrics guard
                 log_event(
                     logger,
                     logging.DEBUG,
@@ -332,8 +337,6 @@ def attach_request_context(app: FastAPI) -> None:
                 cache_source=cache_meta["cache_source"],
                 cache_key=cache_meta["cache_key"],
             )
-            from app.runtime import request_metrics  # local import to prevent cycles
-
             request_metrics.record(
                 status_code=500,
                 duration_ms=duration_ms,

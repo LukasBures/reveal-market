@@ -106,7 +106,7 @@ def _parse_json_list(value: Any) -> list[Any]:
         try:
             parsed = json.loads(value)
             return parsed if isinstance(parsed, list) else []
-        except Exception:
+        except (json.JSONDecodeError, TypeError, ValueError):
             return []
     return []
 
@@ -131,7 +131,15 @@ async def _enqueue_claim_proof_jobs(
         rows = await repository_async.list_commitments_with_settlement(
             session, wallet, market_filter=None, winning_only=True
         )
-    except Exception:
+    except Exception as exc:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="trade.claim.db_query_failed",
+            message="failed to query commitments for claim enqueue",
+            wallet=wallet,
+            error=str(exc),
+        )
         return
     pending_lookup = {market_id for market_id in pending_markets}
     for _commitment, market, _settlement in rows:
@@ -1599,7 +1607,7 @@ async def _maybe_backfill_settlement(session: AsyncSession, market: models.Marke
             phase_value,
             _deadline,
             winning_outcome_id,
-        ) = await contract.functions.marketState().call()  # type: ignore[assignment]
+        ) = await contract.functions.marketState().call()
         settled = int(phase_value) == 2  # Phase.Settled
         total_escrow = await contract.functions.totalEscrow().call()
         total_liability = await contract.functions.totalLiability().call()

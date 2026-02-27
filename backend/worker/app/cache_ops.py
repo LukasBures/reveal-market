@@ -52,15 +52,14 @@ async def invalidate_cache_tags(redis_client: Redis | None, summary: SyncSummary
                     removed = await shared_cache.invalidate_tag(redis_client, tag)
                     report.record(tag, removed)
                 except (RedisError, RuntimeError, ValueError) as exc:  # pragma: no cover - defensive
-                    if logger.isEnabledFor(logging.DEBUG):
-                        log_event(
-                            logger,
-                            logging.DEBUG,
-                            event="worker.cache.invalidate_failed",
-                            message="failed to invalidate cache tag",
-                            tag=tag,
-                            error=str(exc),
-                        )
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        event="worker.cache.invalidate_failed",
+                        message="failed to invalidate cache tag",
+                        tag=tag,
+                        error=str(exc),
+                    )
 
         await asyncio.gather(*(_invalidate_async(tag) for tag in tags))
 

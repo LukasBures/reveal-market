@@ -7,7 +7,7 @@ import json
 import logging
 import secrets
 import time
-from collections.abc import Awaitable, Sequence
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -16,6 +16,7 @@ from eth_typing import ChecksumAddress, HexStr
 from redis.asyncio import Redis
 from shared import models as shared_models
 from shared import repository_async as shared_repository
+from shared.async_utils import resolve_awaitable as _resolve_awaitable
 from shared.logging import log_event
 from shared.onchain import get_async_web3, to_checksum
 from shared.onchain.abi import REVEAL_MARKET_ABI
@@ -43,12 +44,6 @@ return 0
 """
 
 
-async def _resolve_awaitable(value: Awaitable[Any] | Any) -> Any:
-    if asyncio.iscoroutine(value):
-        return await value
-    return value
-
-
 async def _acquire_settlement_submission_lock(
     redis_client: Redis | None,
     market_id: int,
@@ -58,7 +53,8 @@ async def _acquire_settlement_submission_lock(
     key_prefix = str(runtime.settings.settlement_submission_lock_key_prefix).strip() or "settlement_submit_lock"
     lock_key = f"{key_prefix}:{market_id}"
     lock_token = secrets.token_hex(16)
-    ttl_seconds = max(int(runtime.settings.settlement_submission_lock_ttl_seconds), 30)
+    _CLOCK_SKEW_BUFFER = 5
+    ttl_seconds = max(int(runtime.settings.settlement_submission_lock_ttl_seconds), 30) + _CLOCK_SKEW_BUFFER
     try:
         acquired = await _resolve_awaitable(redis_client.set(lock_key, lock_token, nx=True, ex=ttl_seconds))
     except Exception as exc:  # pragma: no cover - defensive
@@ -226,6 +222,8 @@ def _build_batch_roots_from_commitments(
     if not commitments:
         raise LockBatchDataError("no_commitments")
 
+    _MAX_LEAF_INDEX = BATCH_SIZE * 1024  # upper bound sanity check
+
     leaves_by_index: dict[int, bytes] = {}
     max_index = -1
     for commitment in commitments:
@@ -234,6 +232,8 @@ def _build_batch_roots_from_commitments(
         leaf_index = int(commitment.leaf_index)
         if leaf_index < 0:
             raise LockBatchDataError("invalid_leaf_index")
+        if leaf_index > _MAX_LEAF_INDEX:
+            raise LockBatchDataError("leaf_index_exceeds_maximum")
         if leaf_index in leaves_by_index:
             raise LockBatchDataError("duplicate_leaf_index")
         leaf_hex = commitment.leaf or commitment.ticket_hash
@@ -291,19 +291,31 @@ async def _fetch_onchain_snapshot(web3: AsyncWeb3, market_address: str) -> dict[
     """Return settlement-related state from the on-chain market contract."""
 
     contract = _build_market_contract(web3, market_address)
+    # Batch the initial RPC calls to reduce sequential round trips
+    (
+        market_state_result,
+        total_escrow,
+        total_liability,
+        pool_total_yes,
+        pool_total_no,
+        rake_bps,
+        circuit_hash,
+    ) = await asyncio.gather(
+        contract.functions.marketState().call(),
+        contract.functions.totalEscrow().call(),
+        contract.functions.totalLiability().call(),
+        contract.functions.poolTotalYes().call(),
+        contract.functions.poolTotalNo().call(),
+        contract.functions.rakeBps().call(),
+        contract.functions.circuitHash().call(),
+    )
     (
         commitments_root,
         next_ticket_id,
         phase_value,
         commit_deadline,
         winning_outcome_id,
-    ) = await contract.functions.marketState().call()
-    total_escrow = await contract.functions.totalEscrow().call()
-    total_liability = await contract.functions.totalLiability().call()
-    pool_total_yes = await contract.functions.poolTotalYes().call()
-    pool_total_no = await contract.functions.poolTotalNo().call()
-    rake_bps = await contract.functions.rakeBps().call()
-    circuit_hash = await contract.functions.circuitHash().call()
+    ) = market_state_result
     try:
         oracle = await contract.functions.oracle().call()
     except Exception:

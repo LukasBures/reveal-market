@@ -386,8 +386,7 @@ async def delete_prefix(client: Redis | None, prefix: str) -> None:
 async def iter_scan(client: Redis, pattern: str) -> AsyncIterator[str]:
     """Iterate over keys matching pattern."""
 
-    iterator = cast(AsyncIterator[str], client.scan_iter(match=pattern))
-    async for key in iterator:
+    async for key in client.scan_iter(match=pattern):  # type: ignore[union-attr]
         yield key
 
 
@@ -438,7 +437,7 @@ async def invalidate_tag(client: Redis | None, tag: str) -> int:
     storage_key = _tag_storage_key(tag)
     removed = 0
     try:
-        iterator = cast(AsyncIterator[str], client.sscan_iter(storage_key, count=512))
+        iterator = client.sscan_iter(storage_key, count=512)  # type: ignore[union-attr]
         batch: list[str] = []
         async for member in iterator:
             if not member:

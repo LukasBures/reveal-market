@@ -15,8 +15,10 @@ router = APIRouter(tags=["debug"])
 
 def _verify_internal_secret(secret_header: str | None) -> None:
     secret = settings.internal_api_secret.get_secret_value() if settings.internal_api_secret else None
-    if not secret or secret_header != secret:
-        raise HTTPException(status_code=401, detail="invalid_internal_secret")
+    if not secret:
+        raise HTTPException(status_code=403, detail={"error": "internal_api_secret_not_configured"})
+    if secret_header != secret:
+        raise HTTPException(status_code=401, detail={"error": "invalid_internal_secret"})
 
 
 @contextmanager

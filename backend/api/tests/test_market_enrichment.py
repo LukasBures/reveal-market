@@ -152,8 +152,20 @@ def test_resolution_endpoint_returns_cached_isoformat(client, db_session):
     condition_id = "0x" + "a" * 64
     checked_at = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     block_ts = checked_at + timedelta(hours=1)
+    market = _make_market(
+        "evt-resolution",
+        "Resolution Market",
+        condition_id=condition_id.lower(),
+    )
+    db_session.add(market)
+    db_session.flush()
+    market_id = db_session.execute(
+        select(models.Market.id).where(models.Market.event_id == "evt-resolution")
+    ).scalar_one()
     resolution = models.Resolution(
         condition_id=condition_id.lower(),
+        event_id="evt-resolution",
+        market_id=market_id,
         source="conditional_tokens",
         resolved=True,
         payouts=[0, 1],
@@ -165,16 +177,8 @@ def test_resolution_endpoint_returns_cached_isoformat(client, db_session):
         block_timestamp=block_ts,
         checked_at=checked_at,
     )
-    market = _make_market(
-        "evt-resolution",
-        "Resolution Market",
-        condition_id=condition_id.lower(),
-    )
-    db_session.add_all([resolution, market])
+    db_session.add(resolution)
     db_session.flush()
-    market_id = db_session.execute(
-        select(models.Market.id).where(models.Market.event_id == "evt-resolution")
-    ).scalar_one()
     db_session.add_all(
         [
             shared_models.MarketOutcome(market_id=market_id, outcome_id=0, label="No", price=0.4),

@@ -119,7 +119,12 @@ class ProverClient:
         return headers or None
 
     def generate_settlement_proof(self, request: SettlementProofRequest | dict[str, Any]) -> SettlementProofResponse:
-        """Submit a proof job and synchronously retrieve the receipt."""
+        """Submit a proof job and synchronously retrieve the receipt.
+
+        .. deprecated::
+            This sync method blocks the event loop. Use ``AsyncProverClient.generate_settlement_proof`` instead.
+            Kept for backwards-compatible test helpers.
+        """
 
         url = f"{self.base_url}/api/v1/proofs/settlement"
         if isinstance(request, SettlementProofRequest):

@@ -28,6 +28,8 @@ def run_migrations_offline() -> None:
     url = context.get_x_argument(as_dictionary=True).get("db_url") or config.get_main_option("sqlalchemy.url")
     if not url:
         url = os.getenv("RM_DATABASE_URL", "")
+        if not url:
+            raise RuntimeError("RM_DATABASE_URL is required for migrations (set env var or pass --x db_url=...)")
         config.set_main_option("sqlalchemy.url", url)
     context.configure(
         url=url,
@@ -43,7 +45,10 @@ def run_migrations_offline() -> None:
 def run_migrations_online() -> None:
     configuration = config.get_section(config.config_ini_section, {})
     if not configuration.get("sqlalchemy.url"):
-        configuration["sqlalchemy.url"] = os.getenv("RM_DATABASE_URL", "")
+        db_url = os.getenv("RM_DATABASE_URL", "")
+        if not db_url:
+            raise RuntimeError("RM_DATABASE_URL is required for migrations")
+        configuration["sqlalchemy.url"] = db_url
 
     connectable = engine_from_config(
         configuration,

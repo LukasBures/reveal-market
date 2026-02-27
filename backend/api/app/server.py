@@ -21,6 +21,7 @@ from app.pricing import fetch_fx_quote
 from app.rate_limit import RateLimiter
 from app.routes import markets, meta, pricing, profiling, proofs, trade, treasury
 from app.routes.pricing import build_quote_digest
+from app import runtime as _runtime
 from app.runtime import cache_client, is_production, logger, mode_env, settings
 from app.services.cache_client import get_cache_client
 from app.services.markets import hydrate_markets_cache
@@ -68,10 +69,8 @@ def _build_goldsky_client() -> AsyncGoldskyClient | None:
 def _initialise_clients() -> None:
     """Populate global clients (Goldsky) during app creation."""
 
-    from app import runtime  # avoid cycle
-
-    if runtime.goldsky_client is None:
-        runtime.goldsky_client = _build_goldsky_client()
+    if _runtime.goldsky_client is None:
+        _runtime.goldsky_client = _build_goldsky_client()
 
 
 def _log_environment() -> None:

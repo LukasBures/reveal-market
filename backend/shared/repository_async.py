@@ -1,20 +1,46 @@
 from __future__ import annotations
 
+import functools
+import logging
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, TypeVar
 
 from sqlalchemy import and_, delete, func, insert, or_, select
+from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.sql.elements import ColumnElement
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from . import models
 
+logger = logging.getLogger("reveal_market.shared.repository_async")
+
 DEFAULT_SCHEMA_VERSION_KEY = "core"
 
+T = TypeVar("T")
 
+
+def _is_transient_db_error(exc: BaseException) -> bool:
+    """Return True for transient DB errors worth retrying."""
+    if isinstance(exc, OperationalError):
+        return True
+    if isinstance(exc, DBAPIError) and getattr(exc, "connection_invalidated", False):
+        return True
+    return False
+
+
+db_retry = retry(
+    retry=retry_if_exception(_is_transient_db_error),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=0.2, max=2),
+    reraise=True,
+)
+
+
+@db_retry
 async def get_market_by_event_id(session: AsyncSession, event_id: str) -> models.Market | None:
     """Return a market by its unique event identifier."""
 
@@ -22,6 +48,7 @@ async def get_market_by_event_id(session: AsyncSession, event_id: str) -> models
     return (await session.scalars(stmt)).first()
 
 
+@db_retry
 async def get_market_by_onchain_market_id(session: AsyncSession, onchain_market_id: int) -> models.Market | None:
     """Return a market by its onchain numeric identifier."""
 
@@ -29,6 +56,7 @@ async def get_market_by_onchain_market_id(session: AsyncSession, onchain_market_
     return (await session.scalars(stmt)).first()
 
 
+@db_retry
 async def get_market_by_market_address(session: AsyncSession, market_address: str) -> models.Market | None:
     """Return a market by its onchain address."""
 
@@ -367,8 +395,9 @@ async def count_commitments(session: AsyncSession, market_db_id: int) -> int:
     return int(result.scalar_one() or 0)
 
 
+@db_retry
 async def list_commitments_for_wallet(
-    session: AsyncSession, wallet_address: str
+    session: AsyncSession, wallet_address: str, *, limit: int = 500
 ) -> list[tuple[models.Commitment, models.Market]]:
     """Return commitments with market metadata for a wallet address."""
 
@@ -377,17 +406,20 @@ async def list_commitments_for_wallet(
         .join(models.Market, models.Market.id == models.Commitment.market_id)
         .where(models.Commitment.user_address == wallet_address.lower())
         .order_by(models.Commitment.created_at.desc())
+        .limit(limit)
     )
     rows = await session.execute(stmt)
     return [(commitment, market) for commitment, market in rows.all()]
 
 
+@db_retry
 async def list_commitments_with_settlement(
     session: AsyncSession,
     wallet_address: str,
     *,
     market_filter: str | None = None,
     winning_only: bool = False,
+    limit: int = 500,
 ) -> list[tuple[models.Commitment, models.Market, models.Settlement | None]]:
     """Return commitments joined with market + optional settlement.
 
@@ -425,18 +457,22 @@ async def list_commitments_with_settlement(
             )
         )
 
-    stmt = stmt.order_by(models.Commitment.created_at.desc())
+    stmt = stmt.order_by(models.Commitment.created_at.desc()).limit(limit)
     rows = await session.execute(stmt)
     return [(commitment, market, settlement) for commitment, market, settlement in rows.all()]
 
 
-async def list_commitments_by_market(session: AsyncSession, market_id: int) -> list[models.Commitment]:
+@db_retry
+async def list_commitments_by_market(
+    session: AsyncSession, market_id: int, *, limit: int = 500
+) -> list[models.Commitment]:
     """Return all commitments for a market ordered by leaf index then id."""
 
     stmt = (
         select(models.Commitment)
         .where(models.Commitment.market_id == market_id)
         .order_by(models.Commitment.leaf_index.asc().nulls_last(), models.Commitment.id.asc())
+        .limit(limit)
     )
     return list((await session.scalars(stmt)).all())
 

@@ -241,7 +241,7 @@ def record_commitments(
     }
     for ticket in tickets:
         ticket_hash = str(ticket.get("ticketHash") or ticket.get("ticket_hash") or "").lower()
-        if not ticket_hash or ticket_hash in existing_hashes:
+        if not ticket_hash or ticket_hash == "0" * 64 or ticket_hash in existing_hashes:
             continue
         raw_index = ticket.get("merkleIndex")
         if raw_index is None:

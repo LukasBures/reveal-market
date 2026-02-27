@@ -171,7 +171,14 @@ class AsyncGoldskyClient:
         try:
             data = await self._run_with_retry(lambda: self._post(payload))
             resolutions = data.get("conditionResolutions") or []
-        except (GoldskyError, httpx.HTTPError, httpx.RequestError, RetryError):
+        except (GoldskyError, httpx.HTTPError, httpx.RequestError, RetryError) as exc:
+            log_event(
+                self._logger,
+                logging.WARNING,
+                event="goldsky.resolution.failed",
+                message="failed to fetch condition resolutions",
+                error=str(exc),
+            )
             resolutions = []
 
         if not resolutions:

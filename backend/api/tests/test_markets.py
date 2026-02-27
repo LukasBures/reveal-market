@@ -768,6 +768,8 @@ def test_resolution_endpoint_returns_summary(client, db_session):
     checked_at = datetime.now(UTC)
     resolution = models.Resolution(
         condition_id=market.condition_id.lower(),
+        event_id=market.event_id,
+        market_id=mid,
         source="conditional_tokens",
         resolved=True,
         payouts=[0, 1],

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import threading
 
 from redis.asyncio import Redis
 from shared.logging import log_event
@@ -11,6 +12,7 @@ from shared.logging import log_event
 from .config import get_settings
 
 _redis_client: Redis | None = None
+_redis_client_lock = threading.Lock()
 logger = logging.getLogger("reveal_market.api.cache")
 
 
@@ -18,18 +20,20 @@ def get_redis_client() -> Redis | None:
     """Return a cached async Redis client for health checks and caching."""
 
     global _redis_client
-    if _redis_client is None:
-        settings = get_settings()
-        _redis_client = Redis.from_url(settings.redis_url, decode_responses=True)
-    return _redis_client
+    with _redis_client_lock:
+        if _redis_client is None:
+            settings = get_settings()
+            _redis_client = Redis.from_url(settings.redis_url, decode_responses=True)
+        return _redis_client
 
 
 async def close_redis_client() -> None:
     """Close the cached Redis client used for health checks."""
 
     global _redis_client
-    client = _redis_client
-    _redis_client = None
+    with _redis_client_lock:
+        client = _redis_client
+        _redis_client = None
     if client is None:
         return
     try:

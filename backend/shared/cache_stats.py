@@ -18,9 +18,9 @@ class CacheStats:
     def record_error(self) -> None:
         self.errors += 1
 
-    def snapshot(self) -> dict[str, float]:
+    def snapshot(self) -> dict[str, int]:
         return {
-            "hits": float(self.hits),
-            "misses": float(self.misses),
-            "errors": float(self.errors),
+            "hits": self.hits,
+            "misses": self.misses,
+            "errors": self.errors,
         }

@@ -1172,14 +1172,8 @@ async def _sync_market(
     )
 
 
-def cleanup_resolved_markets(  # noqa: C901
-    session: Session,
-    *,
-    dry_run: bool = False,
-    now: datetime | None = None,
-) -> CleanupOutcome:
-    """Remove markets that have been resolved for longer than the configured retention."""
-
+def _cleanup_resolved_stmt(now: datetime | None = None):
+    """Build the query statement and cutoff for cleanup_resolved_markets."""
     reference_time = _as_utc(now) or datetime.now(UTC)
     cutoff = reference_time - timedelta(seconds=runtime.settings.resolved_retention_seconds)
     stmt = select(
@@ -1198,8 +1192,18 @@ def cleanup_resolved_markets(  # noqa: C901
             & (shared_models.Market.closes_at < cutoff),
         )
     )
-    records = session.execute(stmt).all()
+    return stmt, cutoff
 
+
+def cleanup_resolved_markets(  # noqa: C901
+    session: Session,
+    *,
+    dry_run: bool = False,
+    now: datetime | None = None,
+) -> CleanupOutcome:
+    """Remove markets that have been resolved for longer than the configured retention."""
+    stmt, cutoff = _cleanup_resolved_stmt(now)
+    records = session.execute(stmt).all()
     return _build_cleanup_outcome(records, cutoff, dry_run)
 
 
@@ -1210,25 +1214,7 @@ async def cleanup_resolved_markets_async(  # noqa: C901
     now: datetime | None = None,
 ) -> CleanupOutcome:
     """Remove markets that have been resolved for longer than the configured retention."""
-
-    reference_time = _as_utc(now) or datetime.now(UTC)
-    cutoff = reference_time - timedelta(seconds=runtime.settings.resolved_retention_seconds)
-    stmt = select(
-        shared_models.Market.id,
-        shared_models.Market.event_id,
-        shared_models.Market.condition_id,
-        shared_models.Market.category,
-        shared_models.Market.resolved_at,
-        shared_models.Market.closes_at,
-        shared_models.Market.closed,
-    ).where(
-        or_(
-            shared_models.Market.resolved_at.isnot(None) & (shared_models.Market.resolved_at < cutoff),
-            shared_models.Market.closed.is_(True)
-            & shared_models.Market.closes_at.isnot(None)
-            & (shared_models.Market.closes_at < cutoff),
-        )
-    )
+    stmt, cutoff = _cleanup_resolved_stmt(now)
     records = (await session.execute(stmt)).all()
     return _build_cleanup_outcome(records, cutoff, dry_run)
 

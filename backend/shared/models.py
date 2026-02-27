@@ -227,6 +227,12 @@ class MarketGammaMetadata(Base):
 
 class Resolution(Base):
     __tablename__ = "resolutions"
+    __table_args__ = (
+        CheckConstraint(
+            "market_id IS NOT NULL OR event_id IS NOT NULL",
+            name="ck_resolutions_has_market_ref",
+        ),
+    )
 
     condition_id: Mapped[str] = mapped_column(String(66), primary_key=True, nullable=False)
     market_id: Mapped[int | None] = mapped_column(

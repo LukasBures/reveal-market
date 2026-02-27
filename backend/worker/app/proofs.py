@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
 import logging
 import time
-from collections.abc import Awaitable
-from typing import Any, TypeVar, cast
+from typing import Any, TypeVar
 
 from redis.asyncio import Redis
 from shared import cache_async as shared_cache
+from shared.async_utils import resolve_awaitable as _resolve_awaitable
 from shared import models as shared_models
 from shared import repository_async as shared_repository
 from shared.cache_keys import proof_receipt_cache_key
@@ -41,14 +40,6 @@ logger = runtime.logger  # type: ignore[has-type]
 T = TypeVar("T")
 _PROVER_HEALTH_CACHE_SECONDS = 60.0
 _PROVER_CIRCUIT_CACHE: dict[str, Any] = {"value": None, "expires_at": 0.0}
-
-
-async def _resolve_awaitable[T](value: Awaitable[T] | T) -> T:
-    """Handle Redis' async-or-pipeline return types safely for mypy."""
-
-    if inspect.isawaitable(value):
-        return cast(T, await value)
-    return cast(T, value)
 
 
 def _normalize_hex(value: Any) -> str | None:

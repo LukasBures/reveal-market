@@ -14,13 +14,11 @@ from shared.logging import log_event
 from app.runtime import settings
 
 _ALERT_HTTP_CLIENT: httpx.AsyncClient | None = None
-_ALERT_CLIENT_LOCK: asyncio.Lock | None = None
+_ALERT_CLIENT_LOCK = asyncio.Lock()
 
 
 async def _get_client() -> httpx.AsyncClient:
-    global _ALERT_HTTP_CLIENT, _ALERT_CLIENT_LOCK
-    if _ALERT_CLIENT_LOCK is None:
-        _ALERT_CLIENT_LOCK = asyncio.Lock()
+    global _ALERT_HTTP_CLIENT
     async with _ALERT_CLIENT_LOCK:
         if _ALERT_HTTP_CLIENT is None or getattr(_ALERT_HTTP_CLIENT, "is_closed", False):
             _ALERT_HTTP_CLIENT = httpx.AsyncClient(timeout=5.0)
@@ -30,9 +28,7 @@ async def _get_client() -> httpx.AsyncClient:
 async def close_alert_client() -> None:
     """Close the shared alerting HTTP client if it exists."""
 
-    global _ALERT_HTTP_CLIENT, _ALERT_CLIENT_LOCK
-    if _ALERT_CLIENT_LOCK is None:
-        _ALERT_CLIENT_LOCK = asyncio.Lock()
+    global _ALERT_HTTP_CLIENT
     async with _ALERT_CLIENT_LOCK:
         client = _ALERT_HTTP_CLIENT
         _ALERT_HTTP_CLIENT = None

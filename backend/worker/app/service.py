@@ -9,7 +9,7 @@ import logging
 import random
 import secrets
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, TypedDict
 
@@ -87,6 +87,7 @@ class WorkerContext:
 
     background_proofs_task: asyncio.Task | None = None
     background_proofs_skipped_count: int = 0
+    _proof_task_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 _DEFAULT_CONTEXT = WorkerContext()
@@ -1530,6 +1531,84 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
         await _release_sync_lease(redis_client, sync_lease_token)
 
 
+async def _dispatch_proof_jobs(
+    redis_client: Redis | None,
+    context: WorkerContext,
+    summary: "SyncSummary",
+    run_fn: Any,
+) -> None:
+    """Dispatch proof jobs via Redis queue or background task depending on availability."""
+    if redis_client is not None:
+        enqueued = await enqueue_proof_jobs(redis_client, summary)
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.proof.jobs_enqueued",
+            message="enqueued proof jobs to background queue",
+            enqueued=enqueued,
+        )
+        try:
+            backfill_enqueued = await _enqueue_backfill_proof_jobs(redis_client)
+            if backfill_enqueued:
+                log_event(
+                    logger,
+                    logging.INFO,
+                    event="worker.proof.jobs_backfilled",
+                    message="enqueued backfill proof jobs for finalized markets",
+                    enqueued=backfill_enqueued,
+                )
+        except Exception as exc:  # pragma: no cover - defensive
+            log_event(
+                logger,
+                logging.WARNING,
+                event="worker.proof.backfill_failed",
+                message="failed to enqueue backfill proof jobs",
+                error=str(exc),
+            )
+    else:
+        async with context._proof_task_lock:
+            if context.background_proofs_task is None or context.background_proofs_task.done():
+                context.background_proofs_task = asyncio.create_task(run_fn(summary))
+                context.background_proofs_skipped_count = 0
+            else:
+                context.background_proofs_skipped_count += 1
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    event="worker.proof.jobs_skipped",
+                    message="previous proof/settlement task still running",
+                    skip_count=context.background_proofs_skipped_count,
+                )
+                if context.background_proofs_skipped_count >= 3:
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        event="worker.proof.jobs_skipped_repeatedly",
+                        message="proof/settlement processing repeatedly skipped because previous task is still running",
+                        skip_count=context.background_proofs_skipped_count,
+                    )
+
+
+async def _enrich_market_count_stats(stats: dict[str, Any]) -> None:
+    """Best-effort: add total_markets and active_markets counts to stats dict."""
+    try:
+        async with session_scope() as session:
+            total_markets_result = await session.execute(select(func.count(shared_models.Market.id)))
+            active_markets_result = await session.execute(
+                select(func.count(shared_models.Market.id)).where(shared_models.Market.closed.is_(False))
+            )
+            stats["total_markets"] = int(total_markets_result.scalar_one() or 0)
+            stats["active_markets"] = int(active_markets_result.scalar_one() or 0)
+    except Exception as exc:  # pragma: no cover - best-effort diagnostics
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.metrics.count_failed",
+            message="failed to compute market counts",
+            error=str(exc),
+        )
+
+
 async def process_once(
     redis_client: Redis | None = None, context: WorkerContext | None = None
 ) -> dict[str, float | int | str | bool]:
@@ -1601,55 +1680,7 @@ async def process_once(
                 error=str(exc),
             )
 
-    if redis_client is not None:
-        enqueued = await enqueue_proof_jobs(redis_client, summary)
-        log_event(
-            logger,
-            logging.DEBUG,
-            event="worker.proof.jobs_enqueued",
-            message="enqueued proof jobs to background queue",
-            enqueued=enqueued,
-        )
-        # Backfill proof jobs for finalized markets that are no longer fetched (e.g., when only-open filter is on).
-        try:
-            backfill_enqueued = await _enqueue_backfill_proof_jobs(redis_client)
-            if backfill_enqueued:
-                log_event(
-                    logger,
-                    logging.INFO,
-                    event="worker.proof.jobs_backfilled",
-                    message="enqueued backfill proof jobs for finalized markets",
-                    enqueued=backfill_enqueued,
-                )
-        except Exception as exc:  # pragma: no cover - defensive
-            log_event(
-                logger,
-                logging.WARNING,
-                event="worker.proof.backfill_failed",
-                message="failed to enqueue backfill proof jobs",
-                error=str(exc),
-            )
-    else:
-        if context.background_proofs_task is None or context.background_proofs_task.done():
-            context.background_proofs_task = asyncio.create_task(_run_proofs_and_settlements(summary))
-            context.background_proofs_skipped_count = 0
-        else:
-            context.background_proofs_skipped_count += 1
-            log_event(
-                logger,
-                logging.DEBUG,
-                event="worker.proof.jobs_skipped",
-                message="previous proof/settlement task still running",
-                skip_count=context.background_proofs_skipped_count,
-            )
-            if context.background_proofs_skipped_count >= 3:
-                log_event(
-                    logger,
-                    logging.WARNING,
-                    event="worker.proof.jobs_skipped_repeatedly",
-                    message="proof/settlement processing repeatedly skipped because previous task is still running",
-                    skip_count=context.background_proofs_skipped_count,
-                )
+    await _dispatch_proof_jobs(redis_client, context, summary, _run_proofs_and_settlements)
     summary.proofs_generated = 0
     summary.settlement_txs = 0
     cache_report = await invalidate_cache_tags(redis_client, summary)
@@ -1681,22 +1712,7 @@ async def process_once(
     )
 
     stats["redis_available"] = redis_client is not None
-    try:
-        async with session_scope() as session:
-            total_markets_result = await session.execute(select(func.count(shared_models.Market.id)))
-            active_markets_result = await session.execute(
-                select(func.count(shared_models.Market.id)).where(shared_models.Market.closed.is_(False))
-            )
-            stats["total_markets"] = int(total_markets_result.scalar_one() or 0)
-            stats["active_markets"] = int(active_markets_result.scalar_one() or 0)
-    except Exception as exc:  # pragma: no cover - best-effort diagnostics
-        log_event(
-            logger,
-            logging.DEBUG,
-            event="worker.metrics.count_failed",
-            message="failed to compute market counts",
-            error=str(exc),
-        )
+    await _enrich_market_count_stats(stats)
     await publish_heartbeat(redis_client, stats)
     _log_db_metrics("process_once")
     if runtime.settings.db_latency_pace_enabled:

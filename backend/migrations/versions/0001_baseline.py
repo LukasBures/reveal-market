@@ -3,6 +3,19 @@
 Revision ID: 0001_baseline
 Revises:
 Create Date: 2026-02-07 00:00:00.000000
+
+FK Strategy Notes:
+    This schema uses a mixed primary key / foreign key strategy:
+
+    - ``markets.id`` (Integer, auto-increment): Internal numeric PK used by most child tables
+      (commitments, settlements, quotes, etc.) for efficient joins and indexing.
+    - ``markets.event_id`` (String): External Polymarket identifier used as a stable cross-service
+      reference. Some tables (e.g. resolutions, quotes) reference ``event_id`` because data
+      originates from external sources where only the string ID is known at ingest time.
+
+    This dual-key pattern is intentional: numeric PKs for performance, string event_ids for
+    external system interop. Child tables should prefer ``markets.id`` FKs when the market row
+    is always available at write time.
 """
 
 import sqlalchemy as sa
@@ -64,6 +77,9 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "resolution_status IN ('pending_resolution','disputed','final')", name="ck_markets_resolution_status"
         ),
+        # NOTE: PostgreSQL unique constraints on nullable columns allow multiple NULL values
+        # (SQL standard behavior). This is intentional — not all markets have onchain_market_id
+        # or market_address populated at creation time.
         sa.UniqueConstraint("event_id", name="uq_markets_event_id"),
         sa.UniqueConstraint("onchain_market_id", name="uq_markets_onchain_market_id"),
         sa.UniqueConstraint("market_address", name="uq_markets_market_address"),
@@ -264,6 +280,9 @@ def upgrade() -> None:
         sa.Column("applied_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
 
+    # NOTE: quotes.market_id stores the string event_id (not the numeric markets.id).
+    # This is intentional: quotes reference markets by their external Polymarket identifier
+    # for cross-service interop. See FK Strategy Notes in the module docstring.
     op.create_table(
         "quotes",
         sa.Column("quote_id", sa.String(length=66), primary_key=True, nullable=False),

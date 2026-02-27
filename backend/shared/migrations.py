@@ -43,7 +43,7 @@ def run_migrations(database_url: str) -> None:
                 "Missing Alembic revision; resetting schema before applying baseline",
                 extra={"event": "migrations.missing_revision_reset"},
             )
-            _reset_schema(database_url)
+            _reset_schema(database_url, confirm=True)
             command.upgrade(config, "head")
             return
         raise
@@ -84,7 +84,13 @@ def _allow_reset_on_missing_revision() -> bool:
     return os.getenv("RM_ENVIRONMENT", "").strip().lower() == "local"
 
 
-def _reset_schema(database_url: str) -> None:
+def _reset_schema(database_url: str, *, confirm: bool = False) -> None:
+    if not confirm and not _allow_reset_on_missing_revision():
+        raise RuntimeError(
+            "Schema reset refused: set RM_MIGRATIONS_ALLOW_RESET=true or RM_ENVIRONMENT=local, "
+            "or pass confirm=True explicitly."
+        )
+    logger.warning("Dropping and recreating schema", extra={"event": "migrations.schema_reset"})
     engine = create_engine(database_url, future=True)
     try:
         with engine.connect() as connection:

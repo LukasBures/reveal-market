@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_DOWN, Decimal
@@ -32,6 +33,7 @@ router = APIRouter()
 
 _STREAMER_TIMEOUT_SECONDS = 3.0
 _PRESET_CFG: dict[str, object] | None = None
+_PRESET_CFG_LOCK = asyncio.Lock()
 _QUOTE_NONCE_FALLBACK: dict[str, datetime] = {}
 _QUOTE_NONCE_FALLBACK_LOCK = asyncio.Lock()
 
@@ -58,15 +60,16 @@ def _pricing_unavailable(
     )
 
 
-def _get_cached_preset() -> dict[str, object]:
+async def _get_cached_preset() -> dict[str, object]:
     """Load and cache env preset config to avoid repeated lookups per request."""
 
     from shared.env_presets import get_preset
 
     global _PRESET_CFG
-    if _PRESET_CFG is None:
-        _PRESET_CFG = get_preset()
-    return _PRESET_CFG
+    async with _PRESET_CFG_LOCK:
+        if _PRESET_CFG is None:
+            _PRESET_CFG = get_preset()
+        return _PRESET_CFG
 
 
 async def _fetch_streamer_price(stream_market_id: str, outcome_id: int) -> Decimal | None:
@@ -74,7 +77,7 @@ async def _fetch_streamer_price(stream_market_id: str, outcome_id: int) -> Decim
 
     if not stream_market_id:
         return None
-    preset_cfg = _get_cached_preset()
+    preset_cfg = await _get_cached_preset()
     stream_base = str(preset_cfg.get("streamer_internal") or preset_cfg.get("streamer_public") or "")
     if not stream_base:
         return None
@@ -93,7 +96,16 @@ async def _fetch_streamer_price(stream_market_id: str, outcome_id: int) -> Decim
         if data.get("fx_stale") is True:
             return None
         return _coerce_price(data.get("display_price") or data.get("price"))
-    except Exception:
+    except (httpx.HTTPError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="pricing.streamer_fetch_failed",
+            message="failed to fetch streamer price",
+            market_id=stream_market_id,
+            outcome_id=outcome_id,
+            error=str(exc),
+        )
         return None
 
 

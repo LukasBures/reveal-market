@@ -826,7 +826,7 @@ class _AsyncRateLimiter:
     def __init__(self, max_requests: int | None, window_seconds: float | None) -> None:
         self.max_requests = max_requests if max_requests and max_requests > 0 else None
         self.window_seconds = window_seconds if window_seconds and window_seconds > 0 else None
-        self._events: deque[float] = deque()
+        self._events: deque[float] = deque(maxlen=(self.max_requests or 1000) * 2)
 
     async def acquire(self) -> None:
         if not self.max_requests or not self.window_seconds:
@@ -1380,19 +1380,25 @@ def _derive_category(raw: dict[str, Any]) -> str | None:
     return None
 
 
+_MAX_TAGS = 50
+_MAX_TAG_LENGTH = 200
+
+
 def _extract_tags(tags: Any) -> list[str] | None:
     if not isinstance(tags, list):
         return None
     result: list[str] = []
     for entry in tags:
+        if len(result) >= _MAX_TAGS:
+            break
         if isinstance(entry, str):
-            cleaned = entry.strip()
+            cleaned = entry.strip()[:_MAX_TAG_LENGTH]
             if cleaned:
                 result.append(cleaned)
         elif isinstance(entry, dict):
             candidate = entry.get("slug") or entry.get("name") or entry.get("label")
             if isinstance(candidate, str) and candidate.strip():
-                result.append(candidate.strip())
+                result.append(candidate.strip()[:_MAX_TAG_LENGTH])
     return result or None
 
 
@@ -1781,16 +1787,21 @@ def fetch_clob_markets(clob_client: ClobClient, *, max_pages: int | None = None)
     return results
 
 
+_MAX_IMAGE_VARIANTS = 20
+
+
 def _collect_images(raw: dict[str, Any]) -> list[str] | None:
     images: list[str] = []
     candidates = [raw.get("image"), raw.get("icon"), raw.get("imageUrl"), raw.get("imageURL"), raw.get("coverImage")]
     events = raw.get("events")
     if isinstance(events, list):
-        for event in events:
+        for event in events[:_MAX_IMAGE_VARIANTS]:
             if isinstance(event, dict):
                 candidates.extend([event.get("image"), event.get("icon")])
-    seen = set()
+    seen: set[str] = set()
     for candidate in candidates:
+        if len(images) >= _MAX_IMAGE_VARIANTS:
+            break
         cleaned = _clean_string(candidate)
         if cleaned and cleaned not in seen:
             seen.add(cleaned)
