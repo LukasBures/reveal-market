@@ -648,6 +648,55 @@ PROTOCOL_POOL_ABI: list[dict] = [
         "stateMutability": "view",
         "type": "function",
     },
+    {
+        "inputs": [],
+        "name": "totalShares",
+        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "totalAssets",
+        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [{"internalType": "address", "name": "", "type": "address"}],
+        "name": "lpShareBalance",
+        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "protocolSurplus",
+        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "anonymous": False,
+        "inputs": [
+            {"indexed": True, "internalType": "address", "name": "lp", "type": "address"},
+            {"indexed": False, "internalType": "uint256", "name": "assets", "type": "uint256"},
+            {"indexed": False, "internalType": "uint256", "name": "shares", "type": "uint256"},
+            {"indexed": False, "internalType": "uint256", "name": "unlockTime", "type": "uint256"},
+        ],
+        "name": "LpDeposited",
+        "type": "event",
+    },
+    {
+        "anonymous": False,
+        "inputs": [
+            {"indexed": True, "internalType": "address", "name": "lp", "type": "address"},
+            {"indexed": False, "internalType": "uint256", "name": "assets", "type": "uint256"},
+            {"indexed": False, "internalType": "uint256", "name": "shares", "type": "uint256"},
+        ],
+        "name": "LpWithdrawn",
+        "type": "event",
+    },
 ]
 
 RELAYER_ESCROW_ABI: list[dict] = [

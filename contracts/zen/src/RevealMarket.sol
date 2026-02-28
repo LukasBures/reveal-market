@@ -113,7 +113,9 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     event Committed(uint256 indexed ticketId, bytes32 commitment, uint256 totalEscrow);
     event Locked(bytes32 indexed commitmentsRoot, uint256 ticketCount);
     event ResultPosted(uint256 indexed winningOutcomeId);
-    event Settled(uint256 indexed totalLiability, uint256 rakeAmount, uint256 protocolTopUp, uint256 poolYes, uint256 poolNo);
+    event Settled(
+        uint256 indexed totalLiability, uint256 rakeAmount, uint256 protocolTopUp, uint256 poolYes, uint256 poolNo
+    );
     event Claimed(address indexed relayer, address indexed user, uint256 indexed ticketId, uint256 amount);
     event ClaimDeadlineExtended(uint256 newDeadline);
     event ClaimsSwept(address indexed recipient, uint256 amount);
@@ -265,6 +267,9 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     }
 
     /// @notice Relayer-only commit entrypoint; verifies backend authorization and pushes the sealed commitment.
+    /// @dev Trust assumption: the relayer controls commit ordering and may front-run or reorder tickets within
+    ///      a block. ticketId is bound to the sequential commitments.length at execution time; the backend
+    ///      authorization signature covers the ticketId to prevent replay across slots.
     function commitWithAuthorization(CommitAuth calldata auth, bytes calldata signature)
         external
         payable
@@ -281,6 +286,7 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         if (auth.user == address(0)) revert InvalidAddress();
         if (IERC20(collateralToken).balanceOf(address(this)) < totalEscrow + ticketSize) revert InvalidPayment();
         if (commitments.length >= maxCommitments) revert MaxCommitmentsReached();
+        if (uint256(auth.commitment) >= SNARK_SCALAR_FIELD) revert FieldElementOutOfRange();
         uint256 expectedTicketId = commitments.length;
         if (auth.ticketId != expectedTicketId) revert TicketIndexMismatch();
         if (auth.expiry < block.timestamp) revert CommitExpired();
@@ -556,6 +562,9 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
 
     /// @notice Fallback claim path when users cannot reconstruct commitment preimages.
     /// Oracle signs ticket-level payouts off-chain and anyone can execute delivery to the recorded ticket owner.
+    /// @dev Trust assumption: the oracle is trusted to produce correct payout amounts. The on-chain guard caps
+    ///      cumulative claimed liability at totalLiability and per-ticket payouts at totalLiability to bound damage
+    ///      from a compromised oracle key.
     function claimWithOracleAuthorization(
         uint256 ticketId,
         uint256 payout,
@@ -567,6 +576,7 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         if (claimsSwept) revert ClaimsAlreadySwept();
         if (claimDeadline != 0 && block.timestamp > _effectiveClaimDeadline()) revert ClaimWindowClosed();
         if (block.timestamp > expiry) revert OracleAuthorizationExpired();
+        if (payout > totalLiability) revert OverClaimed();
         if (claimedTickets[ticketId]) revert TicketAlreadyClaimed();
 
         address user = _ticketOwner(ticketId);
@@ -636,10 +646,10 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         emit AuthorizationSignerUpdated(newSigner);
     }
 
-    /// @notice Rotate oracle; allowed until settlement to handle provider changes.
+    /// @notice Rotate oracle; only allowed during the Commit phase.
     function setOracle(address newOracle) external onlyFactory {
         if (newOracle == address(0)) revert InvalidAddress();
-        if (phase == Phase.Locked || phase == Phase.Settled) revert InvalidPhase();
+        if (phase != Phase.Commit) revert InvalidPhase();
         oracle = newOracle;
         emit OracleUpdated(newOracle);
     }
@@ -672,13 +682,25 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         emit VerifierUpdated(newVerifier, newCircuitHash);
     }
 
-    /// @notice Refreshes the locked verifier key hash before any batch proof is accepted.
+    /// @notice Refreshes the locked verifier key hash after a verifier key rotation.
+    ///         Resets settlement progress if any batch proofs were already accepted under the old key.
     function refreshLockedVerifierKeyHash() external onlyFactory {
         if (phase != Phase.Locked) revert InvalidPhase();
         if (IVerifier(verifier).circuitHash() != circuitHash) revert CircuitHashMismatch();
         if (!_isVerifierApprovedForSettlement()) revert VerifierNotApproved();
-        if (IVerifier(verifier).verifyingKeyHash() != lockedVerifierKeyHash) revert VerifierKeyMismatch();
-        emit LockedVerifierKeyRefreshed(lockedVerifierKeyHash);
+        bytes32 newKeyHash = IVerifier(verifier).verifyingKeyHash();
+        lockedVerifierKeyHash = newKeyHash;
+        if (settledBatchCount > 0) {
+            uint256 prev = settledBatchCount;
+            currentBatchProofEpoch += 1;
+            settledBatchCount = 0;
+            settledEscrowSum = 0;
+            settledLiabilitySum = 0;
+            settledPoolYesSum = 0;
+            settledPoolNoSum = 0;
+            emit SettlementProgressReset(prev);
+        }
+        emit LockedVerifierKeyRefreshed(newKeyHash);
     }
 
     /// @notice Adjust the per-market protocol liability cap before settlement.
@@ -700,7 +722,12 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
             if (paused && !claimsPaused) {
                 claimPauseStartedAt = block.timestamp;
             } else if (!paused && claimsPaused) {
-                claimPauseTotalDuration += block.timestamp - claimPauseStartedAt;
+                uint256 elapsed = block.timestamp - claimPauseStartedAt;
+                uint256 newTotal = claimPauseTotalDuration + elapsed;
+                if (newTotal > MAX_CLAIM_DEADLINE_EXTENSION) {
+                    newTotal = MAX_CLAIM_DEADLINE_EXTENSION;
+                }
+                claimPauseTotalDuration = newTotal;
                 claimPauseStartedAt = 0;
             }
         }
@@ -749,10 +776,11 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         emit Settled(totalLiability_, rakeAmount, protocolTopUp, poolTotalYes, poolTotalNo);
     }
 
-    /// @notice Extend-only deadline updates. Cannot shorten.
+    /// @notice Extend-only deadline updates. Cannot shorten. Must be called before the window closes.
     function extendCommitDeadline(uint256 newDeadline) external onlyFactory {
         if (newDeadline <= commitDeadline) revert DeadlineExtendOnly();
         if (phase != Phase.Commit) revert InvalidPhase();
+        if (block.timestamp >= commitDeadline) revert CommitWindowClosed();
         if (commitDeadlineExtended) revert CommitDeadlineAlreadyExtended();
         if (newDeadline > commitDeadline + MAX_COMMIT_DEADLINE_EXTENSION) revert DeadlineTooFar();
         commitDeadline = newDeadline;
@@ -922,6 +950,10 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         }
     }
 
+    /// @dev Strict accounting transfer that reverts on fee-on-transfer or deflationary tokens.
+    ///      Intentionally over-checks both sender debit and recipient credit to ensure exact delivery.
+    ///      This is safe because the collateral token is a known, trusted ERC20 set at initialization;
+    ///      the strict checks serve as a defense-in-depth invariant rather than a runtime expectation.
     function _safeTransferExact(address recipient, uint256 amount) internal {
         uint256 senderBalanceBefore = IERC20(collateralToken).balanceOf(address(this));
         uint256 recipientBalanceBefore = IERC20(collateralToken).balanceOf(recipient);

@@ -32,6 +32,9 @@ contract RelayerEscrow is Ownable2Step, ReentrancyGuard {
     event CommitAuthorizationApproved(
         address indexed user, address indexed market, uint256 indexed nonce, bytes32 authHash
     );
+    event CommitAuthorizationRevoked(
+        address indexed user, address indexed market, uint256 indexed nonce, bytes32 authHash
+    );
     event CreditReceived(address indexed market, address indexed user, uint256 amount);
     event MigratedCreditReceived(address indexed user, uint256 amount);
     event ExcessCollateralRecovered(address indexed recipient, uint256 amount);
@@ -160,6 +163,14 @@ contract RelayerEscrow is Ownable2Step, ReentrancyGuard {
         bytes32 authHash = _commitAuthorizationHash(market, auth);
         approvedCommitAuthorizations[msg.sender][authHash] = true;
         emit CommitAuthorizationApproved(msg.sender, market, auth.nonce, authHash);
+    }
+
+    /// @notice Revoke a previously approved commit authorization before the relayer consumes it.
+    function revokeCommitAuthorization(address market, IRevealMarket.CommitAuth calldata auth) external {
+        if (auth.user != msg.sender) revert UserMismatch();
+        bytes32 authHash = _commitAuthorizationHash(market, auth);
+        approvedCommitAuthorizations[msg.sender][authHash] = false;
+        emit CommitAuthorizationRevoked(msg.sender, market, auth.nonce, authHash);
     }
 
     /// @notice View helper for clients to precompute commit-authorization hashes.

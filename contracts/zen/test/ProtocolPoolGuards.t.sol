@@ -36,9 +36,28 @@ contract ProtocolPoolGuardsTest is Test {
         vm.expectRevert();
         pool.setMarketFactory(nextFactory);
 
+        // Factory is already set — changing to a different address reverts with FactoryLocked.
         vm.prank(owner);
+        vm.expectRevert(ProtocolPool.FactoryLocked.selector);
         pool.setMarketFactory(nextFactory);
-        assertEq(pool.marketFactory(), nextFactory);
+
+        // Idempotent set to the same factory succeeds.
+        vm.prank(owner);
+        pool.setMarketFactory(factory);
+        assertEq(pool.marketFactory(), factory);
+    }
+
+    function testSetMarketFactoryLockPreventsReassignment() external {
+        // Deploy a fresh pool with no factory set.
+        ProtocolPool freshPool = new ProtocolPool(owner, IERC20(address(token)));
+        vm.prank(owner);
+        freshPool.setMarketFactory(factory);
+        assertEq(freshPool.marketFactory(), factory);
+
+        // Second call to a different factory reverts.
+        vm.prank(owner);
+        vm.expectRevert(ProtocolPool.FactoryLocked.selector);
+        freshPool.setMarketFactory(makeAddr("anotherFactory"));
     }
 
     function testSetMarketFactoryRejectsSpoofedOwnerContract() external {
@@ -236,6 +255,27 @@ contract ProtocolPoolGuardsTest is Test {
         vm.prank(stranger);
         vm.expectRevert(ProtocolPool.Unauthorized.selector);
         pool.updateLiabilityCap(market, 2 ether);
+    }
+
+    function testCompactDepositsRemovesZeroRecords() external {
+        // Deposit twice, withdraw the first, compact.
+        _fundPool(10 ether);
+        _fundPool(5 ether);
+
+        // Two deposits under owner.
+        assertEq(pool.depositCount(owner), 2);
+
+        // Unlock and withdraw the first deposit.
+        vm.warp(block.timestamp + 60 days);
+        vm.prank(owner);
+        pool.lpWithdraw(10 ether, 0);
+
+        // After lpWithdraw, compaction runs automatically.
+        // First record (shares=0) should be removed.
+        assertEq(pool.depositCount(owner), 1, "zero-share record compacted");
+
+        (uint256 shares,) = pool.depositAt(owner, 0);
+        assertEq(shares, 5 ether, "remaining deposit intact");
     }
 
     function _fundPool(uint256 amount) private {

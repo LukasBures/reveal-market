@@ -341,27 +341,32 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
         factory.updateProtocolLiabilityCap(address(market), protocolCap + 1);
     }
 
-    function testRefreshLockedVerifierKeyHashCannotRewriteLockedAnchor() external {
+    function testRefreshLockedVerifierKeyAllowsKeyRotation() external {
         (bytes32 leaf,, uint256 netAmount, uint256 payout) = _commitTicket(1, _salt("refresh-key"));
         bytes32 root = _lockSingle(leaf, "");
-        verifier.setVerifyingKeyHash(keccak256("rotated-key"));
+        bytes32 newKey = keccak256("rotated-key");
+        verifier.setVerifyingKeyHash(newKey);
 
+        // Verifier has drifted — re-approval fails until we clear the pin.
+        vm.expectRevert(MarketFactory.VerifierDrift.selector);
+        factory.setVerifierApproval(address(verifier), true);
+
+        // Revoke, clear pin, re-approve with new key.
+        factory.setVerifierApproval(address(verifier), false);
+        factory.clearVerifierPin(address(verifier));
+        factory.setVerifierApproval(address(verifier), true);
+
+        // Refresh the locked key hash on the market.
+        factory.refreshMarketLockedVerifierKey(address(market));
+        assertEq(market.lockedVerifierKeyHash(), newKey, "key updated");
+
+        // Settlement with new key should succeed.
         vm.prank(oracle);
         market.postResult(1);
         uint256[10] memory signals = _signals(root, 1, netAmount, payout);
-
-        vm.expectRevert(RevealMarket.VerifierNotApproved.selector);
         vm.prank(oracle);
         market.verifyAndSettle("", signals);
-
-        vm.expectRevert(MarketFactory.VerifierDrift.selector);
-        factory.setVerifierApproval(address(verifier), true);
-        vm.expectRevert(MarketFactory.VerifierDrift.selector);
-        factory.refreshMarketLockedVerifierKey(address(market));
-
-        vm.expectRevert(RevealMarket.VerifierNotApproved.selector);
-        vm.prank(oracle);
-        market.verifyAndSettle("", signals);
+        assertEq(uint8(market.phase()), uint8(IRevealMarket.Phase.Settled));
     }
 
     function testExtendClaimDeadlineOnlyOnce() external {
@@ -399,6 +404,86 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
 
         vm.expectRevert(RevealMarket.InvalidMerkleProof.selector);
         market.refund(user, 0, 1, netAmount, payout, _salt("wrong-salt"), new bytes32[](0));
+    }
+
+    function testExtendCommitDeadlineRevertsAfterWindowClosed() external {
+        _commitTicket(1, _salt("extend-closed"));
+        vm.warp(commitDeadline + 1);
+        uint256 newDeadline = commitDeadline + 1 days;
+        vm.expectRevert(RevealMarket.CommitWindowClosed.selector);
+        factory.extendMarketCommitDeadline(address(market), newDeadline);
+    }
+
+    function testClaimPauseTotalDurationCapped() external {
+        (bytes32 leaf,, uint256 netAmount, uint256 payout) = _commitTicket(1, _salt("pause-cap"));
+        bytes32 root = _lockAndPost(leaf, 1);
+        uint256[10] memory signals = _signals(root, 1, netAmount, payout);
+        vm.prank(oracle);
+        market.verifyAndSettle("", signals);
+
+        // Pause and unpause for 400 days — exceeds MAX_CLAIM_DEADLINE_EXTENSION (365 days).
+        factory.setMarketClaimsPaused(address(market), true);
+        vm.warp(block.timestamp + 400 days);
+        factory.setMarketClaimsPaused(address(market), false);
+
+        // Duration should be capped at 365 days, not 400.
+        assertEq(market.claimPauseTotalDuration(), market.MAX_CLAIM_DEADLINE_EXTENSION(), "capped at 365 days");
+    }
+
+    function testOracleClaimBoundedByTotalLiability() external {
+        (bytes32 leaf,, uint256 netAmount, uint256 payout) = _commitTicket(1, _salt("oracle-bound"));
+        bytes32 root = _lockAndPost(leaf, 1);
+        uint256[10] memory signals = _signals(root, 1, netAmount, payout);
+        vm.prank(oracle);
+        market.verifyAndSettle("", signals);
+
+        // Build oracle claim with payout > totalLiability.
+        // The per-ticket ceiling check fires before signature validation.
+        uint256 excessPayout = market.totalLiability() + 1;
+        uint256 futureExpiry = block.timestamp + 1 hours;
+        // Dummy signature — OverClaimed fires before signature recovery.
+        bytes memory dummySig = new bytes(65);
+
+        vm.expectRevert(RevealMarket.OverClaimed.selector);
+        market.claimWithOracleAuthorization(0, excessPayout, futureExpiry, dummySig);
+    }
+
+    function testCommitRejectsOutOfFieldCommitment() external {
+        // A commitment >= SNARK_SCALAR_FIELD can never be proven in the ZK circuit.
+        uint256 SNARK_SCALAR_FIELD = 21888242871839275222246405745257275088548364400416034343698204186575808495617;
+        bytes32 badCommitment = bytes32(SNARK_SCALAR_FIELD);
+
+        token.mint(user, ticketSize);
+        vm.prank(user);
+        token.approve(address(relayerEscrow), ticketSize);
+        vm.prank(user);
+        relayerEscrow.deposit(ticketSize);
+
+        IRevealMarket.CommitAuth memory auth = IRevealMarket.CommitAuth({
+            commitment: badCommitment,
+            ticketId: 0,
+            user: user,
+            nonce: 1,
+            expiry: block.timestamp + 12 hours,
+            ticketValue: ticketSize
+        });
+        bytes memory sig = _signAuth(auth, authKey);
+        vm.prank(user);
+        relayerEscrow.approveCommitAuthorization(address(market), auth);
+
+        vm.prank(relayerOwner);
+        vm.expectRevert(RevealMarket.FieldElementOutOfRange.selector);
+        relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
+    }
+
+    function testSetOracleRevertsInCancelledPhase() external {
+        _commitTicket(1, _salt("cancelled-oracle"));
+        vm.warp(commitDeadline + 1);
+        factory.enableMarketRefunds(address(market));
+        assertEq(uint8(market.phase()), uint8(IRevealMarket.Phase.Cancelled));
+
+        vm.expectRevert(RevealMarket.InvalidPhase.selector);
+        factory.updateOracle(address(market), makeAddr("newOracle"));
     }
 
     function _commitTicket(uint256 outcome, bytes32 salt)

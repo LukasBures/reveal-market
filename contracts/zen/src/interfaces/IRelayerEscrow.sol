@@ -6,6 +6,8 @@ import {IRevealMarket} from "./IRevealMarket.sol";
 interface IRelayerEscrow {
     function approveCommitAuthorization(address market, IRevealMarket.CommitAuth calldata auth) external;
 
+    function revokeCommitAuthorization(address market, IRevealMarket.CommitAuth calldata auth) external;
+
     function commitAuthorizationHash(address market, IRevealMarket.CommitAuth calldata auth)
         external
         view

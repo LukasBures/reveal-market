@@ -21,10 +21,7 @@ contract DeployVerifyingKeyLoadTest is Test, Deploy {
         assertEq(config.beta2[1][1], 10505242626370262277552901082094356697409835680220590971873171140371331206856);
         assertEq(config.ic[0][0], 19497960300567760639660261670012584085507675705850371475691093687439179069054);
         assertEq(config.ic[10][1], 8223598890083111104239146542008747113584684453192694534904016914676203259216);
-        assertEq(
-            config.circuitHash,
-            bytes32(0x181e1866c82c6c72f18cd61723f1f61cd0a02224250b988af5a3f32863f2b157)
-        );
+        assertEq(config.circuitHash, bytes32(0x181e1866c82c6c72f18cd61723f1f61cd0a02224250b988af5a3f32863f2b157));
     }
 
     function testLoadVerifyingKeyRejectsOverlongG1Array() external {

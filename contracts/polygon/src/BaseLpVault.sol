@@ -135,6 +135,14 @@ contract BaseLpVault is ERC20, Ownable, Pausable, ReentrancyGuard {
         return Math.mulDiv(shares, totalAssets(), supply);
     }
 
+    /// @dev Ceil-rounded share conversion used by withdraw() to prevent underburning.
+    function _convertToSharesCeil(uint256 assets) internal view returns (uint256) {
+        if (assets == 0) return 0;
+        uint256 supply = totalSupply();
+        if (supply == 0) return assets;
+        return Math.mulDiv(assets, supply, totalAssets(), Math.Rounding.Ceil);
+    }
+
     /// @notice Deposit USDC and receive vault shares.
     function deposit(uint256 assets, address receiver) external nonReentrant whenNotPaused returns (uint256 shares) {
         if (assets == 0) {
@@ -183,7 +191,7 @@ contract BaseLpVault is ERC20, Ownable, Pausable, ReentrancyGuard {
             revert InsufficientIdleAssets();
         }
 
-        shares = convertToShares(assets);
+        shares = _convertToSharesCeil(assets);
         if (shares == 0) {
             revert ZeroShares();
         }

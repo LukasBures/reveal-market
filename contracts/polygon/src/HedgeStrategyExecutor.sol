@@ -119,7 +119,7 @@ contract HedgeStrategyExecutor is EIP712, Ownable, Pausable, ReentrancyGuard {
             )
         );
 
-        (address recoveredSigner, ECDSA.RecoverError recoverError, ) = ECDSA.tryRecover(orderHash, signature);
+        (address recoveredSigner, ECDSA.RecoverError recoverError,) = ECDSA.tryRecover(orderHash, signature);
         if (recoverError != ECDSA.RecoverError.NoError || recoveredSigner != signer) {
             revert InvalidSigner();
         }

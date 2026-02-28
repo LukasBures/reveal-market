@@ -166,7 +166,7 @@ contract MarketFactoryGuardsTest is Test {
         assertTrue(relayer.commitsPaused(), "active relayer paused");
     }
 
-    function testSetRelayerCommitsPausedContinuesIfActiveRelayerFails() external {
+    function testSetRelayerCommitsPausedRevertsIfActiveRelayerFails() external {
         vm.prank(owner);
         address marketAddress = factory.createMarket(_params(block.timestamp + 1 days));
 
@@ -175,6 +175,7 @@ contract MarketFactoryGuardsTest is Test {
         factory.updateMarketRelayer(marketAddress, RelayerEscrow(payable(address(failing))));
 
         vm.prank(owner);
+        vm.expectRevert();
         factory.setRelayerCommitsPaused(true);
     }
 
@@ -264,6 +265,27 @@ contract MarketFactoryGuardsTest is Test {
         assertEq(factory.activeRelayers(0), address(nextRelayer));
         vm.expectRevert();
         factory.activeRelayers(1);
+    }
+
+    function testClearVerifierPinAllowsReApproval() external {
+        // Revoke → rotate key → clearPin → re-approve succeeds.
+        vm.prank(owner);
+        factory.setVerifierApproval(address(verifier), false);
+
+        verifier.setVerifyingKeyHash(keccak256("rotated-key"));
+
+        vm.prank(owner);
+        factory.clearVerifierPin(address(verifier));
+
+        vm.prank(owner);
+        factory.setVerifierApproval(address(verifier), true);
+        assertTrue(factory.approvedVerifier(address(verifier)), "re-approved after pin clear");
+    }
+
+    function testClearVerifierPinRevertsIfApproved() external {
+        vm.prank(owner);
+        vm.expectRevert(MarketFactory.VerifierStillApproved.selector);
+        factory.clearVerifierPin(address(verifier));
     }
 
     function _params(uint256 deadline) private view returns (MarketFactory.CreateMarketParams memory) {

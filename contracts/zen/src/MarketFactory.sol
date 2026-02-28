@@ -89,6 +89,7 @@ contract MarketFactory is Ownable2Step {
     event MarketVerifierUpdated(address indexed market, address indexed verifier, bytes32 indexed circuitHash);
     event MarketLockedVerifierKeyRefreshed(address indexed market, bytes32 indexed keyHash);
     event VerifierApprovalUpdated(address indexed verifier, bytes32 codehash, bytes32 keyHash, bool approved);
+    event VerifierPinCleared(address indexed verifier);
     event MarketLiabilityCapUpdated(address indexed market, uint256 liabilityCap);
     event MarketProtocolPoolUpdated(address indexed market, address indexed protocolPool);
     event MarketClaimDeadlineExtended(address indexed market, uint256 newDeadline);
@@ -123,6 +124,7 @@ contract MarketFactory is Ownable2Step {
     error InvalidCircuitHash();
     error VerifierNotApproved();
     error VerifierDrift();
+    error VerifierStillApproved();
     error VerifierOwnerMismatch();
     error RelayerPauseFailed(address relayer);
     error InvalidPauseRange();
@@ -201,6 +203,17 @@ contract MarketFactory is Ownable2Step {
         emit VerifierApprovalUpdated(
             verifier, approvedVerifierCodehash[verifier], approvedVerifierKeyHash[verifier], false
         );
+    }
+
+    /// @notice Clears the pinned codehash and key hash for a revoked verifier, allowing re-approval after key rotation.
+    function clearVerifierPin(address verifier) external onlyOwner {
+        if (verifier == address(0)) revert InvalidVerifier();
+        if (approvedVerifier[verifier]) revert VerifierStillApproved();
+        delete pinnedVerifierCodehash[verifier];
+        delete pinnedVerifierKeyHash[verifier];
+        delete approvedVerifierCodehash[verifier];
+        delete approvedVerifierKeyHash[verifier];
+        emit VerifierPinCleared(verifier);
     }
 
     /// @notice Runtime verifier policy check used by markets during settlement.
@@ -547,16 +560,23 @@ contract MarketFactory is Ownable2Step {
 
         for (uint256 i = 0; i < count; ++i) {
             address relayer = activeRelayers[start + i];
-            try RelayerEscrow(payable(relayer)).setCommitsPaused(paused) {
-                try RelayerEscrow(payable(relayer)).commitsPaused() returns (bool relayerPaused) {
-                    if (relayerPaused != paused) {
+            if (paused) {
+                // When pausing, revert on any failure — an active relayer must not dodge the pause.
+                RelayerEscrow(payable(relayer)).setCommitsPaused(true);
+                if (!RelayerEscrow(payable(relayer)).commitsPaused()) revert RelayerPauseFailed(relayer);
+            } else {
+                // When unpausing, swallow failures so a stuck relayer does not block recovery.
+                try RelayerEscrow(payable(relayer)).setCommitsPaused(false) {
+                    try RelayerEscrow(payable(relayer)).commitsPaused() returns (bool relayerPaused) {
+                        if (relayerPaused) {
+                            emit RelayerPausePropagationFailed(relayer);
+                        }
+                    } catch {
                         emit RelayerPausePropagationFailed(relayer);
                     }
                 } catch {
                     emit RelayerPausePropagationFailed(relayer);
                 }
-            } catch {
-                emit RelayerPausePropagationFailed(relayer);
             }
         }
     }
