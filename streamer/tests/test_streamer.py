@@ -412,6 +412,58 @@ async def test_rest_poll_replaces_placeholder_with_tokens(monkeypatch):
     assert "123" not in state.subscriptions.assets
 
 
+def test_validate_rest_market_accepts_closed_zero_sum_binary_payload():
+    state = StubState()
+    streamer = DataStreamer(state, state.settings)
+    assert (
+        streamer._validate_rest_market(
+            {
+                "id": "m-closed",
+                "outcomePrices": [0, 0],
+                "closed": True,
+                "active": False,
+            }
+        )
+        is True
+    )
+
+
+@pytest.mark.asyncio
+async def test_rest_poll_aggregates_invalid_payload_warnings(monkeypatch, caplog):
+    state = StubState()
+    streamer = DataStreamer(state, state.settings)
+    streamer.clob_client = None
+
+    async def fake_client_get(url, params=None):
+        class Resp:
+            status_code = 200
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return [
+                    {"id": "bad-sum", "outcomePrices": [0.7, 0.7]},
+                    {"outcomePrices": [0.5, 0.5]},  # missing id
+                    {"id": "ok", "outcomePrices": [0.4, 0.6]},
+                ]
+
+        return Resp()
+
+    caplog.set_level("WARNING")
+    with monkeypatch.context() as m:
+        m.setattr("httpx.AsyncClient.get", lambda self, url, params=None: fake_client_get(url, params))
+        await streamer._poll_rest()
+
+    summary_records = [r for r in caplog.records if r.__dict__.get("event") == "clob.rest.invalid_payload.summary"]
+    assert len(summary_records) == 1
+    summary = summary_records[0]
+    assert summary.__dict__.get("invalid_count") == 2
+    reasons = summary.__dict__.get("invalid_reasons") or []
+    reason_names = {entry.get("reason") for entry in reasons}
+    assert {"missing_market_id", "binary_sum_out_of_range"}.issubset(reason_names)
+
+
 @pytest.mark.asyncio
 async def test_fetch_midpoints_parses_dict_payload(monkeypatch):
     state = StubState()

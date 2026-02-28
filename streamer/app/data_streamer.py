@@ -91,7 +91,7 @@ class DataStreamer:
                 continue
         return parsed
 
-    def _validate_rest_market(self, raw: dict) -> bool:
+    def _validate_rest_market_with_reason(self, raw: dict) -> tuple[bool, str]:
         market_id = (
             raw.get("id")
             or raw.get("marketId")
@@ -100,22 +100,37 @@ class DataStreamer:
             or raw.get("condition_id")
         )
         if not market_id:
-            return False
+            return False, "missing_market_id"
         prices = self._extract_prices_for_validation(raw)
         if not prices:
-            return False
+            return False, "missing_prices"
         if len(prices) > 100:
-            return False
+            return False, "too_many_prices"
         for price in prices:
             if price.is_nan() or price.is_infinite():
-                return False
+                return False, "non_finite_price"
             if price < 0 or price > 1:
-                return False
+                return False, "price_out_of_range"
         if len(prices) == 2:
             total = prices[0] + prices[1]
+            # Legacy/closed payloads can legitimately report [0, 0]; accept those.
+            if total == 0:
+                is_closed = bool(raw.get("closed") or raw.get("resolved") or raw.get("archived"))
+                is_inactive = raw.get("active") is False
+                if is_closed or is_inactive:
+                    return True, "closed_zero_sum"
             if total < Decimal("0.9") or total > Decimal("1.1"):
-                return False
-        return True
+                return False, "binary_sum_out_of_range"
+        return True, "ok"
+
+    def _validate_rest_market(self, raw: dict) -> bool:
+        is_valid, _reason = self._validate_rest_market_with_reason(raw)
+        return is_valid
+
+    @staticmethod
+    def _summarize_invalid_reasons(invalid_reasons: dict[str, int]) -> list[dict[str, int | str]]:
+        ordered = sorted(invalid_reasons.items(), key=lambda item: item[1], reverse=True)
+        return [{"reason": reason, "count": count} for reason, count in ordered]
 
     @staticmethod
     def _tune_http_logging() -> None:
@@ -437,12 +452,20 @@ class DataStreamer:
                     )
                 break
             valid_markets: list[dict[str, Any]] = []
+            invalid_reasons: dict[str, int] = {}
             for market in markets:
-                if not isinstance(market, dict) or not self._validate_rest_market(market):
-                    logger.warning(
-                        "CLOB REST payload failed validation",
-                        extra={"event": "clob.rest.invalid_payload"},
-                    )
+                if not isinstance(market, dict):
+                    reason = "non_dict_payload"
+                    invalid_reasons[reason] = invalid_reasons.get(reason, 0) + 1
+                    if self.stream_metrics:
+                        with suppress(Exception):
+                            self.stream_metrics.record_drop("ingest", "invalid_payload")
+                            self.stream_metrics.record_ingest_drop("rest", "invalid_payload")
+                    continue
+
+                is_valid, reason = self._validate_rest_market_with_reason(market)
+                if not is_valid:
+                    invalid_reasons[reason] = invalid_reasons.get(reason, 0) + 1
                     if self.stream_metrics:
                         with suppress(Exception):
                             self.stream_metrics.record_drop("ingest", "invalid_payload")
@@ -450,6 +473,19 @@ class DataStreamer:
                     continue
                 valid_markets.append(market)
                 await self._normalize_and_publish(market, source="rest")
+
+            if invalid_reasons:
+                logger.warning(
+                    "CLOB REST payloads failed validation",
+                    extra={
+                        "event": "clob.rest.invalid_payload.summary",
+                        "invalid_count": sum(invalid_reasons.values()),
+                        "invalid_reasons": self._summarize_invalid_reasons(invalid_reasons),
+                        "page_size": len(markets) if isinstance(markets, list) else 0,
+                        "cursor": cursor,
+                    },
+                )
+
             total += len(valid_markets)
             for market in valid_markets:
                 market_id = str(market.get("id") or market.get("marketId") or "")
