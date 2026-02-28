@@ -16,6 +16,20 @@ def _build_transport(expected_body: dict, *, status_code: int = 200, request_ass
     return httpx.MockTransport(handler)
 
 
+def _build_sequence_transport(expected_bodies: list[dict], *, status_code: int = 200, request_assertion=None):
+    responses = list(expected_bodies)
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request_assertion:
+            request_assertion(request)
+        if not responses:
+            raise AssertionError("unexpected extra request")
+        body = responses.pop(0)
+        return httpx.Response(status_code=status_code, json=body)
+
+    return httpx.MockTransport(handler)
+
+
 @pytest.mark.asyncio
 async def test_resolution_summary_parses_payload(monkeypatch):
     timestamp = int(datetime(2024, 1, 1, tzinfo=UTC).timestamp())
@@ -72,4 +86,51 @@ async def test_resolution_summary_raises_on_graph_errors():
 
     with pytest.raises(GoldskyError):
         await client.resolution_summary("0xabc")
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_resolution_summary_falls_back_when_resolution_field_missing():
+    payloads = [
+        {"errors": [{"message": "Type `Query` has no field `conditionResolutions`"}]},
+        {"data": {"condition": {"id": "0xabc", "payoutNumerators": ["1", "0"], "payoutDenominator": "1"}}},
+    ]
+    transport = _build_sequence_transport(payloads)
+    client = AsyncGoldskyClient("https://example.com/subgraph", transport=transport)
+
+    summary = await client.resolution_summary("0xabc", ["YES", "NO"])
+    assert summary is not None
+    assert summary["resolved"] is True
+    assert summary["payouts"] == [1, 0]
+    assert summary["winners"] == [{"index": 0, "label": "YES", "payout": 1}]
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_resolution_summary_batch_falls_back_when_resolution_field_missing():
+    payloads = [
+        {"errors": [{"message": "Type `Query` has no field `conditionResolutions`"}]},
+        {
+            "data": {
+                "c0Cond": {"id": "0xabc", "payoutNumerators": ["0", "1"], "payoutDenominator": "1"},
+                "c1Cond": {"id": "0xdef", "payoutNumerators": [], "payoutDenominator": None},
+            }
+        },
+    ]
+    transport = _build_sequence_transport(payloads)
+    client = AsyncGoldskyClient("https://example.com/subgraph", transport=transport)
+
+    batch = await client.resolution_summary_batch(
+        [
+            ("0xabc", 2, ["YES", "NO"]),
+            ("0xdef", 2, ["YES", "NO"]),
+        ]
+    )
+    assert batch["0xabc"] is not None
+    assert batch["0xabc"]["resolved"] is True
+    assert batch["0xabc"]["payouts"] == [0, 1]
+
+    # Hint-based payout padding still applies on the fallback path.
+    assert batch["0xdef"] is not None
+    assert batch["0xdef"]["payouts"] == [0, 0]
     await client.aclose()

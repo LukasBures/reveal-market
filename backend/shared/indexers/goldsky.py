@@ -86,6 +86,11 @@ def _as_datetime(value: Any) -> datetime | None:
     return datetime.fromtimestamp(timestamp, tz=UTC)
 
 
+def _is_missing_condition_resolutions_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "conditionresolutions" in message and ("no field" in message or "cannot query field" in message)
+
+
 class AsyncGoldskyClient:
     """Async variant of the Goldsky client (uses httpx.AsyncClient + AsyncRetrying)."""
 
@@ -107,6 +112,8 @@ class AsyncGoldskyClient:
         self._transport = transport or httpx.AsyncHTTPTransport(retries=0)
         self._client = httpx.AsyncClient(timeout=self.timeout_seconds, transport=self._transport)
         self._logger = logging.getLogger(logger_name)
+        self._supports_condition_resolutions: bool | None = None
+        self._logged_condition_resolution_schema_warning = False
         wait_strategy = wait_random_exponential(multiplier=backoff_seconds, max=backoff_max_seconds)
 
         async def _before_sleep(retry_state):
@@ -152,6 +159,59 @@ class AsyncGoldskyClient:
                 return await action()
         raise GoldskyError("goldsky request failed unexpectedly")
 
+    def _log_condition_resolution_schema_warning_once(self, *, error: str) -> None:
+        if self._logged_condition_resolution_schema_warning:
+            return
+        self._logged_condition_resolution_schema_warning = True
+        log_event(
+            self._logger,
+            logging.WARNING,
+            event="goldsky.resolution.schema_mismatch",
+            message="conditionResolutions field missing; falling back to condition query",
+            error=error,
+        )
+
+    @staticmethod
+    def _build_batch_query(
+        chunk: Sequence[tuple[str, int | None, Sequence[str] | None]],
+        *,
+        offset: int,
+        include_resolutions: bool,
+    ) -> tuple[str, list[tuple[str, str | None, str]]]:
+        query_parts: list[str] = []
+        aliases: list[tuple[str, str | None, str]] = []
+        for idx, (condition_id, _hint, _outcomes) in enumerate(chunk):
+            condition_key = condition_id.lower()
+            alias_res = f"c{offset + idx}" if include_resolutions else None
+            alias_cond = f"c{offset + idx}Cond"
+            aliases.append((condition_key, alias_res, alias_cond))
+            if alias_res:
+                query_parts.append(
+                    f"""{alias_res}: conditionResolutions(
+  where: {{ conditionId: "{condition_key}" }}
+  orderBy: blockNumber
+  orderDirection: desc
+  first: 1
+) {{
+  conditionId
+  oracle
+  questionId
+  payoutNumerators
+  transactionHash
+  blockNumber
+  blockTimestamp
+}}"""
+                )
+            query_parts.append(
+                f"""{alias_cond}: condition(id: "{condition_key}") {{
+  id
+  payoutNumerators
+  payoutDenominator
+}}"""
+            )
+        query = "{\n" + "\n".join(query_parts) + "\n}"
+        return query, aliases
+
     async def resolution_summary(
         self,
         condition_id: str,
@@ -168,18 +228,24 @@ class AsyncGoldskyClient:
         record: dict[str, Any] = {}
         block_number = None
         block_timestamp = None
-        try:
-            data = await self._run_with_retry(lambda: self._post(payload))
-            resolutions = data.get("conditionResolutions") or []
-        except (GoldskyError, httpx.HTTPError, httpx.RequestError, RetryError) as exc:
-            log_event(
-                self._logger,
-                logging.WARNING,
-                event="goldsky.resolution.failed",
-                message="failed to fetch condition resolutions",
-                error=str(exc),
-            )
-            resolutions = []
+        if self._supports_condition_resolutions is not False:
+            try:
+                data = await self._run_with_retry(lambda: self._post(payload))
+                self._supports_condition_resolutions = True
+                resolutions = data.get("conditionResolutions") or []
+            except (GoldskyError, httpx.HTTPError, httpx.RequestError, RetryError) as exc:
+                if _is_missing_condition_resolutions_error(exc):
+                    self._supports_condition_resolutions = False
+                    self._log_condition_resolution_schema_warning_once(error=str(exc))
+                else:
+                    log_event(
+                        self._logger,
+                        logging.WARNING,
+                        event="goldsky.resolution.failed",
+                        message="failed to fetch condition resolutions",
+                        error=str(exc),
+                    )
+                resolutions = []
 
         if not resolutions:
             # Fall back to querying the Condition entity directly (pnl-subgraph schema).
@@ -249,37 +315,9 @@ class AsyncGoldskyClient:
 
         for i in range(0, len(condition_requests), chunk_size):
             chunk = condition_requests[i : i + chunk_size]
-            query_parts: list[str] = []
-            aliases: list[tuple[str, str]] = []
-            for idx, (condition_id, _hint, _outcomes) in enumerate(chunk):
-                alias_res = f"c{i + idx}"
-                alias_cond = f"c{i + idx}Cond"
-                aliases.append((condition_id.lower(), alias_res))
-                query_parts.append(
-                    f"""{alias_res}: conditionResolutions(
-  where: {{ conditionId: "{condition_id.lower()}" }}
-  orderBy: blockNumber
-  orderDirection: desc
-  first: 1
-) {{
-  conditionId
-  oracle
-  questionId
-  payoutNumerators
-  transactionHash
-  blockNumber
-  blockTimestamp
-}}"""
-                )
-                query_parts.append(
-                    f"""{alias_cond}: condition(id: "{condition_id.lower()}") {{
-  id
-  payoutNumerators
-  payoutDenominator
-}}"""
-                )
-            query = "{\n" + "\n".join(query_parts) + "\n}"
-
+            hints = {condition_id.lower(): hint for condition_id, hint, _outcomes in chunk}
+            include_resolutions = self._supports_condition_resolutions is not False
+            query, aliases = self._build_batch_query(chunk, offset=i, include_resolutions=include_resolutions)
             payload = {"query": query}
             try:
 
@@ -287,15 +325,32 @@ class AsyncGoldskyClient:
                     return await self._post(body)
 
                 data = await self._run_with_retry(_do_post)
-            except (GoldskyError, httpx.HTTPError, httpx.RequestError, RetryError):
-                # Mark all in this chunk as None on failure to avoid partial poisoning.
-                for condition_id, _alias in aliases:
-                    results.setdefault(condition_id, None)
-                continue
+                if include_resolutions:
+                    self._supports_condition_resolutions = True
+            except (GoldskyError, httpx.HTTPError, httpx.RequestError, RetryError) as exc:
+                if include_resolutions and _is_missing_condition_resolutions_error(exc):
+                    self._supports_condition_resolutions = False
+                    self._log_condition_resolution_schema_warning_once(error=str(exc))
+                    fallback_query, aliases = self._build_batch_query(chunk, offset=i, include_resolutions=False)
+                    fallback_payload = {"query": fallback_query}
+                    try:
 
-            for condition_id, alias_res in aliases:
-                alias_cond = f"{alias_res}Cond"
-                resolutions = data.get(alias_res) or []
+                        async def _do_post_fallback(body: dict[str, Any] = fallback_payload) -> dict[str, Any]:
+                            return await self._post(body)
+
+                        data = await self._run_with_retry(_do_post_fallback)
+                    except (GoldskyError, httpx.HTTPError, httpx.RequestError, RetryError):
+                        for condition_id, _alias_res, _alias_cond in aliases:
+                            results.setdefault(condition_id, None)
+                        continue
+                else:
+                    # Mark all in this chunk as None on failure to avoid partial poisoning.
+                    for condition_id, _alias_res, _alias_cond in aliases:
+                        results.setdefault(condition_id, None)
+                    continue
+
+            for condition_id, alias_res, alias_cond in aliases:
+                resolutions = data.get(alias_res) or [] if alias_res else []
                 condition = data.get(alias_cond) or {}
                 record: dict[str, Any] = {}
                 payouts: list[int] = []
@@ -316,7 +371,7 @@ class AsyncGoldskyClient:
                     resolved = bool(payouts) or bool(den)
 
                 # Fill hint-based padding for payouts when needed.
-                hint = next((h for cid, h, _out in chunk if cid.lower() == condition_id), None)
+                hint = hints.get(condition_id)
                 if not payouts and isinstance(hint, int) and hint > 0:
                     payouts = [0] * hint
 
