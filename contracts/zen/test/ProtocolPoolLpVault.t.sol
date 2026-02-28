@@ -462,15 +462,31 @@ contract ProtocolPoolLpVaultTest is Test {
         assertEq(token.balanceOf(lp2), 40 ether, "LP2: 50 * 40/50 = 40");
     }
 
-    function testAdminWithdrawReducesLpValue() external {
+    function testAdminWithdrawCannotReduceLpValue() external {
         _lpDeposit(lp1, 100 ether);
 
-        // Admin withdraws 30
+        // Admin cannot withdraw into LP principal.
         vm.prank(owner);
-        pool.withdraw(payable(owner), 30 ether);
+        vm.expectRevert(ProtocolPool.InsufficientPool.selector);
+        pool.withdraw(payable(owner), 1 wei);
 
-        // 70 assets, 100 shares → LP's 100 shares = 70 ZEN
-        assertEq(pool.convertToAssets(100 ether), 70 ether);
+        // LP value stays at 1:1.
+        assertEq(pool.convertToAssets(100 ether), 100 ether);
+    }
+
+    function testAdminWithdrawAllowsSurplusOnly() external {
+        _lpDeposit(lp1, 100 ether);
+        token.mint(address(pool), 20 ether); // simulate surplus
+
+        // Admin can withdraw the 20 surplus.
+        vm.prank(owner);
+        pool.withdraw(payable(owner), 20 ether);
+        assertEq(pool.convertToAssets(100 ether), 100 ether, "LP value unchanged");
+
+        // Cannot touch LP principal.
+        vm.prank(owner);
+        vm.expectRevert(ProtocolPool.InsufficientPool.selector);
+        pool.withdraw(payable(owner), 1 wei);
     }
 
     function testIdleLiquidity() external {

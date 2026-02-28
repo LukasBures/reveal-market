@@ -172,13 +172,16 @@ contract ProtocolPoolGuardsTest is Test {
 
     function testWithdrawOnlyOwner() external {
         _fundPool(2 ether);
+        token.mint(address(pool), 3 ether); // add surplus so owner can withdraw
+
         vm.prank(stranger);
         vm.expectRevert();
         pool.withdraw(payable(stranger), 1 ether);
 
+        // Owner can withdraw surplus (3 ether) but not LP principal.
         vm.prank(owner);
-        pool.withdraw(payable(owner), 1 ether);
-        assertEq(token.balanceOf(owner), 1 ether);
+        pool.withdraw(payable(owner), 3 ether);
+        assertEq(token.balanceOf(owner), 3 ether);
     }
 
     function testWithdrawCannotBreachReservedLiability() external {
@@ -276,6 +279,76 @@ contract ProtocolPoolGuardsTest is Test {
 
         (uint256 shares,) = pool.depositAt(owner, 0);
         assertEq(shares, 5 ether, "remaining deposit intact");
+    }
+
+    function testWithdrawCannotBreachLpPrincipal() external {
+        // LP deposits 10, market surplus adds 5 → balance=15, totalShares=10.
+        _fundPool(10 ether);
+        token.mint(address(pool), 5 ether); // simulate surplus from rake
+
+        // Owner can withdraw the 5 surplus.
+        vm.prank(owner);
+        pool.withdraw(payable(owner), 5 ether);
+        assertEq(token.balanceOf(owner), 5 ether);
+
+        // Owner cannot withdraw into LP principal.
+        vm.prank(owner);
+        vm.expectRevert(ProtocolPool.InsufficientPool.selector);
+        pool.withdraw(payable(owner), 1 wei);
+    }
+
+    function testWithdrawFloorUsesMaxOfReservedAndShares() external {
+        // LP deposits 5, then market reserves 8 (with extra liquidity from direct mint).
+        _fundPool(5 ether);
+        token.mint(address(pool), 10 ether); // balance=15
+        vm.prank(factory);
+        pool.registerMarket(market, 10 ether);
+        vm.prank(market);
+        pool.reserveLiability(market, 8 ether);
+
+        // reservedTotal=8 > totalShares=5, so floor=8. Can withdraw 15-8=7.
+        vm.prank(owner);
+        pool.withdraw(payable(owner), 7 ether);
+        assertEq(token.balanceOf(owner), 7 ether);
+
+        // Cannot withdraw more.
+        vm.prank(owner);
+        vm.expectRevert(ProtocolPool.InsufficientPool.selector);
+        pool.withdraw(payable(owner), 1 wei);
+    }
+
+    function testForceReleaseLiability() external {
+        _fundPool(10 ether);
+        vm.prank(factory);
+        pool.registerMarket(market, 10 ether);
+        vm.prank(market);
+        pool.reserveLiability(market, 5 ether);
+
+        assertEq(pool.reservedTotal(), 5 ether);
+
+        // Owner force-releases the orphaned reservation.
+        vm.prank(owner);
+        pool.forceReleaseLiability(market);
+        assertEq(pool.reservedTotal(), 0);
+        assertEq(pool.reservedLiability(market), 0);
+    }
+
+    function testForceReleaseLiabilityOnlyOwner() external {
+        _fundPool(10 ether);
+        vm.prank(factory);
+        pool.registerMarket(market, 10 ether);
+        vm.prank(market);
+        pool.reserveLiability(market, 5 ether);
+
+        vm.prank(stranger);
+        vm.expectRevert();
+        pool.forceReleaseLiability(market);
+    }
+
+    function testForceReleaseLiabilityRevertsOnZero() external {
+        vm.prank(owner);
+        vm.expectRevert(ProtocolPool.InvalidAmount.selector);
+        pool.forceReleaseLiability(market);
     }
 
     function _fundPool(uint256 amount) private {

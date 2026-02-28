@@ -187,13 +187,26 @@ contract ProtocolPool is Ownable2Step, ReentrancyGuard {
     }
 
     /// @notice Owner can withdraw idle funds (e.g., to re-seed the pool elsewhere).
+    ///         Withdrawals are capped at protocol surplus — LP principal (totalShares) and
+    ///         reserved liquidity are both protected.
     function withdraw(address payable to, uint256 amount) external onlyOwner nonReentrant {
         if (to == address(0)) revert InvalidAddress();
         uint256 balance = COLLATERAL_TOKEN.balanceOf(address(this));
         if (amount > balance) revert InsufficientPool();
-        if (balance - amount < reservedTotal) revert InsufficientPool();
+        uint256 floor = reservedTotal > totalShares ? reservedTotal : totalShares;
+        if (balance - amount < floor) revert InsufficientPool();
         _safeTransferExactOut(to, amount);
         emit Withdrawn(to, amount);
+    }
+
+    /// @notice Owner can force-release an orphaned reservation for a market that will never
+    ///         call releaseLiabilityReservation (e.g., bricked market, stuck settlement).
+    function forceReleaseLiability(address market) external onlyOwner {
+        uint256 reserved = reservedLiability[market];
+        if (reserved == 0) revert InvalidAmount();
+        reservedLiability[market] = 0;
+        reservedTotal -= reserved;
+        emit LiabilityReservationReleased(market, reserved);
     }
 
     /// @notice Sets a global risk budget; zero disables capacity tracking.
