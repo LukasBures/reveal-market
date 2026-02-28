@@ -41,6 +41,13 @@ contract MarketFactoryGuardsTest is Test {
         factory.setVerifierApproval(address(verifier), true);
     }
 
+    function testRenounceOwnershipReverts() external {
+        vm.prank(owner);
+        vm.expectRevert();
+        factory.renounceOwnership();
+        assertEq(factory.owner(), owner, "ownership unchanged");
+    }
+
     function testCreateMarketRevertsWhenPaused() external {
         vm.prank(owner);
         factory.setFactoryPaused(true);

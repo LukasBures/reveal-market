@@ -150,6 +150,11 @@ contract MarketFactory is Ownable2Step {
         _trackRelayer(address(relayerEscrow_));
     }
 
+    /// @dev Prevent accidental ownership renunciation — factory admin is critical for market lifecycle.
+    function renounceOwnership() public pure override {
+        revert();
+    }
+
     /// @notice Owner can update the relayer escrow address (e.g., when rotating relayers).
     function setRelayerEscrow(RelayerEscrow relayer) external onlyOwner {
         if (address(relayer) == address(0)) revert InvalidRelayer();
