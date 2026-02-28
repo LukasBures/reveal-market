@@ -1,6 +1,6 @@
 # Reveal Market Local Stack Hardening Plan
 
-Date: 2026-02-28  
+Date: 2026-02-28
 Author: Codex (execution + analysis)
 
 ## 1. Goal
@@ -480,10 +480,10 @@ Acceptance criteria:
 
 ## 7. Proposed Delivery Sequence
 
-1. **P0-A** hedger healthcheck simplification + timeout/start-period tuning  
-2. **P0** run_local conflict auto-recovery  
-3. **P1** streamer log aggregation/rate-limiting  
-4. **P2** Goldsky fallback and schema mismatch handling  
+1. **P0-A** hedger healthcheck simplification + timeout/start-period tuning
+2. **P0** run_local conflict auto-recovery
+3. **P1** streamer log aggregation/rate-limiting
+4. **P2** Goldsky fallback and schema mismatch handling
 5. **P2** local smoke checker script
 
 Rationale:
@@ -546,4 +546,3 @@ Addressing these in the proposed order should significantly improve:
 - confidence in health signals
 - log usability for real issue detection
 - resilience to upstream schema changes
-

@@ -451,6 +451,52 @@ RM_PRICING_VERIFYING_CONTRACT=0x<NEW_FACTORY>
 
 > **Note on `.env.example` bug**: Line 330 currently sets `HEDGER_VAULT_RPC_URL` to `https://horizen-testnet.rpc.caldera.xyz/http`, but this should be a **Polygon** RPC URL since the vault is on Polygon chain. Fix this regardless of mainnet migration.
 
+### Gas & RPC Tuning for Mainnet
+
+On testnet, gas settings default to `None` (use node suggestion) and timeouts are generous. For mainnet with real value at stake, consider explicit configuration:
+
+```bash
+# ──── Worker: Settlement Submission ────
+# If mainnet gas is volatile, set explicit gas price overrides:
+RM_SETTLEMENT_GAS_PRICE_GWEI=0.001          # Horizen L3 typically has very low gas
+RM_SETTLEMENT_MAX_PRIORITY_FEE_GWEI=0.001
+# Optional: dedicated RPC for settlement (separate from general RM_RPC_URL for reliability):
+# RM_SETTLEMENT_RPC_URL=https://horizen.calderachain.xyz/http
+
+# ──── Worker: Lock Batches ────
+RM_LOCK_BATCHES_GAS_LIMIT=800000            # Default; increase if lockBatches reverts with out-of-gas
+RM_LOCK_BATCHES_GAS_PRICE_GWEI=0.001
+RM_LOCK_BATCHES_MAX_PRIORITY_FEE_GWEI=0.001
+# Route lockBatches through relayer instead of direct RPC (reduces key exposure):
+# RM_LOCK_BATCHES_USE_RELAYER=true
+
+# ──── Relayer: Gas & Retry Tuning ────
+RELAYER_FEE_BUMP_PERCENT=0.15               # 15% fee bump on retry (default; may need tuning)
+RELAYER_TX_TIMEOUT_SECONDS=120              # Default; mainnet block times may differ
+RELAYER_MAX_RETRIES=3                       # Increase if mainnet is congested
+
+# ──── RPC Client Timeout ────
+RM_RPC_HTTP_TIMEOUT_SECONDS=10              # Default; increase for slow RPCs
+
+# ──── Relayer Circuit Breaker ────
+# These protect against cascading RPC failures; defaults are reasonable but review:
+RELAYER_RPC_CIRCUIT_THRESHOLD=5             # Failures before tripping
+RELAYER_RPC_CIRCUIT_WINDOW_SECONDS=30       # Window to count failures
+RELAYER_RPC_CIRCUIT_COOLDOWN_SECONDS=30     # Cooldown before retrying
+```
+
+> **Note on `RM_LOCK_BATCHES_USE_RELAYER`**: When `false` (default), the worker submits `lockBatches` directly via RPC using the settlement signer key. When `true`, it routes through the relayer API. Using the relayer reduces key exposure (only the relayer holds the signing key) but adds a dependency. For mainnet, evaluate whether the added reliability of the relayer queue is worth the extra hop.
+
+### Hedger: Polygon Defaults Already Correct
+
+The hedger's `hedger/app/config.py` hardcoded defaults are already targeting **Polygon mainnet**:
+- `polygon_chain_id=137` (correct)
+- `polygon_rpc_url="https://polygon-rpc.com"` (correct)
+- `usdc_address="0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"` (bridged USDC on Polygon, correct)
+- `polymarket_exchange="0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"` (Polymarket CTF exchange, correct)
+
+No code changes needed for the hedger — only set the env vars in `.env.production` (done above). The only bug is in `.env.example` where `HEDGER_VAULT_RPC_URL` incorrectly defaults to the Horizen testnet RPC (see note below).
+
 ### `.env.example` (update defaults for documentation)
 
 Update all default values from testnet → mainnet so new developers see the correct chain.
@@ -547,6 +593,19 @@ DEFAULT_EXPLORER_URL = os.getenv("NEXT_PUBLIC_BLOCK_EXPLORER_URL", "https://hori
 DEFAULT_TOKEN_ADDRESS = "0x<MAINNET_ZEN_TOKEN>"  # was testnet ZEN
 DEFAULT_POOL_ADDRESS = os.getenv("RM_PROTOCOL_POOL_ADDRESS", "0x<MAINNET_POOL>")  # was testnet pool
 ```
+
+**`scripts/send_eth.py`** (lines 32-34):
+```python
+# Line 32-33 default to Base mainnet (for bridging), NOT Horizen. Update if you want
+# this script to default to Horizen Mainnet for gas top-ups:
+DEFAULT_RPC_URL = os.getenv("NEXT_PUBLIC_RPC_URL", "https://horizen.calderachain.xyz/http")
+DEFAULT_EXPLORER_URL = os.getenv("NEXT_PUBLIC_BLOCK_EXPLORER_URL", "https://horizen.explorer.caldera.xyz")
+
+# Line 34 references a testnet keyfile — update or remove:
+DEFAULT_KEYFILE = Path(__file__).resolve().parent / "generated" / "<mainnet_funding_wallet>.txt"
+```
+
+> **Note**: `send_eth.py` currently defaults to `https://mainnet.base.org` (Base chain), which is intentional if used for Base ETH transfers. If you want it to default to Horizen Mainnet for relayer gas top-ups (referenced in Phase 14), update the defaults above. Alternatively, always pass `--rpc-url` explicitly.
 
 **`scripts/zen_testnet_faucet.py`** — This script is **testnet-only**. Do not use on mainnet. Consider adding a guard:
 ```python
@@ -736,10 +795,12 @@ Run through this checklist **before** going live:
 - [ ] Prover responds to proof requests
 
 ### Wallet Balances
-- [ ] Relayer has sufficient ETH for gas
+- [ ] Relayer has sufficient ETH for gas (check: `cast balance <RELAYER> --rpc-url https://horizen.calderachain.xyz/http`)
 - [ ] Settlement signer has sufficient ETH
 - [ ] Oracle has sufficient ETH
-- [ ] Protocol Pool has ZEN liquidity
+- [ ] Protocol Pool has ZEN liquidity (`cast call <ZEN_TOKEN> "balanceOf(address)(uint256)" <POOL> --rpc-url ...`)
+- [ ] RelayerEscrow has ZEN token allowance set (if required by commit flow)
+- [ ] Hedger vault signer has MATIC/POL on Polygon (if hedger active): `cast balance <HEDGER_VAULT_ADDR> --rpc-url https://polygon-rpc.com`
 
 ---
 
@@ -767,15 +828,60 @@ Execute in this exact order:
 Run this on the prod server **after updating env but before starting services** to catch misconfigurations:
 
 ```bash
-# Verify critical env vars are set and not testnet values:
-grep -c "2651420" .env.production && echo "WARNING: testnet chain ID found!" || echo "OK: no testnet chain ID"
-grep -c "horizen-testnet" .env.production && echo "WARNING: testnet RPC found!" || echo "OK: no testnet RPC"
+#!/bin/bash
+set -euo pipefail
 
-# Verify all three escrow address vars match:
 source .env.production
+
+echo "=== Environment Validation ==="
+
+# 1. Check for leftover testnet values
+grep -c "2651420" .env.production && echo "FAIL: testnet chain ID found!" || echo "OK: no testnet chain ID"
+grep -c "horizen-testnet" .env.production && echo "FAIL: testnet RPC found!" || echo "OK: no testnet RPC"
+
+# 2. Verify all three escrow address vars match
 [ "$RM_RELAYER_ESCROW_ADDRESS" = "$RELAYER_ESCROW_ADDRESS" ] && \
 [ "$RELAYER_ESCROW_ADDRESS" = "$NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS" ] && \
-  echo "OK: escrow addresses match" || echo "ERROR: escrow address mismatch!"
+  echo "OK: escrow addresses match" || echo "FAIL: escrow address mismatch!"
+
+# 3. Verify chain ID consistency
+[ "$NEXT_PUBLIC_CHAIN_ID" = "26514" ] && echo "OK: frontend chain ID" || echo "FAIL: frontend chain ID = $NEXT_PUBLIC_CHAIN_ID"
+[ "$CHAIN_ID" = "26514" ] && echo "OK: relayer chain ID" || echo "FAIL: relayer chain ID = $CHAIN_ID"
+[ "$RM_PRICING_CHAIN_ID" = "26514" ] && echo "OK: pricing chain ID" || echo "FAIL: pricing chain ID = $RM_PRICING_CHAIN_ID"
+
+echo ""
+echo "=== On-Chain Validation ==="
+
+RPC="https://horizen.calderachain.xyz/http"
+
+# 4. Verify RPC is reachable and returns expected chain ID
+ACTUAL_CHAIN_ID=$(cast chain-id --rpc-url "$RPC" 2>/dev/null)
+[ "$ACTUAL_CHAIN_ID" = "26514" ] && echo "OK: RPC chain ID = 26514" || echo "FAIL: RPC chain ID = $ACTUAL_CHAIN_ID"
+
+# 5. Verify contracts exist on-chain (non-zero code)
+for LABEL_ADDR in "MarketFactory:$RM_FACTORY_ADDRESS" "ProtocolPool:$RM_PROTOCOL_POOL_ADDRESS" \
+  "RelayerEscrow:$RELAYER_ESCROW_ADDRESS" "Verifier:$RM_VERIFIER_ADDRESS"; do
+  LABEL="${LABEL_ADDR%%:*}"
+  ADDR="${LABEL_ADDR##*:}"
+  CODE=$(cast code "$ADDR" --rpc-url "$RPC" 2>/dev/null)
+  [ "$CODE" != "0x" ] && echo "OK: $LABEL has code at $ADDR" || echo "FAIL: $LABEL has no code at $ADDR"
+done
+
+# 6. Verify wallet balances
+for LABEL_KEY in "Relayer:RELAYER_PRIVATE_KEY" "Settlement:RM_SETTLEMENT_SIGNER_PRIVATE_KEY"; do
+  LABEL="${LABEL_KEY%%:*}"
+  KEY="${LABEL_KEY##*:}"
+  ADDR=$(cast wallet address --private-key "${!KEY}" 2>/dev/null)
+  BAL=$(cast balance "$ADDR" --rpc-url "$RPC" 2>/dev/null)
+  echo "INFO: $LABEL ($ADDR) balance = $BAL wei"
+done
+
+# 7. Verify circuit hash matches
+ONCHAIN_HASH=$(cast call "$RM_VERIFIER_ADDRESS" "circuitHash()(bytes32)" --rpc-url "$RPC" 2>/dev/null)
+[ "$ONCHAIN_HASH" = "$PROVER_CIRCUIT_HASH" ] && echo "OK: circuit hash matches" || echo "FAIL: circuit hash mismatch ($ONCHAIN_HASH vs $PROVER_CIRCUIT_HASH)"
+
+echo ""
+echo "=== Verification Complete ==="
 ```
 
 ### DNS / Domain
@@ -809,7 +915,7 @@ No DNS changes needed — `revealmarket.xyz` and subdomains stay the same. The c
 ### Ongoing
 - [ ] Set up balance monitoring alerts (Prometheus + Grafana or simple cron script)
 - [ ] Set up transaction failure alerts
-- [ ] Implement automatic gas top-up for relayer (via funding wallet + `scripts/send_eth.py`)
+- [ ] Implement automatic gas top-up for relayer (via funding wallet + `scripts/send_eth.py --rpc-url https://horizen.calderachain.xyz/http`)
 - [ ] Regular ZEN liquidity monitoring for Protocol Pool
 - [ ] Monitor hedger Polygon wallet balance (if hedger active)
 - [ ] Weekly review of Docker resource utilization — scale up if hitting limits
@@ -912,6 +1018,7 @@ Adjust in `docker-compose.yml` and/or `docker-compose.prod.yml` `deploy.resource
 | `contracts/scripts/monitoring_report.py` | Hardcoded RPC URL (line 11) |
 | `scripts/send_erc20.py` | Default RPC URL, explorer URL, token address (lines 34-38) |
 | `scripts/send_to_protocol_pool.py` | Default RPC URL, explorer URL, token address, pool address (lines 36-40) |
+| `scripts/send_eth.py` | Default RPC URL, explorer URL, keyfile path (lines 32-34) — currently defaults to Base mainnet; update if used for Horizen gas top-ups |
 
 ### Environment Files
 
@@ -1022,6 +1129,9 @@ Adjust in `docker-compose.yml` and/or `docker-compose.prod.yml` `deploy.resource
 | Docker resource exhaustion | **Medium** — OOM kills under mainnet load | Review and bump resource limits (see Appendix D) |
 | No rollback plan | **High** — stuck on broken mainnet config | Prepare `.env.production.testnet` backup before cutover (see Appendix A) |
 | Secrets reused from testnet | **Medium** — bearer tokens/API secrets exposed | Regenerate all service-to-service secrets (Phase 1 secret generation) |
+| Gas settings untuned | **Medium** — settlement/lock txns fail or overpay | Review and set explicit gas prices in `.env.production` (Phase 6 gas tuning section) |
+| `send_eth.py` defaults to Base | **Low** — gas top-up script hits wrong chain | Pass `--rpc-url` explicitly or update defaults (Phase 7) |
+| Settlement RPC single-point-of-failure | **Medium** — one RPC outage blocks all settlements | Consider `RM_SETTLEMENT_RPC_URL` with a separate provider |
 
 ---
 
@@ -1042,7 +1152,7 @@ Phase 7  → Update hardcoded defaults in code         (1 hour)
            ├── 2 backend files
            ├── 4 frontend files
            ├── 1 contracts monitoring script
-           └── 2 helper scripts
+           └── 3 helper scripts (send_erc20, send_to_protocol_pool, send_eth)
 Phase 8  → Update frontend chain config              (30 min)
 Phase 9  → Update infrastructure configs             (30 min)
            └── docker-compose.yml (4 build arg defaults)
