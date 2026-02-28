@@ -492,8 +492,40 @@ fi
 if [[ ${#UP_ARGS[@]} -gt 0 ]]; then
   UP_CMD+=("${UP_ARGS[@]}")
 fi
-log_info "Running: ${UP_CMD[*]}"
-"${UP_CMD[@]}"
+
+run_compose_up_with_conflict_retry() {
+  local up_log
+  up_log="$(mktemp)"
+
+  log_info "Running: ${UP_CMD[*]}"
+  set +e
+  "${UP_CMD[@]}" 2>&1 | tee "${up_log}"
+  local up_status=${PIPESTATUS[0]}
+  set -e
+
+  if [[ "${up_status}" -eq 0 ]]; then
+    rm -f "${up_log}"
+    return 0
+  fi
+
+  # Recover once from stale compose artifacts (common after interrupted local runs).
+  if grep -Eqi "already exists|is already in use|Conflict\\. The container name" "${up_log}"; then
+    local down_cmd=("${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" down "--remove-orphans")
+    log_warn "Compose up failed due to stale Docker resources; cleaning project resources and retrying once."
+    log_info "Running: ${down_cmd[*]}"
+    "${down_cmd[@]}"
+    log_info "Retrying: ${UP_CMD[*]}"
+    set +e
+    "${UP_CMD[@]}" 2>&1 | tee "${up_log}"
+    up_status=${PIPESTATUS[0]}
+    set -e
+  fi
+
+  rm -f "${up_log}"
+  return ${up_status}
+}
+
+run_compose_up_with_conflict_retry
 
 API_PORT="${API_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-3000}"

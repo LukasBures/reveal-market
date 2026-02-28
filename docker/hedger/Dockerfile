@@ -81,7 +81,7 @@ COPY --chown=hedgeruser:hedgeruser ${SHARED_DIR} ./shared
 COPY --chown=hedgeruser:hedgeruser ${SERVICE_DIR}/app ./app
 COPY --chown=hedgeruser:hedgeruser ${SERVICE_DIR}/run.py ./run.py
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD python -m app.healthcheck
+HEALTHCHECK --interval=30s --timeout=10s --start-period=45s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:8090/healthz >/dev/null || exit 1
 
 CMD ["python", "run.py"]
