@@ -1,0 +1,268 @@
+[
+  {
+    "id": "beta-4eba4075-cf51-4772-a836-183d625a6690",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "BETA",
+    "title": "RevealMarket.extendCommitDeadline: Missing expiry guard allows reopening commits after deadline, enabling late-position insertion before lock",
+    "locations": [
+      "RevealMarket.extendCommitDeadline",
+      "RevealMarket.commitWithAuthorization",
+      "RevealMarket.lockBatches",
+      "MarketFactory.extendMarketCommitDeadline"
+    ],
+    "root_cause": "extendCommitDeadline() only checks monotonic increase and one-shot/max-range constraints, but never requires block.timestamp <= commitDeadline. Because commitWithAuthorization() gates on the mutable commitDeadline value, a factory owner can extend after the original deadline has already passed and reopen the commit window.",
+    "trigger_scenario": [
+      "Users submit commitments until the original commitDeadline and stop because commit window appears closed.",
+      "Original deadline passes, but oracle has not yet called lockBatches().",
+      "Factory owner calls extendMarketCommitDeadline(), which forwards to RevealMarket.extendCommitDeadline() and sets a new future deadline without checking that the previous deadline already expired.",
+      "Relayer resumes commitWithAuthorization() calls because block.timestamp is now below the new commitDeadline.",
+      "Oracle can no longer lock immediately since lockBatches() now requires waiting for the extended deadline.",
+      "Late commitments are inserted with more information than earlier participants had, breaking market fairness and deadline finality assumptions."
+    ],
+    "preconditions": [
+      "Market is still in Phase.Commit (not yet locked).",
+      "Original commit deadline has elapsed, and factory owner is willing to extend once.",
+      "Relayer continues accepting commits after extension."
+    ],
+    "impact": "unfair_treatment",
+    "likelihood": "malicious_action",
+    "belief_score": 0.86,
+    "description": null,
+    "category": null,
+    "severity": "informational",
+    "related_to": null,
+    "context_metadata": {
+      "repository": "reveal-market",
+      "commit": "5e1e80836cb2812e68c7deee1436e71b192858a4",
+      "scope_ids": [
+        "STATE_A_RevealMarketLifecycleAndBatchState"
+      ],
+      "affected_files": [
+        "contracts/zen/src/RevealMarket.sol",
+        "contracts/zen/src/MarketFactory.sol"
+      ]
+    },
+    "evidence": [
+      {
+        "type": "code",
+        "path": "contracts/zen/src/RevealMarket.sol",
+        "lines": "755-762",
+        "snippet": "extendCommitDeadline checks only newDeadline>commitDeadline, phase==Commit, one-shot flag, and max extension; no check that block.timestamp is still before current commitDeadline."
+      },
+      {
+        "type": "code",
+        "path": "contracts/zen/src/RevealMarket.sol",
+        "lines": "277-278",
+        "snippet": "commitWithAuthorization allows commits whenever block.timestamp < commitDeadline, so extending commitDeadline re-opens commit acceptance."
+      },
+      {
+        "type": "code",
+        "path": "contracts/zen/src/RevealMarket.sol",
+        "lines": "329-330",
+        "snippet": "lockBatches requires block.timestamp >= commitDeadline, so extension also delays locking and finalization."
+      },
+      {
+        "type": "code",
+        "path": "contracts/zen/src/MarketFactory.sol",
+        "lines": "351-354",
+        "snippet": "Factory owner can invoke extendMarketCommitDeadline at any time while market remains in commit phase."
+      }
+    ]
+  },
+  {
+    "id": "beta-9bab4b96-e729-40ce-bce7-dae2455beae8",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "BETA",
+    "title": "RevealMarket.enableRefunds: Timeout cancel path can discard posted results and accepted batch proofs, allowing privileged settlement rollback",
+    "locations": [
+      "RevealMarket.enableRefunds",
+      "RevealMarket.postResult",
+      "RevealMarket.verifyAndSettleBatched",
+      "RevealMarket._verifyBatchProof"
+    ],
+    "root_cause": "enableRefunds() allows transition from Locked -> Cancelled solely on timeout, without checking resultPosted status or settledBatchCount progress. This lets a privileged factory caller void a market after outcome publication and partial proof acceptance, effectively overriding in-flight settlement state.",
+    "trigger_scenario": [
+      "Market is locked and oracle posts the winning outcome via postResult().",
+      "Oracle submits one or more valid batch proofs through verifyAndSettleBatched(), so settledBatchCount and settled sums become non-zero, but not all batches are completed yet.",
+      "No final _finalizeSettlement() occurs before lockedAt + SETTLEMENT_TIMEOUT_SECONDS.",
+      "Factory owner calls enableMarketRefunds(), which forwards to enableRefunds() and flips phase to Cancelled without inspecting resultPosted or partial settlement progress.",
+      "All claim paths are disabled by phase check (requires Settled), and only refund paths remain.",
+      "Users who should have asymmetric winner payouts are instead forced into symmetric ticket refunds, rolling back economic finality after result revelation."
+    ],
+    "preconditions": [
+      "Phase is Locked and settlement timeout has elapsed.",
+      "Factory owner can call enableMarketRefunds().",
+      "Settlement is partially complete (or at least result is posted) but not finalized."
+    ],
+    "impact": "unfair_treatment",
+    "likelihood": "malicious_action",
+    "belief_score": 0.79,
+    "description": null,
+    "category": null,
+    "severity": "informational",
+    "related_to": null,
+    "context_metadata": {
+      "repository": "reveal-market",
+      "commit": "5e1e80836cb2812e68c7deee1436e71b192858a4",
+      "scope_ids": [
+        "FLOW_3_LockAndBatchSettlement",
+        "STATE_A_RevealMarketLifecycleAndBatchState"
+      ],
+      "affected_files": [
+        "contracts/zen/src/RevealMarket.sol"
+      ]
+    },
+    "evidence": [
+      {
+        "type": "code",
+        "path": "contracts/zen/src/RevealMarket.sol",
+        "lines": "473-493",
+        "snippet": "enableRefunds in Locked phase checks only timeout and then sets phase=Cancelled; it does not inspect resultPosted, settledBatchCount, or any settlement-progress fields."
+      },
+      {
+        "type": "code",
+        "path": "contracts/zen/src/RevealMarket.sol",
+        "lines": "381-387",
+        "snippet": "postResult persists outcome (resultPosted=true), but cancellation path does not require this to be false."
+      },
+      {
+        "type": "code",
+        "path": "contracts/zen/src/RevealMarket.sol",
+        "lines": "841-847",
+        "snippet": "_verifyBatchProof records partial progress (settledBatchCount and sums), which can still be abandoned by later enableRefunds timeout cancellation."
+      }
+    ]
+  },
+  {
+    "id": "beta-de16dec6-a64a-4e11-847b-68c230185d56",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "BETA",
+    "title": "RevealMarket._safeTransferExact: Strict balance-delta accounting can permanently DoS settlement/claims/refunds when collateral token behavior drifts",
+    "locations": [
+      "RevealMarket._safeTransferExact",
+      "RevealMarket._finalizeSettlement",
+      "RevealMarket.claim",
+      "RevealMarket.refundSelf",
+      "RevealMarket.refundTicket",
+      "RevealMarket.sweepUnclaimed",
+      "RevealMarket.sweepCancelledRefunds"
+    ],
+    "root_cause": "All payout paths hard-revert unless sender and recipient balance deltas are exactly compatible with a no-fee, non-rebasing token. _safeTransferExact() enforces senderDebited == amount and recipientReceived >= amount using pre/post balanceOf checks. If token mechanics change post-deployment (fee-on-transfer toggle, blacklist side effects, rebasing quirks), claims/refunds/sweeps and even surplus forwarding during finalization can revert indefinitely.",
+    "trigger_scenario": [
+      "Users commit funds and market reaches Locked or Settled lifecycle stages.",
+      "Collateral token behavior changes after deployment (e.g., transfer fee activation, blacklist semantics, unusual balance accounting).",
+      "Market executes _safeTransferExact() in _finalizeSettlement(), claim(), refund*(), or sweep*().",
+      "Pre/post balance checks fail strict invariants (senderDebited != amount or recipientReceived < amount).",
+      "Transaction reverts with FeeOnTransferNotSupported.",
+      "Because all outbound value paths share this helper, users can be stuck unable to claim or refund, and factory sweep fallback can also fail."
+    ],
+    "preconditions": [
+      "Collateral token does not maintain strict no-fee/no-rebase semantics for the full market lifetime.",
+      "Market reaches a state requiring token outflow (settle, claim, refund, or sweep)."
+    ],
+    "impact": "dos",
+    "likelihood": "external_dependency",
+    "belief_score": 0.83,
+    "description": null,
+    "category": null,
+    "severity": "informational",
+    "related_to": null,
+    "context_metadata": {
+      "repository": "reveal-market",
+      "commit": "5e1e80836cb2812e68c7deee1436e71b192858a4",
+      "scope_ids": [
+        "FLOW_3_LockAndBatchSettlement",
+        "STATE_A_RevealMarketLifecycleAndBatchState"
+      ],
+      "affected_files": [
+        "contracts/zen/src/RevealMarket.sol"
+      ]
+    },
+    "evidence": [
+      {
+        "type": "code",
+        "path": "contracts/zen/src/RevealMarket.sol",
+        "lines": "927-939",
+        "snippet": "_safeTransferExact requires senderDebited == amount and recipientReceived >= amount based on balanceOf deltas; otherwise it reverts FeeOnTransferNotSupported."
+      },
+      {
+        "type": "code",
+        "path": "contracts/zen/src/RevealMarket.sol",
+        "lines": "734-739",
+        "snippet": "_finalizeSettlement forwards surplus via _safeTransferExact(protocolPool, surplus), so finalization can fail on token semantic drift."
+      },
+      {
+        "type": "code",
+        "path": "contracts/zen/src/RevealMarket.sol",
+        "lines": "468-469,517-518,540-541,555-556,801-802,816-817",
+        "snippet": "Claims, refunds, and sweep paths all rely on _safeTransferExact, expanding any token-compatibility failure into a full lifecycle payout DoS."
+      }
+    ]
+  },
+  {
+    "id": "beta-c092858e-e0b7-4fd6-aa03-39f8aa7096d4",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "BETA",
+    "title": "RevealMarket.refreshLockedVerifierKeyHash: Locked verifier anchor is non-recoverable, so key drift hard-locks settlement until cancellation",
+    "locations": [
+      "RevealMarket.lockBatches",
+      "RevealMarket.verifyAndSettle",
+      "RevealMarket.verifyAndSettleBatched",
+      "RevealMarket.refreshLockedVerifierKeyHash",
+      "MarketFactory.refreshMarketLockedVerifierKey"
+    ],
+    "root_cause": "lockBatches snapshots lockedVerifierKeyHash once, and both verify paths require exact equality forever. The so-called refreshLockedVerifierKeyHash() path only re-checks equality and emits an event; it never updates the stored anchor. If verifier key hash drifts for operational reasons, market settlement becomes unrecoverable in Locked phase and can only exit via timeout cancellation.",
+    "trigger_scenario": [
+      "Market is locked and stores lockedVerifierKeyHash from current verifier.",
+      "Verifier key hash changes later (e.g., emergency rotation, verifier redeploy policy mismatch, or ownership/governance maintenance event).",
+      "verifyAndSettle()/verifyAndSettleBatched() revert due VerifierNotApproved or VerifierKeyMismatch checks.",
+      "Factory attempts refreshMarketLockedVerifierKey(), but market.refreshLockedVerifierKeyHash() enforces current key == lockedVerifierKeyHash and does not write new state.",
+      "Settlement cannot progress even before any batch proof is accepted.",
+      "After timeout, only cancellation/refund path remains, sacrificing intended settlement finality."
+    ],
+    "preconditions": [
+      "Phase is Locked with unsettled batches.",
+      "Verifier key hash no longer matches lockedVerifierKeyHash.",
+      "Factory cannot or does not finalize before timeout."
+    ],
+    "impact": "dos",
+    "likelihood": "external_dependency",
+    "belief_score": 0.72,
+    "description": null,
+    "category": null,
+    "severity": "informational",
+    "related_to": null,
+    "context_metadata": {
+      "repository": "reveal-market",
+      "commit": "5e1e80836cb2812e68c7deee1436e71b192858a4",
+      "scope_ids": [
+        "FLOW_3_LockAndBatchSettlement",
+        "STATE_A_RevealMarketLifecycleAndBatchState"
+      ],
+      "affected_files": [
+        "contracts/zen/src/RevealMarket.sol",
+        "contracts/zen/src/MarketFactory.sol"
+      ]
+    },
+    "evidence": [
+      {
+        "type": "code",
+        "path": "contracts/zen/src/RevealMarket.sol",
+        "lines": "365,401,427-428",
+        "snippet": "Locked key hash is captured once at lock and enforced by both settlement entry points."
+      },
+      {
+        "type": "code",
+        "path": "contracts/zen/src/RevealMarket.sol",
+        "lines": "678-683",
+        "snippet": "refreshLockedVerifierKeyHash checks equality and emits an event, but never updates lockedVerifierKeyHash."
+      },
+      {
+        "type": "code",
+        "path": "contracts/zen/src/MarketFactory.sol",
+        "lines": "317-323",
+        "snippet": "Factory refresh helper delegates to the no-op refresh path; there is no alternate state transition to rotate locked key anchor."
+      }
+    ]
+  }
+]

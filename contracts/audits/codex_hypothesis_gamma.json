@@ -1,0 +1,141 @@
+[
+  {
+    "id": "gamma-flow4-001",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "GAMMA",
+    "title": "RevealMarket.claimWithOracleAuthorization: Oracle-signed payout is not bound to the committed leaf -> compromised oracle can drain all settled liquidity through one owned ticket",
+    "locations": [
+      "RevealMarket.claimWithOracleAuthorization",
+      "RevealMarket._ticketOwner",
+      "RevealMarket.claim"
+    ],
+    "root_cause": "claimWithOracleAuthorization() verifies only (ticketId, owner, payout, expiry) against an oracle signature and never recomputes the Poseidon commitment leaf or checks Merkle inclusion for the ticket. The only quantitative guard is claimedLiability <= totalLiability, so any oracle-signed payout amount is accepted even if it does not match the ticket's committed (outcome, amount, payout, salt) preimage.",
+    "trigger_scenario": [
+      "Attacker commits at least one ticket in the market (winning or losing).",
+      "After settlement, the oracle key is compromised (or malicious oracle operator acts).",
+      "Attacker signs/obtains an oracle authorization for their own ticketId with payout equal to the entire remaining totalLiability and a valid expiry.",
+      "Attacker calls claimWithOracleAuthorization(ticketId, hugePayout, expiry, sig).",
+      "The contract marks the ticket claimed, updates claimedLiability, and transfers hugePayout to that ticket owner because no leaf/proof validation runs on this path.",
+      "Subsequent legitimate tickets fail to claim due to OverClaimed or depleted market balance."
+    ],
+    "preconditions": [
+      "Oracle signing key is compromised or oracle is malicious.",
+      "Attacker controls at least one committed ticket owner address."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.89
+  },
+  {
+    "id": "gamma-flow4-002",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "GAMMA",
+    "title": "RevealMarket.claimWithOracleAuthorization: Missing per-ticket nonce/version lets stale low-value signatures be frontrun -> ticket can be permanently underpaid",
+    "locations": [
+      "RevealMarket.claimWithOracleAuthorization"
+    ],
+    "root_cause": "Oracle claim authorizations include payout and expiry but no monotonic nonce/version tracked per ticket. The contract accepts the first valid signature submitted and sets claimedTickets[ticketId] = true, so older signatures remain valid until expiry and cannot be revoked on-chain.",
+    "trigger_scenario": [
+      "Oracle issues a first authorization for ticketId with payout P1 (for example during an initial off-chain calculation).",
+      "Oracle later issues a corrected authorization for the same ticket with payout P2 > P1.",
+      "Both signatures are observable by third parties (API leak, relayer logs, or mempool exposure).",
+      "An attacker submits the stale P1 signature first via claimWithOracleAuthorization.",
+      "The contract marks the ticket as claimed and transfers only P1.",
+      "The corrected P2 authorization becomes unusable because TicketAlreadyClaimed now blocks all further claims for that ticket."
+    ],
+    "preconditions": [
+      "More than one valid oracle authorization exists for the same ticketId.",
+      "At least one stale/lower authorization is still unexpired when submitted."
+    ],
+    "impact": "unfair_treatment",
+    "likelihood": "malicious_action",
+    "belief_score": 0.72
+  },
+  {
+    "id": "gamma-flow4-003",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "GAMMA",
+    "title": "RevealMarket.setClaimsPaused/_effectiveClaimDeadline: Ongoing pause time extends claim deadline in real-time -> claims and sweep can be frozen indefinitely",
+    "locations": [
+      "RevealMarket.setClaimsPaused",
+      "RevealMarket._effectiveClaimDeadline",
+      "RevealMarket.claim",
+      "RevealMarket.sweepUnclaimed"
+    ],
+    "root_cause": "When claims are paused in Settled phase, _effectiveClaimDeadline() adds (block.timestamp - claimPauseStartedAt) continuously. claim() is blocked by claimsPaused, and sweepUnclaimed() requires block.timestamp > _effectiveClaimDeadline(). While paused, effective deadline moves forward with current time, so sweep condition can never become true until an explicit unpause occurs. No max pause duration or emergency sweep bypass exists.",
+    "trigger_scenario": [
+      "Market reaches Settled and claimDeadline is initialized.",
+      "Factory owner calls setClaimsPaused(true), setting claimPauseStartedAt = now.",
+      "Users cannot call claim because ClaimsPaused reverts.",
+      "As time passes, _effectiveClaimDeadline grows by the same amount (now - claimPauseStartedAt), so it stays ahead of block.timestamp.",
+      "Factory cannot call sweepUnclaimed because ClaimWindowOpen keeps reverting while paused.",
+      "If pause is never lifted (operator failure, key loss, or malicious governance), both user claims and terminal sweeping are permanently blocked."
+    ],
+    "preconditions": [
+      "Market is in Settled phase.",
+      "Claims are paused and not later unpaused by factory governance."
+    ],
+    "impact": "dos",
+    "likelihood": "internal_state",
+    "belief_score": 0.86
+  },
+  {
+    "id": "gamma-flow4-004",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "GAMMA",
+    "title": "RevealMarket._verifyLeaf path depends on unverified lockBatches roots -> oracle+relayer can make trustless claims impossible and force trusted payout path",
+    "locations": [
+      "RevealMarket.lockBatches",
+      "RevealMarket._verifyLeaf",
+      "RevealMarket.claim",
+      "RevealMarket.claimWithOracleAuthorization"
+    ],
+    "root_cause": "claim() requires both commitments[ticketId] == leaf and a Merkle proof to batchRoots[batchIndex], but lockBatches() never recomputes/validates roots from on-chain commitments. It only checks counts and a relayer-owner signature over supplied roots. If supplied roots do not correspond to stored commitments, users cannot satisfy _verifyLeaf even with correct preimages.",
+    "trigger_scenario": [
+      "Users commit valid ticket leaves, which are stored in commitments[].",
+      "At lock time, oracle submits batch roots that are inconsistent with commitments[] but still passes count checks.",
+      "Relayer owner signature is provided (collusion, compromise, or blind signing of incorrect roots).",
+      "Settlement completes against those roots.",
+      "Winning users call claim with correct (ticketId, outcome, amount, payout, salt) and fail InvalidMerkleProof because no proof can satisfy both commitment equality and mismatched batch root.",
+      "Only claimWithOracleAuthorization remains, shifting payout correctness from cryptographic leaf membership to trusted oracle signatures."
+    ],
+    "preconditions": [
+      "Oracle submits incorrect batch roots during lock.",
+      "Relayer owner signs or is compromised for those roots."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.64
+  },
+  {
+    "id": "gamma-flow4-005",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "GAMMA",
+    "title": "RevealMarket claim/refund payout recipient is immutable ticket owner -> blacklist/frozen addresses become unclaimable and are swept to protocol pool",
+    "locations": [
+      "RevealMarket.claim",
+      "RevealMarket.refund",
+      "RevealMarket.refundSelf",
+      "RevealMarket.refundTicket",
+      "RevealMarket._safeTransferExact",
+      "RevealMarket.sweepUnclaimed",
+      "RevealMarket.sweepCancelledRefunds"
+    ],
+    "root_cause": "All payout paths transfer only to the recorded ticket owner (or provided user constrained by _ticketOwner check) and provide no alternate recipient or rescue mechanism. If collateral token policy blocks transfers to that address (blacklist/freeze/compliance lock), claim/refund always reverts. After deadlines, sweeps move leftover market balance to protocolPool, effectively confiscating unclaimable user funds.",
+    "trigger_scenario": [
+      "User commits a ticket and becomes the recorded owner in commitmentUsers[].",
+      "Before claiming/refunding, collateral token marks that address as blocked (or otherwise non-receivable).",
+      "User (or relayer) attempts claim/refund; _safeTransferExact reverts because token transfer to owner fails.",
+      "Ticket remains unclaimed as deadlines continue.",
+      "After claim/refund window closes, factory executes sweepUnclaimed or sweepCancelledRefunds.",
+      "Remaining balance, including the blocked user's entitlement, is transferred to protocolPool."
+    ],
+    "preconditions": [
+      "Collateral token can block/freeze transfers for specific recipient addresses.",
+      "Affected ticket owner is blocked before successful claim/refund."
+    ],
+    "impact": "unfair_treatment",
+    "likelihood": "external_dependency",
+    "belief_score": 0.58
+  }
+]

@@ -1,0 +1,108 @@
+[
+  {
+    "id": "epsilon-H1-withdraw-rounding-underburn",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "EPSILON",
+    "title": "BaseLpVault.withdraw rounds share burn down, allowing over-withdrawal that dilutes other LPs",
+    "locations": [
+      "BaseLpVault.withdraw",
+      "BaseLpVault.convertToShares"
+    ],
+    "root_cause": "`withdraw()` computes shares to burn via `convertToShares(assets)`, and `convertToShares` uses `Math.mulDiv(... )` with floor rounding. For exact-asset withdrawals, rounding down under-burns shares whenever `assets * totalSupply / totalAssets` is non-integer; ERC4626-style safety requires rounding up for withdraw paths.",
+    "trigger_scenario": [
+      "Vault has non-integer price-per-share, e.g. `totalAssets=150` and `totalSupply=100` after hedging profit donation.",
+      "Attacker owns 50 shares (half of supply).",
+      "Attacker repeatedly calls `withdraw(2, attacker, attacker)`.",
+      "Each call burns `floor(2*100/150)=1` share but transfers 2 assets out.",
+      "After 50 calls, attacker burns 50 shares and withdraws 100 assets, even though fair value for 50 shares was 75 assets.",
+      "The extra 25 assets are transferred from remaining LPs (value extraction via rounding drift)."
+    ],
+    "preconditions": [
+      "`totalSupply() > 0` and `totalAssets()`/`totalSupply()` yields non-integer conversion for chosen withdrawal amounts.",
+      "Attacker can perform multiple withdrawals (or choose a single amount with favorable floor rounding).",
+      "Vault has enough `idleAssets()` to satisfy requested withdrawals."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "internal_state",
+    "belief_score": 0.98
+  },
+  {
+    "id": "epsilon-H2-outbound-transfer-accounting-gap",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "EPSILON",
+    "title": "BaseLpVault outbound transfers are assumed exact, so non-standard assets can desynchronize accounting and real balances",
+    "locations": [
+      "BaseLpVault.withdraw",
+      "BaseLpVault.redeem",
+      "BaseLpVault.borrowForHedge"
+    ],
+    "root_cause": "The vault validates exact amounts only on inbound `safeTransferFrom` paths (`deposit`, `repayFromHedge`) but does not enforce exact sender/receiver deltas for outbound `safeTransfer` paths (`withdraw`, `redeem`, `borrowForHedge`). If the configured 6-decimal asset has directional fees/surcharges/burn semantics on outbound transfers, internal accounting (`utilizedAssets`, burned shares) assumes exact movement while token balances realize different movement.",
+    "trigger_scenario": [
+      "Vault is deployed with a 6-decimal token that behaves non-standard on outbound transfers (e.g., sender surcharge or recipient haircut).",
+      "LP calls `withdraw`/`redeem` or hedger calls `borrowForHedge`.",
+      "Vault updates state as if `amount` moved exactly (burns shares or increments `utilizedAssets`).",
+      "Token transfer applies non-standard fee behavior so actual debited/received value differs from `amount`.",
+      "Vault accounting diverges from real balances, causing LP underpayment, utilization mismeasurement, or insolvency drift."
+    ],
+    "preconditions": [
+      "Configured `ASSET` is not strict vanilla USDC behavior on outbound transfers.",
+      "Outbound transfer paths (`withdraw`, `redeem`, or `borrowForHedge`) are exercised."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "external_dependency",
+    "belief_score": 0.72
+  },
+  {
+    "id": "epsilon-H3-protocolpool-unbounded-fifo-gas-dos",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "EPSILON",
+    "title": "ProtocolPool LP unlock accounting is unbounded per-user, enabling withdrawal liveness failure via deposit-fragmentation",
+    "locations": [
+      "ProtocolPool.deposit",
+      "ProtocolPool.lpWithdraw",
+      "ProtocolPool._burnUnlockedShares",
+      "ProtocolPool._unlockedSharesOf",
+      "ProtocolPool.maxRedeemable"
+    ],
+    "root_cause": "Each `deposit()` appends a new `DepositRecord` and records are never compacted/removed. `lpWithdraw`, `unlockedShares`, and `maxRedeemable` iterate the full per-user `_deposits` array. This creates O(n) gas with unbounded n, so sufficiently fragmented deposit history can make redemption paths exceed block gas limits.",
+    "trigger_scenario": [
+      "An LP (or automation acting for the LP) performs a very large number of small deposits over time.",
+      "After lock expiry, LP calls `lpWithdraw` to redeem unlocked shares.",
+      "`_burnUnlockedShares` scans the entire `_deposits[lp]` array and may run out of gas before completion.",
+      "The same O(n) scan affects `maxRedeemable` and `unlockedShares` queries, degrading front-end and keeper operations.",
+      "LP funds become practically stuck until transaction gas limits increase or custom off-chain splitting strategy is used."
+    ],
+    "preconditions": [
+      "Per-user deposit record count grows large (many fragmented deposits).",
+      "User must rely on loop-based withdrawal path over full historical records."
+    ],
+    "impact": "loss_of_function",
+    "likelihood": "malicious_action",
+    "belief_score": 0.69
+  },
+  {
+    "id": "epsilon-H4-slippage-fields-not-binding-execution",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "EPSILON",
+    "title": "HedgeStrategyExecutor executes signed borrows without enforcing minOut/slippage against realized hedge outcome",
+    "locations": [
+      "HedgeStrategyExecutor.executeBorrow",
+      "HedgeStrategyExecutor._validateOrder"
+    ],
+    "root_cause": "`Order.minOut` is never used for any on-chain condition and `Order.maxSlippageBps` is only compared to a global admin cap, not to any observed execution result. `executeBorrow` only moves funds from vault to receiver, so signed price-protection fields are not cryptographically bound to downstream execution quality.",
+    "trigger_scenario": [
+      "Signer issues a valid order with conservative `minOut` / `maxSlippageBps` expecting slippage protection.",
+      "Any caller submits `executeBorrow` with that signature.",
+      "Executor validates signature, nonce, deadline, amount, and receiver allowlist, then borrows funds to receiver.",
+      "No on-chain check compares downstream hedge fill to `minOut` or realized slippage.",
+      "If receiver-side execution is compromised or adverse, vault funds are still borrowed with no protocol-level slippage enforcement."
+    ],
+    "preconditions": [
+      "Receiver is allowed and order signature is valid.",
+      "Downstream hedge execution happens off-contract (or not at all), outside enforceable checks in `executeBorrow`."
+    ],
+    "impact": "theft_of_yield",
+    "likelihood": "malicious_action",
+    "belief_score": 0.56
+  }
+]

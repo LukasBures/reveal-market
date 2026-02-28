@@ -1,0 +1,523 @@
+[
+  {
+    "id": "hyp-pool-v2-001",
+    "job_id": "audit-zen-v2",
+    "agent": "pool-lp-agent",
+    "title": "ProtocolPool.withdraw: Owner can drain LP principal by withdrawing surplus-inclusive balance",
+    "locations": ["ProtocolPool.withdraw"],
+    "root_cause": "The owner's `withdraw` function (line 190-197) only checks `balance - amount >= reservedTotal` but does NOT check that `balance - amount >= totalShares`. This means the owner can withdraw funds that LPs deposited as principal, as long as there are no active reservations. The `protocolSurplus()` view correctly shows surplus = balance - totalShares, but `withdraw` does not enforce this boundary — it only protects reserved funds.",
+    "trigger_scenario": [
+      "LP deposits 100 ZEN via deposit(). Pool balance = 100, totalShares = 100, reservedTotal = 0.",
+      "Owner calls withdraw(payable(owner), 80 ether). Check: balance(100) - 80 = 20 >= reservedTotal(0). Passes.",
+      "Pool balance is now 20, totalShares = 100. LP share value = 20/100 = 0.2 per share.",
+      "LP unlocks and calls lpWithdraw(100, 0). Gets 20 ZEN instead of 100 ZEN deposited."
+    ],
+    "preconditions": [
+      "Owner is a trusted role but acts maliciously or negligently",
+      "No active market reservations (reservedTotal == 0)"
+    ],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.92
+  },
+  {
+    "id": "hyp-pool-v2-002",
+    "job_id": "audit-zen-v2",
+    "agent": "pool-lp-agent",
+    "title": "ProtocolPool._lpShareValue: totalAssets includes reservedTotal, inflating LP share value during underwater conditions",
+    "locations": ["ProtocolPool._lpShareValue", "ProtocolPool.totalAssets"],
+    "root_cause": "_lpShareValue (line 337-341) computes proportional = shares * totalAssets() / totalShares. totalAssets() returns COLLATERAL_TOKEN.balanceOf(address(this)) which includes reserved funds. When the pool has large reservations, LP shares appear more valuable than they actually are because the reserved funds are committed to markets and cannot be used for LP withdrawals. However, lpWithdraw separately checks idle liquidity (line 258-260: `assets > idle`), so the actual payout is constrained. The risk is in the _view_ giving a misleading value — but more critically, the slippage check `assets < minAssets` at line 255 uses the inflated value from convertToAssets, which could cause LPs to set minAssets based on a value they cannot actually receive if idle liquidity is insufficient (they get InsufficientIdleLiquidity instead of SlippageExceeded).",
+    "trigger_scenario": [
+      "Pool has 100 ZEN balance, 200 totalShares (underwater), 80 reservedTotal.",
+      "LP calls convertToAssets(100 shares) = 100 * 100 / 200 = 50 ZEN. LP expects 50 ZEN.",
+      "LP calls lpWithdraw(100, 50). assets = 50 via convertToAssets. Passes slippage check.",
+      "idle = balance(100) - reservedTotal(80) = 20. 50 > 20 => reverts InsufficientIdleLiquidity.",
+      "No fund loss occurs but the UX is misleading — convertToAssets suggests a value that cannot be redeemed."
+    ],
+    "preconditions": [
+      "Pool is underwater (totalAssets < totalShares)",
+      "Significant portion of balance is reserved"
+    ],
+    "impact": "griefing",
+    "likelihood": "internal_state",
+    "belief_score": 0.45
+  },
+  {
+    "id": "hyp-pool-v2-003",
+    "job_id": "audit-zen-v2",
+    "agent": "pool-lp-agent",
+    "title": "ProtocolPool.registerMarket: Re-registration zeroes out consumedLiability, allowing market to draw beyond its true cap",
+    "locations": ["ProtocolPool.registerMarket", "MarketFactory.rotateProtocolPool"],
+    "root_cause": "registerMarket (line 98-105) unconditionally sets consumedLiability[market] = 0 and reservedLiability[market] = 0. If the factory calls registerMarket for an already-registered market on a new pool (via rotateProtocolPool at MarketFactory line 348), the market is correctly registered fresh. However, if registerMarket is somehow called again for the same market on the SAME pool (e.g., through a factory bug or re-deployment path), the consumedLiability is zeroed, allowing the market to draw up to liabilityCap again — effectively doubling its allowed draw. The onlyFactory guard prevents external calls, but the factory itself has no guard against calling registerMarket for an already-registered market on the same pool.",
+    "trigger_scenario": [
+      "Factory calls pool.registerMarket(market, 100 ether). Market is registered with cap 100.",
+      "Market draws 80 ZEN. consumedLiability[market] = 80.",
+      "Factory calls pool.registerMarket(market, 100 ether) again (through some path).",
+      "consumedLiability[market] is reset to 0. reservedLiability[market] is reset to 0.",
+      "Market can now draw another 100 ZEN, for 180 total against a 100 cap."
+    ],
+    "preconditions": [
+      "Factory has a code path that calls registerMarket for the same market on the same pool twice",
+      "Market has already consumed some liability"
+    ],
+    "impact": "protocol_insolvency",
+    "likelihood": "internal_state",
+    "belief_score": 0.35
+  },
+  {
+    "id": "hyp-pool-v2-004",
+    "job_id": "audit-zen-v2",
+    "agent": "pool-lp-agent",
+    "title": "ProtocolPool.draw: Reserved draw does not deduct capacity, creating capacity accounting asymmetry with reserveLiability",
+    "locations": ["ProtocolPool.draw", "ProtocolPool.reserveLiability", "ProtocolPool.releaseLiabilityReservation"],
+    "root_cause": "When a market reserves liability via reserveLiability (line 126-129), capacity is decremented by the reservation amount. When the market later draws from that reservation via draw (line 162-165), capacity is NOT decremented (the else-branch at line 168-171 handles unreserved draws only). When the market then calls releaseLiabilityReservation (line 144-148), the remaining unredrawn reservation is added BACK to capacity. This is correct accounting: capacity -= reserve_amount at reserve time, then capacity += (reserve_amount - drawn_amount) at release time. Net effect: capacity decreases by the drawn amount. This is actually correct behavior — no bug here.",
+    "trigger_scenario": [
+      "capacityEnabled = true, capacity = 100.",
+      "Market reserves 50. capacity becomes 50.",
+      "Market draws 30 from reservation. reservedLiability becomes 20. capacity stays 50.",
+      "Market releases remaining reservation (20). capacity becomes 50 + 20 = 70.",
+      "Net: capacity decreased by 30 (the drawn amount). This is correct."
+    ],
+    "preconditions": [
+      "capacityEnabled is true",
+      "Market uses reservation-then-draw flow"
+    ],
+    "impact": "protocol_insolvency",
+    "likelihood": "internal_state",
+    "belief_score": 0.05
+  },
+  {
+    "id": "hyp-pool-v2-005",
+    "job_id": "audit-zen-v2",
+    "agent": "pool-lp-agent",
+    "title": "ProtocolPool.lpWithdraw: LP withdrawing during underwater state socializes losses unfairly to remaining LPs",
+    "locations": ["ProtocolPool.lpWithdraw", "ProtocolPool._lpShareValue"],
+    "root_cause": "When the pool is underwater (totalAssets < totalShares), _lpShareValue returns proportional = shares * totalAssets / totalShares. An LP withdrawing shares burns `sharesToRedeem` shares but receives `assets = shares * totalAssets / totalShares` tokens. After withdrawal, the remaining LPs have the same totalAssets-to-totalShares ratio (the withdrawal is proportional), so the loss distribution remains fair. However, there is a rounding edge case: Math.mulDiv rounds down, so the withdrawing LP receives slightly less than their proportional share, leaving a tiny dust benefit for remaining LPs. This is actually in the protocol's favor (withdrawing LP gets less, not more). No actual unfair treatment.",
+    "trigger_scenario": [
+      "Pool: 60 assets, 100 totalShares (underwater). LP1 has 50 shares, LP2 has 50 shares.",
+      "LP1 withdraws 50 shares. assets = 50 * 60 / 100 = 30. Pool after: 30 assets, 50 shares.",
+      "LP2's share value: 50 * 30 / 50 = 30. Same proportional value. Fair.",
+      "No exploitation possible through withdrawal ordering alone."
+    ],
+    "preconditions": [
+      "Pool is underwater"
+    ],
+    "impact": "unfair_treatment",
+    "likelihood": "internal_state",
+    "belief_score": 0.08
+  },
+  {
+    "id": "hyp-pool-v2-006",
+    "job_id": "audit-zen-v2",
+    "agent": "pool-lp-agent",
+    "title": "ProtocolPool.deposit: New LP deposits during underwater state dilute existing LPs' loss recovery",
+    "locations": ["ProtocolPool.deposit", "ProtocolPool._lpShareValue"],
+    "root_cause": "deposit() always mints shares 1:1 (line 234: shares = amount). When the pool is underwater (e.g., 60 assets, 100 shares), a new deposit of 40 ZEN creates 40 new shares. Pool state becomes: 100 assets, 140 shares. The new LP's 40 shares are worth 40*100/140 = 28.57 ZEN — immediate unrealized loss of 11.43 ZEN. Meanwhile, existing LPs benefit: their 100 shares went from worth 60 ZEN (60/100) to 71.43 ZEN (100*100/140). The new depositor effectively subsidizes existing LPs' losses. This is by design (documented: 'LPs bear losses from market draws') but represents an economic asymmetry where a new depositor immediately takes on legacy losses without any discount on share price.",
+    "trigger_scenario": [
+      "Pool is underwater: 60 assets, 100 totalShares. Each share worth 0.6 ZEN.",
+      "New LP deposits 40 ZEN. Gets 40 shares at 1:1. Pool: 100 assets, 140 shares.",
+      "New LP's 40 shares are now worth 40 * 100/140 = 28.57 ZEN. Immediate 28.6% loss.",
+      "Existing LP's 100 shares went from 60 ZEN to 71.43 ZEN — a windfall from new depositor."
+    ],
+    "preconditions": [
+      "Pool is underwater (totalAssets < totalShares)",
+      "New LP deposits into the pool"
+    ],
+    "impact": "fund_loss",
+    "likelihood": "internal_state",
+    "belief_score": 0.88
+  },
+  {
+    "id": "hyp-pool-v2-007",
+    "job_id": "audit-zen-v2",
+    "agent": "pool-lp-agent",
+    "title": "ProtocolPool.maxRedeemable: Off-by-one when pool is exactly at totalShares boundary",
+    "locations": ["ProtocolPool.maxRedeemable"],
+    "root_cause": "maxRedeemable (line 319-332) branches at line 330: `if (balance >= totalShares) return idle`. When balance == totalShares exactly, it returns `idle` (healthy path: 1 share = 1 ZEN). But `idle = balance - reservedTotal`. If reservedTotal > 0, the returned value might overestimate redeemable shares when all unlocked shares exceed idle. Consider: unlocked = 100, balance = 100, totalShares = 100, reservedTotal = 30, idle = 70. unlockedValue = _lpShareValue(100) = min(100*100/100, 100) = 100. 100 > 70 so we enter the cap branch. balance(100) >= totalShares(100) so return idle = 70. LP tries lpWithdraw(70, 0). assets = convertToAssets(70) = min(70*100/100, 70) = 70. idle = 70. 70 <= 70. Passes. This is correct.",
+    "trigger_scenario": [
+      "balance = 100, totalShares = 100, reservedTotal = 30, LP unlocked = 100.",
+      "maxRedeemable returns 70. LP calls lpWithdraw(70, 0).",
+      "assets = 70, idle = 70. 70 <= 70. Succeeds. Correct."
+    ],
+    "preconditions": [
+      "Pool balance equals totalShares exactly with non-zero reservations"
+    ],
+    "impact": "dos",
+    "likelihood": "internal_state",
+    "belief_score": 0.05
+  },
+  {
+    "id": "hyp-pool-v2-008",
+    "job_id": "audit-zen-v2",
+    "agent": "pool-lp-agent",
+    "title": "ProtocolPool._burnUnlockedShares: FIFO burn skips locked deposits but total deducted from lpShareBalance which includes locked shares",
+    "locations": ["ProtocolPool._burnUnlockedShares", "ProtocolPool.lpWithdraw"],
+    "root_cause": "In lpWithdraw (line 249-270), the check at line 251 is `sharesToRedeem > lpShareBalance[msg.sender]` — this checks against the TOTAL share balance including locked shares. But _burnUnlockedShares (line 381-396) only burns from unlocked deposits. If sharesToRedeem exceeds unlocked shares but is less than total lpShareBalance, the lpShareBalance check at line 251 passes, but _burnUnlockedShares reverts at line 395 with InsufficientUnlockedShares. This is safe (the revert catches it) but the check ordering means the more specific error (InsufficientUnlockedShares) is thrown from deep in the call stack rather than at the entry point. No actual vulnerability — just a UX concern where the initial check is looser than necessary.",
+    "trigger_scenario": [
+      "LP has 100 shares total: 60 unlocked, 40 still locked.",
+      "LP calls lpWithdraw(80, 0). lpShareBalance check: 80 <= 100, passes.",
+      "convertToAssets(80) = 80 (assuming healthy pool). Slippage passes.",
+      "_burnUnlockedShares tries to burn 80 from unlocked deposits, only finds 60. remaining = 20.",
+      "Reverts with InsufficientUnlockedShares. No fund loss, but check ordering could be tighter."
+    ],
+    "preconditions": [
+      "LP has both locked and unlocked deposits",
+      "LP tries to redeem more than unlocked portion"
+    ],
+    "impact": "griefing",
+    "likelihood": "common",
+    "belief_score": 0.3
+  },
+  {
+    "id": "hyp-pool-v2-009",
+    "job_id": "audit-zen-v2",
+    "agent": "pool-lp-agent",
+    "title": "ProtocolPool._deposits: Unbounded array growth through repeated small deposits enables DoS on withdrawal and view functions",
+    "locations": ["ProtocolPool.deposit", "ProtocolPool._burnUnlockedShares", "ProtocolPool._unlockedSharesOf", "ProtocolPool._compactDeposits"],
+    "root_cause": "Each call to deposit() pushes a new DepositRecord to _deposits[msg.sender] (line 238). There is no limit on array length. _burnUnlockedShares and _unlockedSharesOf iterate the entire array. A user (or griefer depositing dust amounts) can create an arbitrarily long deposit array, making lpWithdraw, maxRedeemable, and unlockedShares calls exceed block gas limits. While _compactDeposits removes zero-share records after withdrawal, it cannot help if all deposits are still active (non-zero shares). The griefer would need to spend gas on deposits, but the cost may be low for small dust amounts.",
+    "trigger_scenario": [
+      "Attacker approves pool for a large allowance of collateral tokens.",
+      "Attacker calls deposit(1 wei) in a loop, creating thousands of DepositRecord entries.",
+      "After 60 days, attacker tries to call lpWithdraw. The _burnUnlockedShares loop iterates all records.",
+      "If array length exceeds ~10,000+ records, gas cost for withdrawal becomes prohibitive.",
+      "Attacker's own funds are stuck (self-griefing), but this also affects maxRedeemable view calls."
+    ],
+    "preconditions": [
+      "Attacker has enough gas and tokens to create many small deposits",
+      "No external limit on deposit frequency or minimum deposit size beyond > 0"
+    ],
+    "impact": "dos",
+    "likelihood": "malicious_action",
+    "belief_score": 0.65
+  },
+  {
+    "id": "hyp-pool-v2-010",
+    "job_id": "audit-zen-v2",
+    "agent": "pool-lp-agent",
+    "title": "ProtocolPool.reserveLiability: Missing nonReentrant allows potential reentrancy via balance check manipulation",
+    "locations": ["ProtocolPool.reserveLiability"],
+    "root_cause": "reserveLiability (line 116-133) reads COLLATERAL_TOKEN.balanceOf(address(this)) at line 124 but is not protected by nonReentrant. If the collateral token has a callback mechanism (e.g., ERC-777 hooks), a market could potentially re-enter. However, the function does not perform any external calls itself (no transfers), only reads balanceOf. The msg.sender == market check means only the market contract can call it, and markets are deployed by the factory. The actual risk is very low because: (1) no external calls that could trigger reentrancy, (2) COLLATERAL_TOKEN is immutable and set at construction, (3) the function only reads balance, it doesn't transfer. Even ERC-777 send hooks wouldn't be triggered by a balanceOf() call.",
+    "trigger_scenario": [
+      "This would require the balanceOf call itself to trigger a callback, which is non-standard.",
+      "Standard ERC-20 and ERC-777 balanceOf is a pure read with no callbacks.",
+      "No realistic attack path exists."
+    ],
+    "preconditions": [
+      "Collateral token would need to have callbacks on balanceOf (non-standard)"
+    ],
+    "impact": "protocol_insolvency",
+    "likelihood": "external_dependency",
+    "belief_score": 0.03
+  },
+  {
+    "id": "hyp-pool-v2-011",
+    "job_id": "audit-zen-v2",
+    "agent": "pool-lp-agent",
+    "title": "ProtocolPool.draw: consumedLiability is never decremented, preventing future draws after settlement returns funds",
+    "locations": ["ProtocolPool.draw", "ProtocolPool.registerMarket"],
+    "root_cause": "consumedLiability[market] is incremented in draw (line 176) but is never decremented anywhere except registerMarket (which resets to 0 for re-registration). When a market settles and sends surplus back to the pool, the pool receives tokens but consumedLiability remains unchanged. If the same market (or pool configuration) is reused across multiple settlement cycles, the consumedLiability accumulates and eventually hits liabilityCap, preventing further draws. However, in practice each RevealMarket is a single-use contract (deploy -> commit -> lock -> settle) and registerMarket is called per new market deployment, so consumedLiability tracking is per-market-deployment. This is by design, not a bug.",
+    "trigger_scenario": [
+      "Market is registered with cap 100. Market draws 60. consumedLiability = 60.",
+      "Market settles, sends 60 ZEN surplus back to pool. Pool balance restored.",
+      "Market tries to draw again (hypothetical second settlement). newConsumed = 60 + X > 100 for X > 40.",
+      "In practice, RevealMarket is single-use, so this scenario does not arise."
+    ],
+    "preconditions": [
+      "Same market contract would need to draw multiple times across lifecycles"
+    ],
+    "impact": "dos",
+    "likelihood": "internal_state",
+    "belief_score": 0.08
+  },
+  {
+    "id": "hyp-pool-v2-012",
+    "job_id": "audit-zen-v2",
+    "agent": "pool-lp-agent",
+    "title": "ProtocolPool.lpWithdraw: Race condition between multiple LPs withdrawing causes first-mover advantage on idle liquidity",
+    "locations": ["ProtocolPool.lpWithdraw"],
+    "root_cause": "lpWithdraw checks idle liquidity at line 258-260: `idle = balance - reservedTotal; if (assets > idle) revert`. When the pool is underwater and multiple LPs have unlocked shares, the first LP to withdraw gets their proportional share, but this reduces both totalAssets and totalShares. The second LP's share value is then recalculated at the new (identical) ratio — so the loss distribution remains proportional. However, if idle liquidity is limited (large reservedTotal), the first LP to withdraw claims available idle funds, and the second LP is blocked entirely with InsufficientIdleLiquidity. This is first-come-first-served by design (documented in tests as 'testTwoLpsFirstComeFirstServed'), but in a frontrunning-enabled environment, sophisticated LPs can MEV-extract priority withdrawal.",
+    "trigger_scenario": [
+      "Pool: 100 assets, 200 totalShares, reservedTotal = 80. idle = 20.",
+      "LP1 (100 shares) and LP2 (100 shares) both try to withdraw.",
+      "LP1's tx is mined first. assets = 100*100/200 = 50 but idle = 20, so LP1 can only withdraw 20 shares (worth 10 ZEN).",
+      "After LP1: 90 assets, 180 shares, idle = 10. LP2 can withdraw even less.",
+      "LP who gets priority via MEV gets first access to scarce idle liquidity."
+    ],
+    "preconditions": [
+      "Pool is underwater or has significant reservations",
+      "Multiple LPs competing for limited idle liquidity",
+      "MEV/frontrunning is possible on the target chain"
+    ],
+    "impact": "unfair_treatment",
+    "likelihood": "common",
+    "belief_score": 0.55
+  },
+  {
+    "id": "hyp-pool-v2-013",
+    "job_id": "audit-zen-v2",
+    "agent": "pool-lp-agent",
+    "title": "ProtocolPool.setCapacity: Capacity reset while markets have consumed (not reserved) liability creates phantom capacity",
+    "locations": ["ProtocolPool.setCapacity"],
+    "root_cause": "setCapacity (line 200-206) requires `reservedTotal == 0` before allowing capacity changes. However, it does not account for consumedLiability across markets. If markets have drawn funds (consumedLiability > 0) but released their reservations (reservedTotal == 0), the owner can set a new capacity that does not reflect past draws. Capacity tracks a global risk budget, but consumed draws have already reduced actual pool balance. If capacity is set to pool balance but consumedLiability has already transferred funds out, the capacity budget could authorize more draws than the pool can service. However, each draw individually checks `amount > balance - reservedTotal` (unreserved path, line 167), so the actual balance check prevents overdraw regardless of capacity value.",
+    "trigger_scenario": [
+      "Pool has 100 ZEN. Markets have consumed 40 ZEN (pool balance now 60). reservedTotal = 0.",
+      "Owner calls setCapacity(100). capacity = 100, capacityLimit = 100.",
+      "New market tries draw(60). capacity check: 60 <= 100, passes. Balance check: 60 <= 60, passes.",
+      "Pool balance is 0 but capacity still shows 40 remaining. Next draw would fail on balance check.",
+      "No actual over-draw occurs due to balance check, but capacity is misleading."
+    ],
+    "preconditions": [
+      "Markets have consumed liability (drawn funds)",
+      "Owner resets capacity after draws complete"
+    ],
+    "impact": "griefing",
+    "likelihood": "internal_state",
+    "belief_score": 0.25
+  },
+  {
+    "id": "hyp-pool-v2-014",
+    "job_id": "audit-zen-v2",
+    "agent": "pool-lp-agent",
+    "title": "ProtocolPool.lpWithdraw: Slippage check uses minAssets=0 bypass, allowing LP to receive 0 assets if pool becomes fully drained between view and tx",
+    "locations": ["ProtocolPool.lpWithdraw"],
+    "root_cause": "lpWithdraw (line 254) checks `if (assets == 0) revert InvalidAmount()` which prevents zero-value withdrawals. However, the slippage guard at line 255 `if (assets < minAssets) revert SlippageExceeded()` is bypassed when minAssets = 0 (since assets >= 1 > 0). If the pool becomes severely underwater between when an LP submits a tx and when it executes (e.g., a large market draw is mined first), the LP could receive assets worth much less than expected. The assets == 0 check prevents the absolute worst case, but the LP could still receive 1 wei for many shares. The fix would be to document that LPs should always set a non-zero minAssets. The test `testLpWithdrawSlippageZeroBypass` explicitly tests this behavior as acceptable.",
+    "trigger_scenario": [
+      "LP has 100 shares. Pool has 100 assets, 100 totalShares. LP submits lpWithdraw(100, 0).",
+      "Before LP's tx, a market draw of 99 ZEN is mined. Pool: 1 asset, 100 shares.",
+      "LP's tx executes: assets = 100 * 1 / 100 = 1 wei. assets(1) != 0, passes. minAssets = 0, passes.",
+      "LP receives 1 wei for 100 shares of deposits. 99.999...% loss.",
+      "If LP had set minAssets = 90 ether, SlippageExceeded would have protected them."
+    ],
+    "preconditions": [
+      "LP uses minAssets = 0 (no slippage protection)",
+      "Large market draw or owner withdrawal executes between LP submitting tx and it being mined"
+    ],
+    "impact": "fund_loss",
+    "likelihood": "common",
+    "belief_score": 0.4
+  },
+  {
+    "id": "hyp-pool-v2-015",
+    "job_id": "audit-zen-v2",
+    "agent": "pool-lp-agent",
+    "title": "ProtocolPool._compactDeposits: Compaction during lpWithdraw wastes gas but cannot be avoided since it runs unconditionally",
+    "locations": ["ProtocolPool._compactDeposits", "ProtocolPool.lpWithdraw"],
+    "root_cause": "_compactDeposits (line 363-378) is called at the end of every lpWithdraw (line 269). It iterates the entire _deposits array and uses storage writes to compact. For LPs with many deposit records (even after FIFO burn), the compaction pass adds O(n) storage reads plus O(k) storage writes for k zero-share records. If an LP has 100+ deposits and only burns a few, compaction still scans all 100 records. This is gas-inefficient but not a vulnerability per se. The `compactDeposits()` and `compactDepositsFor()` public functions allow pre-compaction, but they also scan the full array. The real concern is that compaction is coupled to withdrawal — an LP cannot opt out of the compaction gas cost.",
+    "trigger_scenario": [
+      "LP makes 50 separate deposits over time.",
+      "LP unlocks and calls lpWithdraw for a small amount.",
+      "_burnUnlockedShares zeros out 1-2 deposit records.",
+      "_compactDeposits scans all 50 records, shifts remaining records, pops 1-2.",
+      "Gas cost is higher than necessary for the small withdrawal."
+    ],
+    "preconditions": [
+      "LP has many deposit records"
+    ],
+    "impact": "griefing",
+    "likelihood": "common",
+    "belief_score": 0.5
+  },
+  {
+    "id": "hyp-pool-v2-016",
+    "job_id": "audit-zen-v2",
+    "agent": "pool-lp-agent",
+    "title": "ProtocolPool.draw: Market with reservation can partially draw, leaving orphaned reservedLiability if market never releases",
+    "locations": ["ProtocolPool.draw", "ProtocolPool.releaseLiabilityReservation"],
+    "root_cause": "When a market reserves 100 and draws only 30, reservedLiability[market] becomes 70 and reservedTotal decreases by 30. The remaining 70 stays reserved until the market calls releaseLiabilityReservation. If the market contract has a bug or its settlement/refund flow never completes, the 70 remains permanently reserved in reservedTotal, reducing idle liquidity for all LPs and blocking new reservations. The ProtocolPool has no admin function to force-release a market's reservation. The owner can only pause draws but cannot reclaim orphaned reservations.",
+    "trigger_scenario": [
+      "Market reserves 100 ZEN. reservedTotal += 100.",
+      "Market draws 30 ZEN. reservedTotal -= 30. reservedLiability[market] = 70.",
+      "Market's settlement logic encounters an unrecoverable error or the oracle never submits settlement data.",
+      "releaseLiabilityReservation is never called. 70 ZEN permanently locked in reservedTotal.",
+      "LP idle liquidity is reduced by 70 ZEN indefinitely. New markets cannot reserve those funds."
+    ],
+    "preconditions": [
+      "Market contract fails to complete its lifecycle (settle or enableRefunds)",
+      "No admin override exists to force-release reservations"
+    ],
+    "impact": "dos",
+    "likelihood": "external_dependency",
+    "belief_score": 0.7
+  },
+  {
+    "id": "hyp-pool-v2-017",
+    "job_id": "audit-zen-v2",
+    "agent": "pool-lp-agent",
+    "title": "ProtocolPool._lpShareValue: mulDiv rounding down favors protocol over LP in all withdrawal cases",
+    "locations": ["ProtocolPool._lpShareValue", "ProtocolPool.lpWithdraw"],
+    "root_cause": "Math.mulDiv (line 339) rounds down by default (Solidity integer division). When the pool is underwater, proportional = shares * totalAssets / totalShares will round down, meaning the LP receives slightly less than their exact proportional share. This rounding dust accumulates in the pool. Over many withdrawals, this dust can become meaningful — but in practice with 18-decimal tokens, the rounding error is at most 1 wei per withdrawal. This is standard ERC-4626-style rounding behavior that favors the vault (pool), which is the correct security direction (prevents vault share inflation attacks). Not a vulnerability.",
+    "trigger_scenario": [
+      "Pool: 101 assets, 150 shares. LP withdraws 100 shares.",
+      "proportional = 100 * 101 / 150 = 67 (rounds down from 67.33...).",
+      "LP receives 67 instead of 67.33. Pool retains 0.33 extra wei.",
+      "Over millions of withdrawals, dust accumulates but remains insignificant with 18-decimal tokens."
+    ],
+    "preconditions": [
+      "Pool is underwater (totalAssets < totalShares)",
+      "Non-clean division in mulDiv"
+    ],
+    "impact": "theft_of_yield",
+    "likelihood": "common",
+    "belief_score": 0.05
+  },
+  {
+    "id": "hyp-pool-v2-018",
+    "job_id": "audit-zen-v2",
+    "agent": "pool-lp-agent",
+    "title": "ProtocolPool.lpWithdraw: convertToAssets checked before idle liquidity, enabling state where assets > idle even at 1:1",
+    "locations": ["ProtocolPool.lpWithdraw", "ProtocolPool.convertToAssets"],
+    "root_cause": "In lpWithdraw, assets are computed at line 253 via convertToAssets(sharesToRedeem), then idle is checked at line 258-260. When the pool is healthy (assets >= totalShares), convertToAssets caps at 1:1 so assets = sharesToRedeem. The idle check then becomes `sharesToRedeem > balance - reservedTotal`. This means an LP can be blocked from withdrawing shares they own if reservedTotal is high, even though the pool is solvent. This is the intended design (reserved funds are committed to markets). The lpWithdraw does not attempt to redeem against reserved funds. The only concern is whether the LP has any recourse if their funds are perpetually reserved — but releaseLiabilityReservation handles this when markets settle.",
+    "trigger_scenario": [
+      "LP deposits 100, pool has 100 balance, 80 reserved, 20 idle.",
+      "LP calls lpWithdraw(50, 0). assets = 50 (1:1). idle = 20. 50 > 20. Reverts.",
+      "LP must wait for markets to settle and release reservations.",
+      "This is by design — LP liquidity is committed to market coverage."
+    ],
+    "preconditions": [
+      "High reservation ratio"
+    ],
+    "impact": "dos",
+    "likelihood": "common",
+    "belief_score": 0.15
+  },
+  {
+    "id": "hyp-pool-v2-019",
+    "job_id": "audit-zen-v2",
+    "agent": "pool-lp-agent",
+    "title": "ProtocolPool.setMarketFactory: Idempotent re-set allows owner to confirm same factory, but lock check has off-by-one in condition",
+    "locations": ["ProtocolPool.setMarketFactory"],
+    "root_cause": "setMarketFactory (line 90-95) checks `if (marketFactory != address(0) && marketFactory != factory) revert FactoryLocked()`. This allows: (1) setting factory when marketFactory == address(0), (2) re-setting to the same factory (idempotent), but reverts if trying to set a different factory. The condition is correct: once a factory is set, it can only be set to the same value (no-op) or it reverts. However, the 'once set, immutable' comment in the NatSpec is slightly misleading since you CAN call setMarketFactory multiple times with the same address. No actual security issue — the factory address cannot change after first set.",
+    "trigger_scenario": [
+      "Owner calls setMarketFactory(factoryA). marketFactory = factoryA.",
+      "Owner calls setMarketFactory(factoryA) again. Condition: factoryA != 0 && factoryA != factoryA => false. No revert. No-op.",
+      "Owner calls setMarketFactory(factoryB). Condition: factoryA != 0 && factoryA != factoryB => true. Reverts FactoryLocked."
+    ],
+    "preconditions": [],
+    "impact": "loss_of_function",
+    "likelihood": "common",
+    "belief_score": 0.03
+  },
+  {
+    "id": "hyp-pool-v2-020",
+    "job_id": "audit-zen-v2",
+    "agent": "pool-lp-agent",
+    "title": "ProtocolPool: Direct token transfers to pool inflate totalAssets, creating artificial surplus that owner can extract but that also dilutes LP loss accounting",
+    "locations": ["ProtocolPool.totalAssets", "ProtocolPool._lpShareValue", "ProtocolPool.withdraw"],
+    "root_cause": "totalAssets() (line 275-277) returns COLLATERAL_TOKEN.balanceOf(address(this)), which includes any tokens sent directly to the pool (donations). Anyone can transfer tokens to the pool contract, increasing totalAssets. _lpShareValue caps LP shares at 1:1 (line 340: proportional < shares ? proportional : shares), so donated tokens do not benefit LPs — they become protocol surplus. The owner can then withdraw this surplus via withdraw(). While this is not exploitable for fund theft (the tokens came from the donor), it creates a vector where a malicious actor could donate tokens to manipulate the pool's apparent health, potentially tricking LPs into depositing during what appears to be a healthy pool but is actually a temporarily inflated one. If the donor later recovers funds via another mechanism, LPs could be misled.",
+    "trigger_scenario": [
+      "Pool has 60 assets, 100 totalShares (underwater, each share worth 0.6).",
+      "Attacker donates 40 tokens to pool. Pool appears healthy: 100 assets, 100 shares (1:1).",
+      "New LP sees pool is healthy, deposits 50 ZEN. Gets 50 shares. Pool: 150 assets, 150 shares.",
+      "Owner withdraws 40 ZEN surplus (the donation). Pool: 110 assets, 150 shares.",
+      "New LP's 50 shares are now worth 50 * 110/150 = 36.67. Loss of 13.33 ZEN.",
+      "But owner acted correctly — withdrawn funds were surplus. The manipulation was the donation."
+    ],
+    "preconditions": [
+      "Anyone can send tokens directly to the pool",
+      "Owner withdraws donated surplus",
+      "New LP deposits between donation and withdrawal"
+    ],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.35
+  },
+  {
+    "id": "hyp-pool-v2-021",
+    "job_id": "audit-zen-v2",
+    "agent": "pool-lp-agent",
+    "title": "ProtocolPool._safeTransferExactOut: Recipient balance check can revert for hook-on-receive tokens when recipient is a contract",
+    "locations": ["ProtocolPool._safeTransferExactOut"],
+    "root_cause": "_safeTransferExactOut (line 399-409) checks that the recipient received exactly `amount` tokens by comparing balanceOf before and after. If the recipient is a contract that triggers additional token transfers in its receive hook (e.g., auto-compounding vault), the recipient's balance could increase by more than `amount`. The check at line 408 is `recipientBalAfter - recipientBalBefore < amount` — it only reverts if received LESS than amount, not if received MORE. So this is actually safe for hooks that receive more. However, if the recipient's hook sends tokens back to the pool, the pool's balance check at line 405 (`senderBalBefore - senderBalAfter != amount`) could fail. In practice, LP withdrawal sends to msg.sender (an EOA typically), and owner withdraw sends to a specified address. The collateral token is set at construction and is expected to be a standard ERC-20.",
+    "trigger_scenario": [
+      "Owner calls withdraw(to=hookContract, amount). hookContract has a receive hook.",
+      "safeTransfer sends `amount` to hookContract. hookContract's receive hook sends some tokens back to pool.",
+      "senderBalAfter > senderBalBefore - amount (because tokens were returned). Check: senderBalBefore - senderBalAfter != amount. Reverts.",
+      "Withdrawal fails. Owner must use a different recipient address."
+    ],
+    "preconditions": [
+      "Recipient is a contract with token receive hooks that interact with the pool",
+      "Collateral token supports transfer hooks (e.g., ERC-777)"
+    ],
+    "impact": "dos",
+    "likelihood": "external_dependency",
+    "belief_score": 0.15
+  },
+  {
+    "id": "hyp-pool-v2-022",
+    "job_id": "audit-zen-v2",
+    "agent": "pool-lp-agent",
+    "title": "ProtocolPool.lpWithdraw: shares burned from totalShares but totalAssets decreases by assets (not shares), creating accounting drift when underwater",
+    "locations": ["ProtocolPool.lpWithdraw", "ProtocolPool._lpShareValue"],
+    "root_cause": "In lpWithdraw (line 264-265): totalShares -= sharesToRedeem and lpShareBalance -= sharesToRedeem. The actual transfer is `assets` (which may be less than shares when underwater). So totalShares decreases by sharesToRedeem but totalAssets decreases by assets (= shares * totalAssets / totalShares). After withdrawal: new_totalShares = totalShares - shares, new_totalAssets = totalAssets - assets = totalAssets - shares*totalAssets/totalShares = totalAssets * (totalShares - shares)/totalShares. The ratio totalAssets/totalShares remains: [totalAssets * (totalShares-shares)/totalShares] / (totalShares - shares) = totalAssets/totalShares. The ratio is preserved exactly (modulo rounding). This is correct — proportional withdrawal maintains the share value for remaining LPs.",
+    "trigger_scenario": [
+      "Pool: 60 assets, 100 shares. Ratio = 0.6.",
+      "LP withdraws 50 shares. assets = 50*60/100 = 30.",
+      "After: 30 assets, 50 shares. Ratio = 30/50 = 0.6. Preserved.",
+      "No accounting drift. Correct behavior."
+    ],
+    "preconditions": [
+      "Pool is underwater"
+    ],
+    "impact": "fund_loss",
+    "likelihood": "internal_state",
+    "belief_score": 0.03
+  },
+  {
+    "id": "hyp-pool-v2-023",
+    "job_id": "audit-zen-v2",
+    "agent": "pool-lp-agent",
+    "title": "ProtocolPool.maxRedeemable: Underwater path returns shares that when burned would yield more assets than idle allows",
+    "locations": ["ProtocolPool.maxRedeemable"],
+    "root_cause": "In maxRedeemable (line 330-331), when pool is underwater (balance < totalShares) and unlockedValue > idle, the function returns Math.mulDiv(idle, totalShares, balance). This computes how many shares can be redeemed such that their asset value equals idle. Verification: if maxShares = idle * totalShares / balance, then _lpShareValue(maxShares) = maxShares * balance / totalShares = (idle * totalShares / balance) * balance / totalShares = idle. So the LP would receive exactly `idle` assets. Since idle = balance - reservedTotal, and the LP's withdrawal would remove `idle` from the pool, the remaining balance equals reservedTotal. This is correct — the function computes the maximum shares whose redemption value fits within idle liquidity. However, mulDiv rounds down, so the returned share count might be slightly conservative (LP could potentially redeem 1 more share). This is safe (conservative) direction.",
+    "trigger_scenario": [
+      "Pool: balance = 80, totalShares = 100, reservedTotal = 30, idle = 50.",
+      "LP has 100 unlocked shares. unlockedValue = 100*80/100 = 80 > 50.",
+      "balance(80) < totalShares(100): underwater path.",
+      "maxRedeemable = 50 * 100 / 80 = 62 shares.",
+      "Verify: _lpShareValue(62) = 62 * 80 / 100 = 49.6 → rounds to 49. 49 <= 50. Correct.",
+      "LP calls lpWithdraw(62, 0). assets = 49. idle = 50. 49 <= 50. Succeeds."
+    ],
+    "preconditions": [
+      "Pool is underwater with limited idle liquidity"
+    ],
+    "impact": "dos",
+    "likelihood": "internal_state",
+    "belief_score": 0.1
+  },
+  {
+    "id": "hyp-pool-v2-024",
+    "job_id": "audit-zen-v2",
+    "agent": "pool-lp-agent",
+    "title": "ProtocolPool: No minimum deposit enforced, enabling share inflation/manipulation with dust deposits",
+    "locations": ["ProtocolPool.deposit"],
+    "root_cause": "deposit() (line 224-242) only requires amount > 0 (line 225). Since shares are always 1:1 with amount, a 1 wei deposit creates 1 wei of shares. Unlike traditional ERC-4626 vaults, there is no first-depositor inflation attack risk here because shares are always minted 1:1 regardless of pool state. The 1:1 model eliminates the classic vault share manipulation. However, as noted in hyp-pool-v2-009, the lack of minimum deposit enables _deposits array bloat. The 1:1 minting model is inherently safe against share price manipulation.",
+    "trigger_scenario": [
+      "First depositor deposits 1 wei. Gets 1 share. totalShares = 1.",
+      "Attacker donates 1e18 tokens directly. totalAssets = 1e18 + 1.",
+      "Second depositor deposits 1e18. Gets 1e18 shares (1:1, NOT inflated). totalShares = 1e18 + 1.",
+      "No inflation attack: second depositor's shares are fairly valued.",
+      "The 1:1 model completely prevents first-depositor share inflation."
+    ],
+    "preconditions": [],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-pool-v2-025",
+    "job_id": "audit-zen-v2",
+    "agent": "pool-lp-agent",
+    "title": "ProtocolPool._compactDeposits: Compaction correctness — write pointer correctly preserves non-zero records and pops trailing zeros",
+    "locations": ["ProtocolPool._compactDeposits"],
+    "root_cause": "Verifying _compactDeposits correctness. The algorithm (line 363-378) uses a read/write pointer pattern: iterate with `read`, copy non-zero records to position `write`, then pop `len - write` entries from the end. Edge cases: (1) All records non-zero: write tracks read, no copies (if write != read is false), no pops. Correct. (2) All records zero: write stays 0, toRemove = len, all popped. Correct. (3) First record zero, rest non-zero: write=0, read=1 copies to 0, etc. Records shift left by 1, last entry popped. Correct. (4) Alternating zero/non-zero: non-zero records packed to front. Correct. The algorithm is a standard in-place array compaction and is correct.",
+    "trigger_scenario": [
+      "Records: [0, 10, 0, 20, 0]. len=5.",
+      "read=0: skip (shares=0). read=1: records[0]=records[1] (10), write=1. read=2: skip. read=3: records[1]=records[3] (20), write=2. read=4: skip.",
+      "write=2. toRemove = 5-2 = 3. Pop 3 times. Result: [10, 20]. Correct."
+    ],
+    "preconditions": [],
+    "impact": "fund_loss",
+    "likelihood": "internal_state",
+    "belief_score": 0.02
+  }
+]

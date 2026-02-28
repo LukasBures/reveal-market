@@ -1,0 +1,83 @@
+[
+  {
+    "id": "alpha-H001",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "ALPHA",
+    "title": "RevealMarket.commitWithAuthorization global ticketId binding enables relayer-ordering censorship of pre-approved commits",
+    "locations": [
+      "RelayerEscrow.approveCommitAuthorization",
+      "RelayerEscrow._commitAuthorizationHash",
+      "RevealMarket.commitWithAuthorization",
+      "RelayerEscrow.commitOnBehalf"
+    ],
+    "root_cause": "The authorization object is bound to an exact `ticketId`, while `ticketId` is a single global queue (`commitments.length`) that can change between approval and execution. Because only `RelayerEscrow.owner()` can execute `commitOnBehalf`, the relayer fully controls sequencing and can invalidate previously approved authorizations by inserting other commits first.",
+    "trigger_scenario": [
+      "Two users obtain backend-signed commit authorizations that both target the current next ticket id.",
+      "Both users call `approveCommitAuthorization`, storing hashes that include that specific ticket id.",
+      "Relayer owner executes one commit first via `commitOnBehalf`, incrementing `commitments.length` in `RevealMarket`.",
+      "The second user's authorized payload now fails `auth.ticketId == commitments.length` in `commitWithAuthorization` with `TicketIndexMismatch`.",
+      "By repeatedly choosing ordering (or withholding execution) the relayer can force selected users to re-sign/re-approve until the commit window closes."
+    ],
+    "preconditions": [
+      "Commit execution is centralized through `RelayerEscrow.commitOnBehalf` (`onlyOwner`).",
+      "Authorizations are pre-signed for a concrete `ticketId` before on-chain execution.",
+      "There is contention or intentional ordering manipulation before `commitDeadline`."
+    ],
+    "impact": "unfair_treatment",
+    "likelihood": "malicious_action",
+    "belief_score": 0.84
+  },
+  {
+    "id": "alpha-H002",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "ALPHA",
+    "title": "RelayerEscrow.approveCommitAuthorization creates non-revocable approvals that relayer owner can execute at arbitrary later times",
+    "locations": [
+      "RelayerEscrow.approveCommitAuthorization",
+      "RelayerEscrow.commitOnBehalf"
+    ],
+    "root_cause": "Approved commit authorizations are stored as a persistent boolean and there is no user-side revoke/cancel path. Execution timing is entirely delegated to `onlyOwner` `commitOnBehalf`, so approvals stay live until consumed (or naturally expired in market checks), even if user intent changes.",
+    "trigger_scenario": [
+      "User approves a commit authorization with a long `expiry` via `approveCommitAuthorization`.",
+      "Relayer does not execute immediately and the approval remains `true` in `approvedCommitAuthorizations`.",
+      "User later changes intent but cannot revoke that authorization on-chain.",
+      "At any later point before expiry, relayer owner executes `commitOnBehalf` once user balance is sufficient.",
+      "User is forced into a commitment at relayer-chosen timing without a fresh consent transaction."
+    ],
+    "preconditions": [
+      "A valid approval exists for `(user, authHash)` and has not been consumed.",
+      "`auth.expiry` has not elapsed when execution is attempted.",
+      "Relayer owner behaves adversarially or is compromised."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.76
+  },
+  {
+    "id": "alpha-H003",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "ALPHA",
+    "title": "RelayerEscrow._safeTransferExact and RevealMarket.commitWithAuthorization trust token-reported balances, enabling phantom collateral if token is adversarial",
+    "locations": [
+      "RelayerEscrow._safeTransferExact",
+      "RelayerEscrow.commitOnBehalf",
+      "RevealMarket.commitWithAuthorization"
+    ],
+    "root_cause": "Collateral movement and backing checks are validated only via `IERC20.balanceOf` deltas from the same external token contract being checked. If the token is upgradeable/non-standard and can lie about balances, `_safeTransferExact` and market backing predicates can be satisfied without an economically equivalent transfer.",
+    "trigger_scenario": [
+      "Collateral token implementation is upgraded or deployed with adversarial `balanceOf` semantics.",
+      "`commitOnBehalf` calls `_safeTransferExact`, and token reports sender/recipient deltas consistent with an exact transfer even when real spendable balances did not move equivalently.",
+      "`commitWithAuthorization` passes `balanceOf(address(this)) >= totalEscrow + ticketSize` using the same manipulated view.",
+      "Escrow debits user accounting and market records commitment/rake based on assumed payment.",
+      "At settlement/claim time, liabilities are under-backed in real token terms, leading to insolvency or payout failure."
+    ],
+    "preconditions": [
+      "Collateral token is non-standard, malicious, or mutable (e.g., upgradeable) and can return deceptive balances.",
+      "Protocol relies exclusively on token-reported balances for transfer correctness and payment backing.",
+      "Commits continue under this token behavior before detection."
+    ],
+    "impact": "protocol_insolvency",
+    "likelihood": "external_dependency",
+    "belief_score": 0.58
+  }
+]

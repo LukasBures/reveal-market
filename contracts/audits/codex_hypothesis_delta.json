@@ -1,0 +1,286 @@
+[
+  {
+    "id": "02082bd2-32c4-4db3-abf3-0259bff055c9",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "DELTA",
+    "title": "MarketFactory.setVerifierApproval + RevealMarket.refreshLockedVerifierKeyHash pin verifier keys in a way that can deadlock locked markets after verifier key rotation",
+    "locations": [
+      "MarketFactory.setVerifierApproval",
+      "MarketFactory._validateVerifier",
+      "MarketFactory.refreshMarketLockedVerifierKey",
+      "RevealMarket.refreshLockedVerifierKeyHash",
+      "RevealMarket.verifyAndSettle",
+      "RevealMarket.verifyAndSettleBatched",
+      "Verifier.setVerifyingKey"
+    ],
+    "root_cause": "Factory governance permanently pins `approvedVerifierKeyHash` per verifier address, while `Verifier` allows owner key rotation. Once a market is locked, `refreshMarketLockedVerifierKey` does not actually write a new key hash (it only re-checks equality) and `setVerifier` is unavailable outside Commit phase, so a post-lock verifier key rotation creates an unrecoverable policy mismatch.",
+    "trigger_scenario": [
+      "A market enters `Phase.Locked` and stores `lockedVerifierKeyHash` during `lockBatches`.",
+      "The verifier owner rotates the proving key via `Verifier.setVerifyingKey`, changing `verifyingKeyHash` without changing verifier address.",
+      "`MarketFactory.isVerifierCurrentlyApproved` starts returning false because on-chain key hash no longer matches pinned `approvedVerifierKeyHash`.",
+      "`MarketFactory.refreshMarketLockedVerifierKey` cannot repair the lock because `_validateVerifier` now fails on drift and `RevealMarket.refreshLockedVerifierKeyHash` requires equality instead of updating state.",
+      "Settlement entrypoints (`verifyAndSettle` / `verifyAndSettleBatched`) fail verifier approval/key checks, leaving market stuck in Locked until timeout-driven refunds."
+    ],
+    "preconditions": [
+      "A locked market still needs settlement proofs.",
+      "Verifier key material is changed after market lock (maliciously or operationally).",
+      "Market cannot be moved back to Commit phase to rotate verifier address."
+    ],
+    "impact": "dos",
+    "likelihood": "internal_state",
+    "belief_score": 0.88,
+    "context_metadata": {
+      "repository": "reveal-market",
+      "commit": "5e1e80836cb2812e68c7deee1436e71b192858a4",
+      "scope_ids": [
+        "FLOW_1_FactoryEscrowOrchestration",
+        "STATE_B_CrossContractLiabilityAndCollateralState"
+      ],
+      "affected_files": [
+        "contracts/zen/src/MarketFactory.sol",
+        "contracts/zen/src/RevealMarket.sol",
+        "contracts/zen/src/Verifier.sol"
+      ]
+    },
+    "evidence": [
+      {
+        "type": "code",
+        "file": "contracts/zen/src/MarketFactory.sol",
+        "location": "MarketFactory.setVerifierApproval",
+        "lines": "177-203",
+        "snippet": "Pins verifier key hash per address and re-approval reverts on drift."
+      },
+      {
+        "type": "code",
+        "file": "contracts/zen/src/RevealMarket.sol",
+        "location": "RevealMarket.refreshLockedVerifierKeyHash",
+        "lines": "678-684",
+        "snippet": "Checks current key equals locked key but never writes a new locked key hash."
+      }
+    ]
+  },
+  {
+    "id": "c3572b19-b543-4253-b7ba-65d7937ec218",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "DELTA",
+    "title": "MarketFactory.setRelayerCommitsPaused is fail-open: pause fanout errors are swallowed so active relayers can remain live during emergency stop",
+    "locations": [
+      "MarketFactory.setRelayerCommitsPaused",
+      "MarketFactory.setRelayerCommitsPausedBatch",
+      "MarketFactory._setRelayerCommitsPausedBatch",
+      "RelayerEscrow.setCommitsPaused"
+    ],
+    "root_cause": "Emergency pause propagation uses nested `try/catch` and never reverts on failure; it only emits `RelayerPausePropagationFailed`. The outer function still emits global pause success even if one or more active relayers reject or ignore the pause call.",
+    "trigger_scenario": [
+      "At least one market points to an active relayer in `activeRelayers`.",
+      "That relayer reverts or behaves non-standardly when `setCommitsPaused(true)` is called.",
+      "Owner invokes `setRelayerCommitsPaused(true)` expecting a protocol-wide commit stop.",
+      "`_setRelayerCommitsPausedBatch` catches the failure and continues without reverting the transaction.",
+      "The transaction emits pause events, but the failing relayer stays unpaused and can continue forwarding commits for its markets."
+    ],
+    "preconditions": [
+      "An active relayer contract can fail/ignore pause updates (misconfiguration, upgrade drift, or malicious relayer implementation).",
+      "Operators rely on factory-level pause fanout as an emergency circuit breaker."
+    ],
+    "impact": "griefing",
+    "likelihood": "malicious_action",
+    "belief_score": 0.81,
+    "context_metadata": {
+      "repository": "reveal-market",
+      "commit": "5e1e80836cb2812e68c7deee1436e71b192858a4",
+      "scope_ids": [
+        "FLOW_1_FactoryEscrowOrchestration"
+      ],
+      "affected_files": [
+        "contracts/zen/src/MarketFactory.sol",
+        "contracts/zen/src/RelayerEscrow.sol"
+      ]
+    },
+    "evidence": [
+      {
+        "type": "code",
+        "file": "contracts/zen/src/MarketFactory.sol",
+        "location": "MarketFactory._setRelayerCommitsPausedBatch",
+        "lines": "541-561",
+        "snippet": "Pause propagation failures emit events but do not revert."
+      },
+      {
+        "type": "code",
+        "file": "contracts/zen/src/MarketFactory.sol",
+        "location": "MarketFactory.setRelayerCommitsPaused",
+        "lines": "405-422",
+        "snippet": "Global pause event is emitted after best-effort fanout, regardless of per-relayer failures."
+      }
+    ]
+  },
+  {
+    "id": "d7105366-e138-4d3b-9194-931058be5b5d",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "DELTA",
+    "title": "MarketFactory.migrateMarketRelayerBalances migrates global user escrow balances (not market-scoped), enabling cross-market collateral misrouting",
+    "locations": [
+      "MarketFactory.migrateMarketRelayerBalances",
+      "RelayerEscrow.balances",
+      "RelayerEscrow.withdrawTo",
+      "RelayerEscrow.creditMigrated"
+    ],
+    "root_cause": "Relayer balances are stored per-user globally in `RelayerEscrow` (no market dimension), but `migrateMarketRelayerBalances` is invoked per market and moves `oldRelayer.balances(user)` in full. This couples one market's relayer migration to all of a user's collateral parked on the old relayer.",
+    "trigger_scenario": [
+      "A user keeps collateral on an old relayer for multiple markets.",
+      "Factory owner rotates a single market to a new relayer and calls `migrateMarketRelayerBalances` for that market.",
+      "The function reads `oldRelayer.balances(user)` and withdraws the full amount, then credits it on the target relayer.",
+      "Other markets still tied to the old relayer lose access to that user's previously available escrow balance.",
+      "Commits for those markets fail until users manually rebalance collateral across relayers."
+    ],
+    "preconditions": [
+      "A user balance on old relayer is intended to serve more than one market.",
+      "Factory performs per-market relayer migration using the provided helper."
+    ],
+    "impact": "loss_of_function",
+    "likelihood": "internal_state",
+    "belief_score": 0.79,
+    "context_metadata": {
+      "repository": "reveal-market",
+      "commit": "5e1e80836cb2812e68c7deee1436e71b192858a4",
+      "scope_ids": [
+        "FLOW_1_FactoryEscrowOrchestration",
+        "STATE_B_CrossContractLiabilityAndCollateralState"
+      ],
+      "affected_files": [
+        "contracts/zen/src/MarketFactory.sol",
+        "contracts/zen/src/RelayerEscrow.sol"
+      ]
+    },
+    "evidence": [
+      {
+        "type": "code",
+        "file": "contracts/zen/src/MarketFactory.sol",
+        "location": "MarketFactory.migrateMarketRelayerBalances",
+        "lines": "289-304",
+        "snippet": "Migrates `oldRelayer.balances(user)` (entire user balance) per user during a single-market migration."
+      },
+      {
+        "type": "code",
+        "file": "contracts/zen/src/RelayerEscrow.sol",
+        "location": "RelayerEscrow.balances",
+        "lines": "16-20",
+        "snippet": "Escrow accounting is `mapping(address => uint256)` without market-level partitioning."
+      }
+    ]
+  },
+  {
+    "id": "3f21f78b-ebe8-4ae9-a552-c7e1a9a75e55",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "DELTA",
+    "title": "RelayerEscrow/ProtocolPool assume non-rebasing collateral; supply rebases can violate backing and reservation invariants across contracts",
+    "locations": [
+      "RelayerEscrow.withdraw",
+      "RelayerEscrow.commitOnBehalf",
+      "RelayerEscrow._excessCollateral",
+      "ProtocolPool.reserveLiability",
+      "ProtocolPool.draw",
+      "ProtocolPool.withdraw"
+    ],
+    "root_cause": "Cross-contract accounting is done in raw token amounts (`balances`, `accountedCollateral`, `reservedTotal`, `reservedLiability`) with no share-based normalization and no token capability gate beyond fee-on-transfer checks. If collateral token balances change asynchronously (negative/positive rebasing), internal accounting can diverge from actual transferable balance.",
+    "trigger_scenario": [
+      "Protocol deploys with an ERC20 that can rebase balances without transfers.",
+      "Users deposit into relayer escrow and markets reserve pool liability under pre-rebase balances.",
+      "A negative rebase reduces actual token balances in escrow/pool while `balances`, `accountedCollateral`, and reservation state remain unchanged.",
+      "Escrow withdraw/commit transfers and pool draw/withdraw checks begin reverting due insufficient real balance relative to accounting expectations.",
+      "Users/markets face withdrawal and settlement DoS until external recapitalization occurs."
+    ],
+    "preconditions": [
+      "Collateral token supports asynchronous supply/balance rebasing or similar non-standard balance mutation.",
+      "Protocol does not hard-restrict collateral to strictly non-rebasing ERC20 implementations."
+    ],
+    "impact": "dos",
+    "likelihood": "external_dependency",
+    "belief_score": 0.74,
+    "context_metadata": {
+      "repository": "reveal-market",
+      "commit": "5e1e80836cb2812e68c7deee1436e71b192858a4",
+      "scope_ids": [
+        "STATE_B_CrossContractLiabilityAndCollateralState"
+      ],
+      "affected_files": [
+        "contracts/zen/src/RelayerEscrow.sol",
+        "contracts/zen/src/ProtocolPool.sol"
+      ]
+    },
+    "evidence": [
+      {
+        "type": "code",
+        "file": "contracts/zen/src/RelayerEscrow.sol",
+        "location": "RelayerEscrow._excessCollateral",
+        "lines": "217-223",
+        "snippet": "Excess is computed from `balanceOf - accountedCollateral` with no share/rebase adaptation."
+      },
+      {
+        "type": "code",
+        "file": "contracts/zen/src/ProtocolPool.sol",
+        "location": "ProtocolPool.reserveLiability",
+        "lines": "121-129",
+        "snippet": "Reservations rely on instantaneous `balanceOf` and `reservedTotal` invariants in raw token units."
+      }
+    ]
+  },
+  {
+    "id": "a5b08519-2c60-4c17-b569-f07fd4bb2247",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "DELTA",
+    "title": "Factory routing rotations are non-atomic across dependencies, leaving stale `allowedMarket` permissions and cross-contract authorization drift",
+    "locations": [
+      "MarketFactory.updateMarketRelayer",
+      "MarketFactory.updateMarketProtocolPool",
+      "RelayerEscrow.unregisterMarket",
+      "ProtocolPool.registerMarket",
+      "ProtocolPool.draw",
+      "ProtocolPool.reserveLiability",
+      "ProtocolPool.releaseLiabilityReservation"
+    ],
+    "root_cause": "Dependency rotations only apply forward registration on the new endpoint, while old endpoint cleanup is missing (`updateMarketProtocolPool`) or best-effort only (`updateMarketRelayer` with swallowed unregister failures). This permits stale `allowedMarket` trust edges to outlive factory routing state.",
+    "trigger_scenario": [
+      "A market is deployed and registered in initial relayer/pool allowlists.",
+      "Factory rotates the market to new dependencies.",
+      "Old relayer unregister can fail without reverting, and old protocol pool is never explicitly de-authorized.",
+      "Factory/market now reference new dependencies, but old dependencies still retain market-level authorization flags.",
+      "Subsequent operational rollbacks, misrouting, or unexpected call paths can exercise stale permissions that operators assume were revoked."
+    ],
+    "preconditions": [
+      "At least one dependency rotation occurs for an existing market.",
+      "Operators assume de-registration is strict and atomic across all protocol-owned dependencies."
+    ],
+    "impact": "griefing",
+    "likelihood": "internal_state",
+    "belief_score": 0.58,
+    "context_metadata": {
+      "repository": "reveal-market",
+      "commit": "5e1e80836cb2812e68c7deee1436e71b192858a4",
+      "scope_ids": [
+        "FLOW_1_FactoryEscrowOrchestration",
+        "STATE_B_CrossContractLiabilityAndCollateralState"
+      ],
+      "affected_files": [
+        "contracts/zen/src/MarketFactory.sol",
+        "contracts/zen/src/RelayerEscrow.sol",
+        "contracts/zen/src/ProtocolPool.sol"
+      ]
+    },
+    "evidence": [
+      {
+        "type": "code",
+        "file": "contracts/zen/src/MarketFactory.sol",
+        "location": "MarketFactory.updateMarketRelayer",
+        "lines": "275-281",
+        "snippet": "Old relayer unregister failures are caught and rotation continues."
+      },
+      {
+        "type": "code",
+        "file": "contracts/zen/src/MarketFactory.sol",
+        "location": "MarketFactory.updateMarketProtocolPool",
+        "lines": "335-337",
+        "snippet": "New pool registration occurs with no corresponding old pool de-registration path."
+      }
+    ]
+  }
+]

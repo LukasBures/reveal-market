@@ -1,0 +1,902 @@
+[
+  {
+    "id": "hyp-factory-001",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "MarketFactory.owner: Single compromised owner key grants full protocol control -> fund_loss",
+    "locations": [
+      "MarketFactory.updateOracle",
+      "MarketFactory.updateMarketVerifier",
+      "MarketFactory.sweepUnclaimed",
+      "MarketFactory.updateMarketRelayer",
+      "MarketFactory.setMarketCommitsPaused",
+      "MarketFactory.setMarketClaimsPaused"
+    ],
+    "root_cause": "MarketFactory uses Ownable2Step with a single owner address as the trust root for all administrative operations. A compromised owner key can rotate oracles to post fraudulent results, rotate verifiers to forge proofs, rotate relayers to redirect user deposits, sweep unclaimed funds, and pause/unpause operations at will. There is no timelock, multisig enforcement, or role separation at the contract level.",
+    "trigger_scenario": [
+      "Attacker compromises the factory owner private key (phishing, leaked key, compromised HSM)",
+      "Attacker calls updateOracle(market, maliciousOracle) to set a colluding oracle",
+      "Attacker calls updateMarketVerifier(market, maliciousVerifier, fakeCircuitHash) with a pre-approved malicious verifier",
+      "Malicious oracle calls lockBatches with fabricated roots, then postResult, then verifyAndSettle with a proof the malicious verifier accepts",
+      "Settlement finalizes with inflated totalLiability, draining the protocol pool via draw()",
+      "Alternatively, attacker calls sweepUnclaimed after claim deadline to drain settled market funds"
+    ],
+    "preconditions": [
+      "Owner private key is compromised",
+      "Attacker has access to submit transactions as the owner",
+      "Markets exist with active user funds (committed or settled)"
+    ],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.85
+  },
+  {
+    "id": "hyp-factory-002",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "MarketFactory.setVerifierApproval: Proxy verifier bypasses codehash pinning -> theft_of_yield",
+    "locations": [
+      "MarketFactory.setVerifierApproval",
+      "MarketFactory._validateVerifier",
+      "MarketFactory.isVerifierCurrentlyApproved"
+    ],
+    "root_cause": "setVerifierApproval pins verifier.codehash on first approval (line 182-190). If the verifier is deployed behind a transparent or UUPS proxy, the codehash is the proxy's codehash which never changes even when the implementation is upgraded. The pinned codehash check (line 188) would pass even after the implementation logic is silently swapped. The verifyingKeyHash and circuitHash are read from the verifier via external calls, so a compromised implementation could return the expected values while actually accepting forged proofs. However, Verifier.sol is Ownable2Step with renounceOwnership disabled and uses no proxy pattern, so this risk requires intentional deployment of a proxy verifier.",
+    "trigger_scenario": [
+      "Owner deploys a verifier behind a minimal proxy (ERC1967 or similar) where the proxy codehash is stable",
+      "Owner calls setVerifierApproval(proxyVerifier, true) — proxy codehash and initial keyHash are pinned",
+      "Owner (or compromised owner) upgrades the proxy implementation to a malicious verifier that returns true for any proof",
+      "Malicious implementation returns identical circuitHash(), verifyingKeyHash(), expectedInputs() values",
+      "isVerifierCurrentlyApproved passes all checks since proxy codehash hasn't changed",
+      "Oracle calls verifyAndSettle with a forged proof that the malicious implementation accepts"
+    ],
+    "preconditions": [
+      "Verifier is deployed behind a proxy contract (not the standard Verifier.sol)",
+      "Owner controls both the factory and the proxy admin",
+      "A market is in Locked phase with active escrow"
+    ],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.45
+  },
+  {
+    "id": "hyp-factory-003",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "RevealMarket.refreshLockedVerifierKeyHash: Function is a no-op that never updates the key hash -> loss_of_function",
+    "locations": [
+      "RevealMarket.refreshLockedVerifierKeyHash",
+      "MarketFactory.refreshMarketLockedVerifierKey"
+    ],
+    "root_cause": "refreshLockedVerifierKeyHash (RevealMarket line 678-684) checks that verifier.verifyingKeyHash() == lockedVerifierKeyHash (line 682), then only emits an event without updating lockedVerifierKeyHash. If the verifier's key has been legitimately rotated (e.g., via Verifier.setVerifyingKey), the new key hash will NOT match lockedVerifierKeyHash, causing the function to revert with VerifierKeyMismatch. If the keys DO match, the function is a no-op since it never writes a new value. This means there is no way to update lockedVerifierKeyHash after lockBatches is called, even if the verifier key is legitimately rotated. The only recovery path is enableRefunds (cancel the market).",
+    "trigger_scenario": [
+      "Market is locked via lockBatches, setting lockedVerifierKeyHash to the current verifier key hash",
+      "Owner legitimately rotates the verifier key via Verifier.setVerifyingKey (bug fix, security upgrade)",
+      "Owner calls refreshMarketLockedVerifierKey to update the locked market's key hash",
+      "_validateVerifier passes (new key hash is in approvedVerifierKeyHash after re-approval)",
+      "rm.refreshLockedVerifierKeyHash() reverts because verifier.verifyingKeyHash() != lockedVerifierKeyHash",
+      "Settlement is permanently blocked for this market unless enableRefunds is called"
+    ],
+    "preconditions": [
+      "Market is in Phase.Locked",
+      "Verifier key has been rotated after lock",
+      "Owner needs to update the locked key hash to continue settlement"
+    ],
+    "impact": "loss_of_function",
+    "likelihood": "internal_state",
+    "belief_score": 0.92
+  },
+  {
+    "id": "hyp-factory-004",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "RevealMarket.setRelayerEscrow: No phase guard allows relayer rotation during Locked/Settled phases -> fund_loss",
+    "locations": [
+      "RevealMarket.setRelayerEscrow",
+      "MarketFactory.updateMarketRelayer"
+    ],
+    "root_cause": "RevealMarket.setRelayerEscrow (line 650-654) has only an onlyFactory modifier with no phase check. The MarketFactory.updateMarketRelayer (line 266-286) enforces phase == Commit && nextTicketId == 0 (line 272), providing indirect protection. However, setRelayerEscrow is a public function that could theoretically be called by any code path in the factory. If a new factory function is added in a future upgrade that calls setRelayerEscrow without the phase guard, or if the factory is redeployed with a different implementation, the relayer could be rotated during Locked or Settled phase. In the current codebase, only updateMarketRelayer calls setRelayerEscrow, so this is safe but fragile.",
+    "trigger_scenario": [
+      "Current code: updateMarketRelayer is the only caller of rm.setRelayerEscrow() — safe",
+      "Future upgrade scenario: a new factory function calls rm.setRelayerEscrow() without the phase+ticket guard",
+      "Relayer is rotated while market is in Locked phase with active user deposits",
+      "New relayer has different user balances, breaking the refund or claim flow",
+      "Users who deposited through the old relayer cannot get refunds"
+    ],
+    "preconditions": [
+      "A new factory code path calls setRelayerEscrow without phase guard (not present in current code)",
+      "Market is in Locked or Settled phase with user funds"
+    ],
+    "impact": "fund_loss",
+    "likelihood": "internal_state",
+    "belief_score": 0.25
+  },
+  {
+    "id": "hyp-factory-005",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "MarketFactory.updateOracle: Oracle rotation during Commit phase enables malicious oracle injection before lock -> fund_loss",
+    "locations": [
+      "MarketFactory.updateOracle",
+      "RevealMarket.setOracle",
+      "RevealMarket.lockBatches",
+      "RevealMarket.postResult",
+      "RevealMarket.verifyAndSettle"
+    ],
+    "root_cause": "RevealMarket.setOracle (line 642-647) allows oracle rotation when phase is Commit or Cancelled. The factory's updateOracle (line 258-263) has no additional phase restrictions. A compromised factory owner can rotate the oracle to a colluding address right before the commit deadline. The malicious oracle can then call lockBatches with fabricated batch roots (that don't match real commitments), post a fraudulent result, and submit fake proofs. However, lockBatches also requires a valid relayerSig from RelayerEscrow.owner(), adding a second check. The attack requires either compromising both oracle and relayer owner, or the owner rotating both.",
+    "trigger_scenario": [
+      "Market is in Commit phase with user commitments and approaching deadline",
+      "Compromised factory owner calls updateOracle(market, maliciousOracle)",
+      "Commit deadline passes",
+      "Malicious oracle calls lockBatches — but this requires a valid relayerSig from relayerEscrow.owner()",
+      "If relayer owner is also compromised, lockBatches succeeds with fabricated roots",
+      "Malicious oracle calls postResult and verifyAndSettle with forged data"
+    ],
+    "preconditions": [
+      "Factory owner key is compromised",
+      "Relayer owner key is also compromised (lockBatches requires relayer signature)",
+      "Market is in Commit phase with user deposits"
+    ],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.5
+  },
+  {
+    "id": "hyp-factory-006",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "MarketFactory.migrateMarketRelayerBalances: Tokens sent to target relayer before creditMigrated accounting -> griefing",
+    "locations": [
+      "MarketFactory.migrateMarketRelayerBalances",
+      "RelayerEscrow.withdrawTo",
+      "RelayerEscrow.creditMigrated"
+    ],
+    "root_cause": "migrateMarketRelayerBalances (line 289-306) iterates users and for each: (1) calls oldRelayer.withdrawTo() which transfers tokens to targetRelayerAddress, then (2) calls targetRelayer.creditMigrated() which attributes the balance. creditMigrated checks _excessCollateral() >= amount (line 198), relying on actual token balance minus accountedCollateral. Since withdrawTo sends tokens before creditMigrated accounts for them, there is excess collateral available. This ordering is correct. However, if an attacker front-runs the migration by sending tokens to the target relayer and then calling recoverExcessCollateral after creditMigrated but before the next iteration, they could steal the migrated tokens. But recoverExcessCollateral is onlyOwner, so this requires relayer owner collusion.",
+    "trigger_scenario": [
+      "Factory owner calls migrateMarketRelayerBalances for users [A, B, C]",
+      "For user A: withdrawTo sends tokens to targetRelayer, creditMigrated attributes balance correctly",
+      "For user B: same flow succeeds",
+      "Between iterations (if reentrancy were possible): attacker calls recoverExcessCollateral on targetRelayer",
+      "However, withdrawTo is nonReentrant, and creditMigrated doesn't have external calls that could be re-entered",
+      "Attack fails due to nonReentrant guard on withdrawTo and onlyOwner on recoverExcessCollateral"
+    ],
+    "preconditions": [
+      "Factory owner is migrating balances between relayers",
+      "Attacker would need to be the relayer owner to call recoverExcessCollateral"
+    ],
+    "impact": "griefing",
+    "likelihood": "malicious_action",
+    "belief_score": 0.1
+  },
+  {
+    "id": "hyp-factory-007",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "MarketFactory._deactivateRelayer: Swap-and-pop with stale refcount could leave relayer in array -> griefing",
+    "locations": [
+      "MarketFactory._deactivateRelayer",
+      "MarketFactory._activateRelayer"
+    ],
+    "root_cause": "_deactivateRelayer (line 572-592) uses a reference-counted swap-and-pop pattern. When refs drop to 0, it looks up activeRelayerIndexPlusOne to find the array position. If _activateRelayer is called for the same relayer multiple times (e.g., via multiple market creations using the same relayer), refs increment but the index stays the same (line 567: 'if refs != 0 return'). When deactivating, it only removes from the array when refs reach 0. The swap-and-pop correctly updates the moved element's index (line 588). Edge case: if the relayer is at the last position (idx == lastIdx), the swap is skipped and only pop() happens. This is correct since no move is needed. No off-by-one found.",
+    "trigger_scenario": [
+      "RelayerEscrow R1 is activated for markets M1, M2, M3 (refCount = 3)",
+      "M1 rotates to R2: _deactivateRelayer(R1) sets refCount to 2, does not remove from array",
+      "M2 rotates to R2: _deactivateRelayer(R1) sets refCount to 1, does not remove from array",
+      "M3 rotates to R2: _deactivateRelayer(R1) sets refCount to 0, removes from array via swap-and-pop",
+      "If R1 is the last element, pop() directly removes it — correct",
+      "If R1 is not the last, the last element is moved to R1's position and its index is updated — correct"
+    ],
+    "preconditions": [
+      "Multiple markets use the same relayer",
+      "Relayer rotation happens in sequence"
+    ],
+    "impact": "griefing",
+    "likelihood": "internal_state",
+    "belief_score": 0.05
+  },
+  {
+    "id": "hyp-factory-008",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "MarketFactory.setRelayerCommitsPaused: try/catch silently skips failed relayers -> dos",
+    "locations": [
+      "MarketFactory._setRelayerCommitsPausedBatch",
+      "MarketFactory.setRelayerCommitsPaused"
+    ],
+    "root_cause": "_setRelayerCommitsPausedBatch (line 541-562) iterates activeRelayers and calls setCommitsPaused on each with try/catch. If a relayer's setCommitsPaused reverts (e.g., relayer contract is self-destructed, or its setCommitsPaused has a bug), the failure is silently caught and only an event RelayerPausePropagationFailed is emitted. The function continues to the next relayer. This means an emergency pause might not reach all relayers, leaving some relayers still accepting commits while the factory owner believes all are paused. Additionally, the function reads back commitsPaused() to verify (line 551) but failures there are also caught silently.",
+    "trigger_scenario": [
+      "Factory owner detects a critical vulnerability and calls setRelayerCommitsPaused(true)",
+      "RelayerEscrow R1 is paused successfully",
+      "RelayerEscrow R2 has been upgraded/self-destructed/has a bug — setCommitsPaused reverts",
+      "try/catch catches the revert, emits RelayerPausePropagationFailed(R2)",
+      "Function continues, R3 is paused successfully",
+      "R2 remains unpaused — users can still commit through R2 during the supposed emergency stop"
+    ],
+    "preconditions": [
+      "At least one relayer in activeRelayers has a malfunctioning setCommitsPaused",
+      "Factory owner initiates an emergency pause"
+    ],
+    "impact": "dos",
+    "likelihood": "external_dependency",
+    "belief_score": 0.4
+  },
+  {
+    "id": "hyp-factory-009",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "MarketFactory.createMarket: Deterministic clone salt is predictable marketId but CREATE2 is factory-bound -> griefing",
+    "locations": [
+      "MarketFactory.createMarket"
+    ],
+    "root_cause": "createMarket deploys clones using cloneDeterministic(bytes32(marketId)) (line 446). The salt is the sequential nextMarketId, making the deployed address predictable via predictMarketAddress. Since CREATE2 addresses depend on (creator, salt, initCodeHash), and the creator is the factory itself, an external attacker cannot deploy to the same address from a different contract. However, if the factory is redeployed (e.g., after an upgrade) with the same implementation address, old marketId salts could be reused, creating a clone at a different address (since the factory address changed). The old factory's isMarket mapping is separate, so this doesn't cause cross-contamination. This is a non-issue in practice.",
+    "trigger_scenario": [
+      "Factory V1 deploys market ID 1 at address X",
+      "Factory V1 is deprecated, Factory V2 is deployed with same IMPLEMENTATION",
+      "Factory V2 calls createMarket which starts at nextMarketId=1, deploying at address Y (different from X because factory address changed)",
+      "No collision occurs — different factory address produces different CREATE2 result",
+      "An attacker cannot front-run createMarket to steal the address since only the factory (as creator) determines the address"
+    ],
+    "preconditions": [
+      "Factory is redeployed with the same implementation"
+    ],
+    "impact": "griefing",
+    "likelihood": "external_dependency",
+    "belief_score": 0.05
+  },
+  {
+    "id": "hyp-factory-010",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "MarketFactory.isVerifierCurrentlyApproved: External calls to compromised verifier return attacker-controlled values -> fund_loss",
+    "locations": [
+      "MarketFactory.isVerifierCurrentlyApproved",
+      "RevealMarket._isVerifierApprovedForSettlement"
+    ],
+    "root_cause": "isVerifierCurrentlyApproved (line 207-220) makes multiple external calls to the verifier contract: owner(), expectedInputs(), circuitHash(), verifyingKeyHash(). If the verifier contract is compromised (e.g., via a proxy upgrade or SELFDESTRUCT+CREATE2 redeployment), these calls could return crafted values that pass all checks while the actual verifyProof logic accepts forged proofs. The codehash check (line 215) mitigates SELFDESTRUCT+redeploy since the new code would have a different hash. However, a proxy-based verifier would retain the same codehash while the implementation could be swapped. The Verifier.sol contract does not use a proxy pattern and has renounceOwnership disabled, but the factory does not enforce that verifiers must not be proxies.",
+    "trigger_scenario": [
+      "A verifier is deployed behind an upgradeable proxy and approved by the factory owner",
+      "Proxy codehash is pinned on first approval",
+      "Attacker (or compromised owner) upgrades the proxy implementation",
+      "New implementation returns valid-looking owner(), expectedInputs(), circuitHash(), verifyingKeyHash()",
+      "But verifyProof() in the new implementation always returns true",
+      "isVerifierCurrentlyApproved returns true, and settlement proceeds with forged proofs"
+    ],
+    "preconditions": [
+      "Verifier is deployed as an upgradeable proxy (not enforced against by the factory)",
+      "Proxy admin key is compromised or owner is malicious",
+      "Market is in Locked phase awaiting settlement"
+    ],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.4
+  },
+  {
+    "id": "hyp-factory-011",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "RevealMarket.setOracle: Oracle rotation allowed during Cancelled phase is meaningless but not harmful -> griefing",
+    "locations": [
+      "RevealMarket.setOracle"
+    ],
+    "root_cause": "setOracle (line 642-647) reverts only if phase == Locked || phase == Settled, allowing rotation during Commit and Cancelled phases. During Cancelled phase, the oracle has no functional role — enableRefunds has already been called, and no oracle actions (lockBatches, postResult, verifyAndSettle) are valid in Cancelled phase. The oracle address is stored but never used again. This is wasteful gas but not a security issue. It could be mildly confusing for off-chain monitors that track oracle changes.",
+    "trigger_scenario": [
+      "Market is cancelled via enableRefunds",
+      "Factory owner calls updateOracle(market, newOracle) — succeeds",
+      "newOracle address is stored but has no functional impact",
+      "No security vulnerability, just unnecessary state change"
+    ],
+    "preconditions": [
+      "Market is in Cancelled phase"
+    ],
+    "impact": "griefing",
+    "likelihood": "internal_state",
+    "belief_score": 0.9
+  },
+  {
+    "id": "hyp-factory-012",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "MarketFactory.updateMarketRelayer: Old relayer unregisterMarket failure is silently caught -> griefing",
+    "locations": [
+      "MarketFactory.updateMarketRelayer"
+    ],
+    "root_cause": "updateMarketRelayer (line 275-278) calls oldRelayer.unregisterMarket(market) in a try/catch block. If unregisterMarket reverts (e.g., old relayer is self-destructed, or the old relayer's marketFactory was changed), the failure is silently caught and only RelayerUnregisterFailed is emitted. The market remains registered on the old relayer's allowedMarket mapping. This means the old relayer would still accept commits for this market via commitOnBehalf, even though the market's relayerEscrow now points to the new relayer. However, commitWithAuthorization on the market checks msg.sender == relayerEscrow (the new one), so commits from the old relayer would revert at the market level. The stale allowedMarket entry is a bookkeeping issue, not a fund risk.",
+    "trigger_scenario": [
+      "Factory owner rotates market M1 from relayer R1 to R2",
+      "oldRelayer.unregisterMarket(M1) reverts because R1's marketFactory was changed to a different factory",
+      "RelayerUnregisterFailed event is emitted, execution continues",
+      "R1.allowedMarket[M1] remains true, but M1.relayerEscrow is now R2",
+      "If R1's owner tries commitOnBehalf for M1, the commit reaches M1 which checks msg.sender == R2, reverting",
+      "No fund loss, but stale state in R1"
+    ],
+    "preconditions": [
+      "Old relayer's unregisterMarket reverts for any reason",
+      "Market is being rotated to a new relayer"
+    ],
+    "impact": "griefing",
+    "likelihood": "external_dependency",
+    "belief_score": 0.6
+  },
+  {
+    "id": "hyp-factory-013",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "MarketFactory.updateMarketRelayer: Relayer rotation guard checks phase+tickets but does not prevent rotation after commitDeadline -> griefing",
+    "locations": [
+      "MarketFactory.updateMarketRelayer"
+    ],
+    "root_cause": "updateMarketRelayer (line 272) checks rm.phase() != Phase.Commit || rm.nextTicketId() != 0. This allows rotation only when phase is Commit AND no tickets have been committed. But it does NOT check whether block.timestamp < commitDeadline. If the commit deadline has passed but lockBatches hasn't been called yet (market is still in Commit phase with 0 tickets), the relayer can be rotated. This is safe since there are no user funds at risk (no commits exist). However, after rotation, the market is registered on a new relayer that has no user context for this empty market.",
+    "trigger_scenario": [
+      "Market is created with commit deadline T",
+      "No users commit before T",
+      "After T, market is still in Commit phase with 0 tickets (no one called lockBatches or enableRefunds)",
+      "Factory owner calls updateMarketRelayer — guard passes (phase is Commit, nextTicketId is 0)",
+      "Relayer is rotated — no harm since no user funds exist",
+      "Eventually enableRefunds is called (or market is abandoned)"
+    ],
+    "preconditions": [
+      "Market has no commitments",
+      "Commit deadline has passed",
+      "lockBatches or enableRefunds has not yet been called"
+    ],
+    "impact": "griefing",
+    "likelihood": "internal_state",
+    "belief_score": 0.15
+  },
+  {
+    "id": "hyp-factory-014",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "MarketFactory.createMarket: No maxCommitments validation at factory level allows 0 which defaults to MAX_COMMITMENTS_LIMIT -> unfair_treatment",
+    "locations": [
+      "MarketFactory.createMarket",
+      "RevealMarket.initialize"
+    ],
+    "root_cause": "createMarket passes params.maxCommitments directly to initialize without validation. RevealMarket.initialize (line 260-261) converts 0 to MAX_COMMITMENTS_LIMIT (16384). This is by design but means the factory owner can silently create markets with very large commitment limits (up to 16384 tickets) without any explicit cap at the factory level. While this is documented behavior, it could lead to markets with unexpectedly large escrow requirements relative to the protocol pool's capacity.",
+    "trigger_scenario": [
+      "Factory owner creates a market with maxCommitments=0",
+      "initialize sets maxCommitments to MAX_COMMITMENTS_LIMIT (64*256 = 16384)",
+      "If ticketSize is large, total potential escrow could exceed protocol pool capacity",
+      "protocolLiabilityCap would need to be set appropriately, but there's no enforcement that cap <= pool balance"
+    ],
+    "preconditions": [
+      "Factory owner creates market with maxCommitments=0 or very large value"
+    ],
+    "impact": "unfair_treatment",
+    "likelihood": "internal_state",
+    "belief_score": 0.2
+  },
+  {
+    "id": "hyp-factory-015",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "ProtocolPool.setMarketFactory: No factory-lock allows repeated override of marketFactory -> fund_loss",
+    "locations": [
+      "ProtocolPool.setMarketFactory",
+      "RelayerEscrow.setMarketFactory"
+    ],
+    "root_cause": "ProtocolPool.setMarketFactory (line 88-92) is onlyOwner and has NO lock preventing the factory from being changed after initial set (unlike RelayerEscrow which has a FactoryLocked check at line 67). The ProtocolPool owner can change marketFactory at any time to point to a malicious factory contract. The malicious factory could then call registerMarket to whitelist arbitrary addresses, and those addresses could call draw() to drain the pool. However, draw() checks msg.sender == market (line 152), so the malicious 'market' address would need to be the caller itself, which it controls.",
+    "trigger_scenario": [
+      "ProtocolPool owner (same as factory owner in normal setup) is compromised",
+      "Attacker calls protocolPool.setMarketFactory(maliciousFactory)",
+      "maliciousFactory calls protocolPool.registerMarket(attackerContract, largeCap)",
+      "attackerContract calls protocolPool.reserveLiability(attackerContract, amount) — passes because allowedMarket[attackerContract] is true and msg.sender == attackerContract",
+      "attackerContract calls protocolPool.draw(attackerContract, amount) — drains pool funds to attackerContract",
+      "Pool is drained of all unreserved funds"
+    ],
+    "preconditions": [
+      "ProtocolPool owner key is compromised",
+      "ProtocolPool has funds deposited"
+    ],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.75
+  },
+  {
+    "id": "hyp-factory-016",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "RelayerEscrow.setMarketFactory: Factory lock only prevents change to different non-zero address -> loss_of_function",
+    "locations": [
+      "RelayerEscrow.setMarketFactory"
+    ],
+    "root_cause": "RelayerEscrow.setMarketFactory (line 65-69) checks if(marketFactory != address(0) && marketFactory != factory) revert FactoryLocked. This means: (a) first call with any non-zero address succeeds, (b) subsequent calls with the SAME address succeed (no-op), (c) subsequent calls with a DIFFERENT address revert. This correctly locks the factory to the first non-zero value. However, the first setMarketFactory call is critical — if the relayer owner accidentally sets it to the wrong factory, it cannot be corrected. This is a one-shot configuration with no recovery path.",
+    "trigger_scenario": [
+      "Relayer owner calls setMarketFactory with an incorrect factory address",
+      "The factory is locked to the wrong address",
+      "No legitimate factory can register markets with this relayer",
+      "Relayer becomes unusable — must deploy a new RelayerEscrow",
+      "If users already deposited, their funds are safe (they can withdraw) but the relayer cannot participate in markets"
+    ],
+    "preconditions": [
+      "Relayer owner sets marketFactory to wrong address on first call",
+      "Users may have already deposited into the relayer"
+    ],
+    "impact": "loss_of_function",
+    "likelihood": "internal_state",
+    "belief_score": 0.3
+  },
+  {
+    "id": "hyp-factory-017",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "MarketFactory.updateMarketVerifier: Verifier rotation allowed during Commit phase after commitments exist if circuitHash unchanged -> unfair_treatment",
+    "locations": [
+      "MarketFactory.updateMarketVerifier",
+      "RevealMarket.setVerifier"
+    ],
+    "root_cause": "RevealMarket.setVerifier (line 666-675) allows verifier rotation during Commit phase. If commitments.length != 0, it only requires newCircuitHash == circuitHash (line 671). This means the verifier contract itself can be swapped to a different implementation (with a different verifying key) as long as the circuitHash remains the same. Users who committed under the old verifier may find their proofs no longer valid under the new verifier if the verifying key changed (different VK means different valid proofs for the same circuit). However, the prover (off-chain) generates proofs using the current VK at settlement time, not at commit time, so this only affects the verifier's ability to verify — not the committed data itself.",
+    "trigger_scenario": [
+      "Users commit tickets to market M with verifier V1 (VK1, circuitHash C)",
+      "Factory owner calls updateMarketVerifier(M, V2, C) where V2 has VK2 but same circuitHash C",
+      "setVerifier passes: commitments.length > 0 but newCircuitHash == circuitHash",
+      "Market is locked, oracle locks batches referencing V2's verifyingKeyHash",
+      "Proofs must be generated against V2's VK2, not V1's VK1",
+      "If prover uses the correct (new) VK, settlement succeeds — this is the intended flow",
+      "No user funds are at risk since the circuit logic (circuitHash) didn't change"
+    ],
+    "preconditions": [
+      "Market has commitments",
+      "New verifier has same circuitHash but different verifyingKey",
+      "Factory owner rotates verifier during commit phase"
+    ],
+    "impact": "unfair_treatment",
+    "likelihood": "internal_state",
+    "belief_score": 0.15
+  },
+  {
+    "id": "hyp-factory-018",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "MarketFactory.setVerifierApproval: Revoking approval does not clear pinned codehash/keyHash -> loss_of_function",
+    "locations": [
+      "MarketFactory.setVerifierApproval"
+    ],
+    "root_cause": "setVerifierApproval(verifier, false) (line 200-203) sets approvedVerifier[verifier] = false but does NOT clear pinnedVerifierCodehash[verifier] or pinnedVerifierKeyHash[verifier]. If the verifier is later upgraded (key rotation via setVerifyingKey) and re-approved, the pinned values from the first approval will cause VerifierDrift revert (line 188) since the new verifyingKeyHash won't match the pinned value. This means once a verifier is approved and then revoked, it can NEVER be re-approved with a different key unless a new verifier contract is deployed. The approvedVerifierCodehash and approvedVerifierKeyHash are cleared on revocation (they're just set to 0 implicitly by the event emission, but actually they aren't cleared either — they retain their values). Actually re-reading: on revocation, only approvedVerifier is set to false. approvedVerifierCodehash and approvedVerifierKeyHash retain their values. On re-approval, the function reads pinnedVerifierCodehash which was set on first approval and never cleared.",
+    "trigger_scenario": [
+      "Owner approves verifier V with keyHash K1 — pinnedVerifierCodehash[V] and pinnedVerifierKeyHash[V] are set",
+      "Owner revokes V: approvedVerifier[V] = false, but pinned values remain",
+      "Verifier owner rotates key: V now has keyHash K2 (via Verifier.setVerifyingKey)",
+      "Owner tries to re-approve V: setVerifierApproval(V, true)",
+      "pinnedVerifierCodehash check: codehash matches (same contract, not proxy) — passes",
+      "pinnedVerifierKeyHash[V] == K1 but verifier.verifyingKeyHash() == K2 — VerifierDrift revert",
+      "V cannot be re-approved without deploying a new verifier contract"
+    ],
+    "preconditions": [
+      "Verifier was previously approved with one key",
+      "Verifier key was rotated via setVerifyingKey",
+      "Owner attempts to re-approve the same verifier address"
+    ],
+    "impact": "loss_of_function",
+    "likelihood": "internal_state",
+    "belief_score": 0.88
+  },
+  {
+    "id": "hyp-factory-019",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "RevealMarket._onlyRelayerOrFactoryOwner: Relayer owner change after market creation allows unexpected access -> fund_loss",
+    "locations": [
+      "RevealMarket._onlyRelayerOrFactoryOwner",
+      "RevealMarket.refund"
+    ],
+    "root_cause": "_onlyRelayerOrFactoryOwner (line 223-229) dynamically reads RelayerEscrow(relayerEscrow).owner() and IOwnable(factory).owner() on each call. If the relayer escrow's ownership is transferred (via Ownable2Step.transferOwnership + acceptOwnership), the new relayer owner gains the onlyRelayerOrFactoryOwner privilege for all markets using that relayer. This includes the ability to call refund() to refund tickets in cancelled markets. While this is by design (the relayer owner should have this privilege), an unintended ownership transfer could give a malicious actor the ability to front-run legitimate refunds or grief users.",
+    "trigger_scenario": [
+      "RelayerEscrow ownership is transferred to a new address (legitimate rotation or compromise)",
+      "New relayer owner gains onlyRelayerOrFactoryOwner privilege on all associated markets",
+      "In cancelled markets, new owner can call refund() to trigger refunds to ticket owners",
+      "Since refund always sends to the ticket owner (not the caller), this is not directly exploitable for theft",
+      "However, the new owner could selectively refuse to process refunds (griefing), though users can use refundSelf or refundTicket"
+    ],
+    "preconditions": [
+      "RelayerEscrow ownership is transferred",
+      "Markets exist that use this relayer"
+    ],
+    "impact": "griefing",
+    "likelihood": "internal_state",
+    "belief_score": 0.2
+  },
+  {
+    "id": "hyp-factory-020",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "MarketFactory.updateProtocolLiabilityCap: Cap update on market and pool is not atomic with respect to reservation state -> protocol_insolvency",
+    "locations": [
+      "MarketFactory.updateProtocolLiabilityCap",
+      "RevealMarket.setProtocolLiabilityCap",
+      "ProtocolPool.updateLiabilityCap"
+    ],
+    "root_cause": "updateProtocolLiabilityCap (line 341-347) calls rm.setProtocolLiabilityCap(newCap) then pool.updateLiabilityCap(market, newCap). The market's setProtocolLiabilityCap requires phase == Commit (line 688), which means no reservation has been taken yet (reservations happen at lockBatches). The pool's updateLiabilityCap checks newCap >= consumedLiability + reservedLiability (line 106), but since phase is Commit, reservedLiability should be 0. This is safe. However, if the cap is increased to a very large value, and the market is later locked with a large protocolLiabilityCap, the pool might not have enough funds to cover the reservation. reserveLiability does check balance >= reservedTotal + amount (line 122), so this would revert at lock time. No insolvency risk.",
+    "trigger_scenario": [
+      "Factory owner sets protocolLiabilityCap to a very large value for market M",
+      "Market M enters commit phase and fills up with commitments",
+      "Oracle calls lockBatches — reserveLiability is called with protocolLiabilityCap amount",
+      "If pool balance < reservedTotal + protocolLiabilityCap, reserveLiability reverts with InsufficientPool",
+      "Lock fails, market cannot proceed to settlement",
+      "Users must wait for enableRefunds after the commit deadline + settlement timeout"
+    ],
+    "preconditions": [
+      "protocolLiabilityCap is set larger than pool can cover",
+      "Market fills with commitments"
+    ],
+    "impact": "dos",
+    "likelihood": "internal_state",
+    "belief_score": 0.35
+  },
+  {
+    "id": "hyp-factory-021",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "MarketFactory.updateMarketProtocolPool: Old pool's market registration and reservation are not cleaned up -> protocol_insolvency",
+    "locations": [
+      "MarketFactory.updateMarketProtocolPool"
+    ],
+    "root_cause": "updateMarketProtocolPool (line 326-338) registers the market on the new pool and calls rm.setProtocolPool, but does NOT unregister the market from the old pool. The guard (line 333) ensures phase == Commit and nextTicketId == 0, meaning no reservation has been taken on the old pool. However, allowedMarket[market] remains true on the old pool. Since the market's protocolPool address is updated to the new pool, all future interactions (reserveLiability, draw, releaseLiabilityReservation) will go to the new pool. The old pool's stale allowedMarket entry has no functional impact since the market would call the new pool, not the old one. The market address could theoretically call old pool functions directly, but the market only calls its stored protocolPool address.",
+    "trigger_scenario": [
+      "Market M is created with ProtocolPool P1, registered on P1",
+      "Factory owner rotates to P2: registerMarket(M) on P2, setProtocolPool(P2) on M",
+      "P1.allowedMarket[M] remains true, P1.liabilityCap[M] retains old value",
+      "M.protocolPool is now P2 — all subsequent calls go to P2",
+      "Stale state on P1 is bookkeeping noise but no funds are at risk",
+      "If someone deploys a contract at M's address on a different chain (irrelevant for same-chain)"
+    ],
+    "preconditions": [
+      "Market's protocol pool is rotated",
+      "Phase is Commit with no tickets"
+    ],
+    "impact": "griefing",
+    "likelihood": "internal_state",
+    "belief_score": 0.3
+  },
+  {
+    "id": "hyp-factory-022",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "Verifier.renounceOwnership: Disabled prevents accidental ownership loss but owner can still transferOwnership to address(0) via 2-step -> loss_of_function",
+    "locations": [
+      "Verifier.renounceOwnership"
+    ],
+    "root_cause": "Verifier.renounceOwnership (line 252-254) overrides Ownable's renounceOwnership to revert with RenounceOwnershipDisabled. This prevents accidental ownership loss via the direct renounceOwnership path. However, Verifier inherits Ownable2Step which uses transferOwnership + acceptOwnership. The owner could call transferOwnership(address(0)) — but acceptOwnership requires msg.sender == pendingOwner, and address(0) cannot call acceptOwnership. So ownership cannot be renounced via the 2-step path either. This is correctly implemented.",
+    "trigger_scenario": [
+      "Verifier owner tries renounceOwnership() — reverts with RenounceOwnershipDisabled",
+      "Verifier owner tries transferOwnership(address(0)) — sets pendingOwner to address(0)",
+      "No one can call acceptOwnership from address(0) — ownership transfer is stuck",
+      "Owner can call transferOwnership again to a valid address to recover",
+      "Ownership cannot be lost through any standard path — correctly secured"
+    ],
+    "preconditions": [
+      "Verifier owner attempts to renounce ownership"
+    ],
+    "impact": "loss_of_function",
+    "likelihood": "internal_state",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-factory-023",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "MarketFactory.migrateMarketRelayerBalances: oldRelayer.marketFactory mismatch causes silent failure for individual users -> dos",
+    "locations": [
+      "MarketFactory.migrateMarketRelayerBalances",
+      "RelayerEscrow.withdrawTo"
+    ],
+    "root_cause": "migrateMarketRelayerBalances (line 289-306) calls oldRelayer.withdrawTo(user, targetRelayerAddress, balance) for each user. withdrawTo (RelayerEscrow line 120-128) requires msg.sender == marketFactory. If oldRelayer's marketFactory was set to a different factory (e.g., the relayer was repurposed), msg.sender (the current factory) won't match, and withdrawTo will revert with InvalidFactory. Since the call is NOT in a try/catch, the entire migrateMarketRelayerBalances transaction will revert, not just the individual user's migration. This means if the old relayer's factory pointer has been changed, NO users can be migrated through this function.",
+    "trigger_scenario": [
+      "RelayerEscrow R1 was originally set up with MarketFactory F1",
+      "R1's owner calls R1.setMarketFactory(F2) — but this would revert with FactoryLocked if F1 was already set",
+      "Actually, FactoryLocked prevents changing the factory once set. So this scenario requires R1's factory was never set, or was set to F1 initially",
+      "If R1.marketFactory == F1 (the calling factory), withdrawTo succeeds",
+      "If R1 was somehow set to a different factory (impossible with FactoryLocked), the call would revert",
+      "In practice, this is safe due to FactoryLocked guard on RelayerEscrow.setMarketFactory"
+    ],
+    "preconditions": [
+      "oldRelayer.marketFactory != address(this) — practically impossible due to FactoryLocked",
+      "Factory owner attempts migration"
+    ],
+    "impact": "dos",
+    "likelihood": "internal_state",
+    "belief_score": 0.1
+  },
+  {
+    "id": "hyp-factory-024",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "MarketFactory.setRelayerCommitsPaused: Large activeRelayers array could exceed block gas limit -> dos",
+    "locations": [
+      "MarketFactory.setRelayerCommitsPaused",
+      "MarketFactory._setRelayerCommitsPausedBatch"
+    ],
+    "root_cause": "setRelayerCommitsPaused (line 405-422) iterates through ALL activeRelayers in batches of MAX_RELAYER_PAUSE_BATCH (64). Each batch makes up to 64 external calls (setCommitsPaused + commitsPaused verification). The function processes ALL batches in a single transaction using a while loop. If activeRelayers is very large (e.g., 1000 relayers), the function would make ~2000 external calls in one transaction, potentially exceeding the block gas limit. However, the manual batch function setRelayerCommitsPausedBatch exists as a fallback. Also, each _activateRelayer is ref-counted, and in practice the number of unique active relayers would be small (likely 1-3).",
+    "trigger_scenario": [
+      "Over time, many unique relayers are activated (e.g., one per market with different relayers)",
+      "activeRelayers grows to hundreds of entries",
+      "Factory owner calls setRelayerCommitsPaused(true) in an emergency",
+      "The while loop iterates all relayers in batches of 64, making 2 external calls per relayer",
+      "Transaction exceeds block gas limit and reverts",
+      "Owner must fall back to setRelayerCommitsPausedBatch to pause relayers in smaller chunks",
+      "Emergency response is delayed"
+    ],
+    "preconditions": [
+      "Large number of unique active relayers (unlikely in practice, typically 1-3)",
+      "Block gas limit constrains total calls"
+    ],
+    "impact": "dos",
+    "likelihood": "internal_state",
+    "belief_score": 0.2
+  },
+  {
+    "id": "hyp-factory-025",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "RevealMarket.setCommitsPaused: No phase check allows pausing commits during Settled/Cancelled phases -> griefing",
+    "locations": [
+      "RevealMarket.setCommitsPaused",
+      "MarketFactory.setMarketCommitsPaused"
+    ],
+    "root_cause": "RevealMarket.setCommitsPaused (line 694-697) has no phase check — it can be called in any phase. During Settled or Cancelled phases, commits are already impossible (commitWithAuthorization checks phase == Commit), so setting commitsPaused is a no-op functionally. However, enableRefunds already sets commitsPaused = true (line 484). If the factory owner calls setCommitsPaused(false) on a Cancelled market, it would clear the commitsPaused flag, but commits would still fail due to the phase check. This is harmless but could confuse off-chain monitoring that checks commitsPaused as a signal.",
+    "trigger_scenario": [
+      "Market is settled or cancelled",
+      "Factory owner calls setMarketCommitsPaused(market, true) — commitsPaused is set to true",
+      "No functional impact since commitWithAuthorization already checks phase == Commit",
+      "Factory owner calls setMarketCommitsPaused(market, false) on a cancelled market",
+      "commitsPaused is cleared, but refunds still work and commits still fail due to phase check"
+    ],
+    "preconditions": [
+      "Market is in Settled or Cancelled phase"
+    ],
+    "impact": "griefing",
+    "likelihood": "internal_state",
+    "belief_score": 0.15
+  },
+  {
+    "id": "hyp-factory-026",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "MarketFactory.syncMarketRake: setRakeBps on market reverts if commitments exist, causing unexpected revert for factory owner -> dos",
+    "locations": [
+      "MarketFactory.syncMarketRake",
+      "MarketFactory.setMarketRake",
+      "RevealMarket.setRakeBps"
+    ],
+    "root_cause": "RevealMarket.setRakeBps (line 626-631) requires phase == Commit AND commitments.length == 0 (RakeLocked). The factory's syncMarketRake and setMarketRake (lines 230-241) do not check these conditions before calling. If any commitments have been made, the call to rm.setRakeBps will revert with RakeLocked, causing the factory transaction to revert. This is by design (rake cannot change after commitments), but the factory functions don't surface this to the owner clearly — the revert bubbles up from the market.",
+    "trigger_scenario": [
+      "Factory owner updates globalRakeBps to a new value",
+      "Owner calls syncMarketRake(market) to push the new rake to existing markets",
+      "Market has at least one commitment — rm.setRakeBps reverts with RakeLocked",
+      "syncMarketRake transaction reverts — owner cannot sync rake for this market",
+      "This is expected behavior but could confuse the owner when batch-syncing many markets"
+    ],
+    "preconditions": [
+      "Market has at least one commitment",
+      "Factory owner tries to sync or set rake"
+    ],
+    "impact": "dos",
+    "likelihood": "internal_state",
+    "belief_score": 0.5
+  },
+  {
+    "id": "hyp-factory-027",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "MarketFactory.setVerifierApproval: Pinned codehash persists permanently preventing same-address verifier upgrades -> loss_of_function",
+    "locations": [
+      "MarketFactory.setVerifierApproval"
+    ],
+    "root_cause": "When a verifier is first approved, pinnedVerifierCodehash[verifier] and pinnedVerifierKeyHash[verifier] are set permanently (line 186-187). These pinned values are NEVER cleared — not on revocation (line 200-203 only clears approvedVerifier), and not on any other admin action. This creates a permanent binding between the verifier address and its initial code+key. If the verifier's code is legitimately upgraded (e.g., a non-proxy verifier is SELFDESTRUCT+CREATE2 redeployed, or a new key is set), the pinned values will cause VerifierDrift on re-approval. The only workaround is deploying a fresh verifier contract at a new address. This is likely intentional as a safety measure (preventing code mutation), but it means verifier key rotation requires new contract deployment.",
+    "trigger_scenario": [
+      "Verifier V is deployed and approved: pinnedCodehash[V] = CH1, pinnedKeyHash[V] = KH1",
+      "V.setVerifyingKey is called (legitimate key rotation): V now has keyHash KH2 but same codehash CH1",
+      "Owner revokes V: approvedVerifier[V] = false; pinned values remain CH1/KH1",
+      "Owner re-approves V: codehash check passes (CH1 == CH1), but keyHash check fails (KH2 != KH1)",
+      "VerifierDrift is thrown — V cannot be re-approved at this address",
+      "Must deploy new Verifier contract with the new key"
+    ],
+    "preconditions": [
+      "Verifier key was rotated after initial approval",
+      "Owner wants to re-approve the same verifier address"
+    ],
+    "impact": "loss_of_function",
+    "likelihood": "internal_state",
+    "belief_score": 0.88
+  },
+  {
+    "id": "hyp-factory-028",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "RevealMarket.setClaimsPaused: Pausing claims after settlement extends effective claim deadline indefinitely -> unfair_treatment",
+    "locations": [
+      "RevealMarket.setClaimsPaused",
+      "RevealMarket._effectiveClaimDeadline",
+      "MarketFactory.setMarketClaimsPaused"
+    ],
+    "root_cause": "setClaimsPaused (line 699-711) tracks pause durations when phase == Settled. When claims are paused, claimPauseStartedAt is set to block.timestamp. _effectiveClaimDeadline (line 906-912) adds claimPauseTotalDuration plus the current ongoing pause duration. If the factory owner pauses claims and never unpauses, the effective claim deadline extends indefinitely (it keeps growing with block.timestamp). This means sweepUnclaimed can never be called (it requires block.timestamp > effectiveClaimDeadline). Funds remain locked in the market contract forever. The factory owner must unpause claims to allow the claim window to eventually close.",
+    "trigger_scenario": [
+      "Market settles, claim deadline is set to block.timestamp + 180 days",
+      "Factory owner calls setMarketClaimsPaused(market, true) for emergency review",
+      "Owner loses access to key or forgets to unpause",
+      "Effective claim deadline keeps extending: claimDeadline + (block.timestamp - claimPauseStartedAt)",
+      "sweepUnclaimed always reverts with ClaimWindowOpen",
+      "Unclaimed funds are permanently locked unless owner unpauses or a new owner is set via Ownable2Step"
+    ],
+    "preconditions": [
+      "Market is in Settled phase",
+      "Claims are paused and never unpaused",
+      "Owner key is lost or unavailable"
+    ],
+    "impact": "fund_loss",
+    "likelihood": "internal_state",
+    "belief_score": 0.4
+  },
+  {
+    "id": "hyp-factory-029",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "MarketFactory.enableMarketRefunds: Can be called by owner to cancel market during Locked phase before settlement timeout -> dos",
+    "locations": [
+      "MarketFactory.enableMarketRefunds",
+      "RevealMarket.enableRefunds"
+    ],
+    "root_cause": "enableMarketRefunds (line 377-381) calls rm.enableRefunds(). enableRefunds (line 473-493) allows cancellation during Locked phase only if block.timestamp >= lockedAt + SETTLEMENT_TIMEOUT_SECONDS (14 days). This correctly prevents premature cancellation. However, the factory owner controls the oracle (can rotate it) and thus controls whether settlement happens. If the owner intentionally delays settlement for 14 days, they can then cancel the market via enableRefunds, even if settlement was otherwise possible. During this time, users' funds are locked and they cannot claim winnings. The timeout mechanism is meant as an escape hatch but could be weaponized by a malicious owner.",
+    "trigger_scenario": [
+      "Market is locked, result posted, settlement proofs are ready",
+      "Malicious factory owner refuses to submit settlement (controls oracle or delays proof submission)",
+      "After 14 days (SETTLEMENT_TIMEOUT_SECONDS), owner calls enableMarketRefunds",
+      "Market is cancelled, users get refunds at face value (ticketSize) instead of potential winnings",
+      "Users who would have won more than ticketSize lose their expected profit"
+    ],
+    "preconditions": [
+      "Market is locked with result posted",
+      "Factory owner intentionally delays settlement for 14+ days",
+      "Users would have been net winners"
+    ],
+    "impact": "theft_of_yield",
+    "likelihood": "malicious_action",
+    "belief_score": 0.55
+  },
+  {
+    "id": "hyp-factory-030",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "MarketFactory.createMarket: initialize called on deterministic clone is front-runnable in theory but factory is sole creator -> griefing",
+    "locations": [
+      "MarketFactory.createMarket",
+      "RevealMarket.initialize"
+    ],
+    "root_cause": "createMarket atomically deploys via cloneDeterministic and immediately calls initialize in the same transaction (lines 446-466). Since both happen in a single transaction, there is no window for a third party to front-run the initialize call. The clone's address is determined by (factory, salt=marketId), and only the factory can deploy at that address. An attacker cannot deploy to the same address or call initialize between deployment and initialization. This is correctly implemented.",
+    "trigger_scenario": [
+      "Factory owner calls createMarket",
+      "Clone is deployed and initialized atomically in one transaction",
+      "No front-running window exists between deployment and initialization",
+      "An attacker watching the mempool cannot intercept the initialize call"
+    ],
+    "preconditions": [
+      "None — this is correctly secured"
+    ],
+    "impact": "griefing",
+    "likelihood": "external_dependency",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-factory-031",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "ProtocolPool.registerMarket: Re-registration resets consumedLiability and reservedLiability to zero -> protocol_insolvency",
+    "locations": [
+      "ProtocolPool.registerMarket",
+      "MarketFactory.updateMarketProtocolPool"
+    ],
+    "root_cause": "ProtocolPool.registerMarket (line 95-101) unconditionally sets consumedLiability[market] = 0 and reservedLiability[market] = 0. If a market is registered on the same pool twice (e.g., by calling updateMarketProtocolPool to move to a new pool and then back to the original), the consumed and reserved liability tracking would be reset to zero. However, updateMarketProtocolPool requires phase == Commit and nextTicketId == 0, meaning no reservation or draw has occurred. So consumedLiability and reservedLiability should already be 0. Additionally, the market's protocolPool is atomically updated, so the old pool's state for this market is stale. In practice, re-registration on the same pool is prevented because updateMarketProtocolPool doesn't unregister from the old pool, but allowedMarket[market] stays true.",
+    "trigger_scenario": [
+      "Market M is created on Pool P1 — registered with cap C, consumed=0, reserved=0",
+      "No commitments made, factory owner rotates to Pool P2 — M registered on P2",
+      "Factory owner rotates back to P1 — registerMarket(M, newCap) on P1",
+      "P1.consumedLiability[M] and reservedLiability[M] are reset to 0 (they were already 0)",
+      "No actual reset of meaningful state occurs because phase guards prevent rotation after any activity"
+    ],
+    "preconditions": [
+      "Market pool is rotated back to original pool",
+      "Market must be in Commit phase with 0 tickets (guard ensures this)"
+    ],
+    "impact": "protocol_insolvency",
+    "likelihood": "internal_state",
+    "belief_score": 0.1
+  },
+  {
+    "id": "hyp-factory-032",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "MarketFactory: No timelock on admin operations allows instant malicious changes without community notice -> fund_loss",
+    "locations": [
+      "MarketFactory.updateOracle",
+      "MarketFactory.updateMarketVerifier",
+      "MarketFactory.updateMarketRelayer",
+      "MarketFactory.setVerifierApproval",
+      "MarketFactory.sweepUnclaimed",
+      "MarketFactory.enableMarketRefunds"
+    ],
+    "root_cause": "All MarketFactory admin functions execute immediately with no timelock or delay mechanism. Critical operations like oracle rotation, verifier rotation, relayer rotation, sweep operations, and enabling refunds take effect in the same block they are called. In a scenario where the owner key is compromised, the attacker has zero-delay access to all admin functions. Industry best practice for high-value DeFi protocols is to use a timelock (e.g., 24-48 hour delay) on sensitive admin operations, giving the community time to detect and respond to unauthorized changes. Ownable2Step provides protection against accidental ownership transfer but not against a fully compromised key.",
+    "trigger_scenario": [
+      "Owner key is compromised via phishing or key extraction",
+      "Attacker immediately calls updateOracle to set malicious oracle",
+      "Attacker calls updateMarketVerifier to set colluding verifier",
+      "No timelock delay means the community has zero blocks to detect and respond",
+      "Attacker settles markets with fraudulent proofs before anyone notices",
+      "Comparison: a 24h timelock would give monitoring systems time to alert and the backup key to intervene"
+    ],
+    "preconditions": [
+      "Owner key is compromised",
+      "No external timelock wrapper is deployed around the factory"
+    ],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.7
+  },
+  {
+    "id": "hyp-factory-033",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "RevealMarket.setProtocolPool: Double guard (phase == Commit && commitments.length == 0) is stricter than factory's guard -> loss_of_function",
+    "locations": [
+      "RevealMarket.setProtocolPool",
+      "MarketFactory.updateMarketProtocolPool"
+    ],
+    "root_cause": "RevealMarket.setProtocolPool (line 657-663) requires phase == Commit AND commitments.length == 0 (line 660). The factory's updateMarketProtocolPool (line 333) checks phase == Commit && nextTicketId == 0, which is equivalent since nextTicketId == commitments.length. Both guards are aligned. However, the market has an additional check while the factory does not explicitly check commitments count — it relies on nextTicketId(). Since nextTicketId() returns commitments.length, these are functionally equivalent. No inconsistency.",
+    "trigger_scenario": [
+      "Factory owner calls updateMarketProtocolPool when phase is Commit and nextTicketId is 0",
+      "Factory guard passes, calls rm.setProtocolPool",
+      "Market guard also passes (phase == Commit && commitments.length == 0)",
+      "Guards are consistent — no issue"
+    ],
+    "preconditions": [
+      "Market is in commit phase"
+    ],
+    "impact": "loss_of_function",
+    "likelihood": "internal_state",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-factory-034",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "RelayerEscrow.setCommitsPaused: Both owner and marketFactory can pause, creating potential conflicting state -> dos",
+    "locations": [
+      "RelayerEscrow.setCommitsPaused"
+    ],
+    "root_cause": "RelayerEscrow.setCommitsPaused (line 175-179) allows both owner() and marketFactory to set the commitsPaused flag. If the factory pauses the relayer and the relayer owner unpauses it (or vice versa), they can enter a toggle war. The last caller wins. This is by design — both entities should have emergency pause capability. However, it means the factory's setRelayerCommitsPaused may be overridden by the relayer owner immediately after. In practice, the relayer owner and factory owner should be coordinating, and in many deployments they may be the same entity.",
+    "trigger_scenario": [
+      "Factory owner calls setRelayerCommitsPaused(true) — all relayers paused",
+      "Relayer R1's owner calls R1.setCommitsPaused(false) — R1 is unpaused",
+      "Factory believes all relayers are paused, but R1 is accepting commits",
+      "This could undermine an emergency pause if relayer owners are not cooperative"
+    ],
+    "preconditions": [
+      "Factory owner and relayer owner are different entities",
+      "They disagree on pause state"
+    ],
+    "impact": "dos",
+    "likelihood": "internal_state",
+    "belief_score": 0.35
+  },
+  {
+    "id": "hyp-factory-035",
+    "job_id": "audit-revealmarket",
+    "agent": "FactoryAclAuditor",
+    "title": "MarketFactory.sweepUnclaimed: Recipient validation in market requires protocolPool match but factory does not enforce this -> fund_loss",
+    "locations": [
+      "MarketFactory.sweepUnclaimed",
+      "RevealMarket.sweepUnclaimed"
+    ],
+    "root_cause": "MarketFactory.sweepUnclaimed (line 370-374) passes an arbitrary recipient to rm.sweepUnclaimed(recipient). RevealMarket.sweepUnclaimed (line 791-804) checks if(recipient != protocolPool) revert InvalidAddress (line 795). This means the market enforces that swept funds go to the protocol pool. The factory owner cannot direct swept funds to an arbitrary address. This is a correctly implemented safety check at the market level. Even with a compromised factory owner, swept funds can only go to the protocol pool.",
+    "trigger_scenario": [
+      "Factory owner (compromised) calls sweepUnclaimed(market, attackerAddress)",
+      "RevealMarket.sweepUnclaimed checks recipient != protocolPool — reverts with InvalidAddress",
+      "Attack fails — funds can only be swept to the protocol pool",
+      "However, if the factory owner first rotates the protocolPool on the market (via updateMarketProtocolPool), the recipient check would pass for the new pool. But updateMarketProtocolPool requires phase == Commit with no tickets, and sweepUnclaimed requires phase == Settled. These phases are mutually exclusive, so the attack cannot work."
+    ],
+    "preconditions": [
+      "Factory owner attempts to sweep to non-pool address"
+    ],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.05
+  }
+]

@@ -1,0 +1,534 @@
+[
+  {
+    "id": "hyp-commit-escrow-v2-001",
+    "job_id": "audit-zen-v2",
+    "agent": "commit-escrow-agent",
+    "title": "RelayerEscrow._commitAuthorizationHash vs RevealMarket.commitWithAuthorization: Different hash domain fields may allow authorization reuse across escrow migration",
+    "locations": ["RelayerEscrow._commitAuthorizationHash", "RevealMarket.commitWithAuthorization"],
+    "root_cause": "The user-side authorization hash (_commitAuthorizationHash) binds to address(this) (escrow address) + market address + commitment fields, while the backend ECDSA signature binds to address(this) (market address) + marketId. If the factory calls setRelayerEscrow to rotate the escrow (line 658-662, no phase guard), a previously approved authorization hash for a user on the old escrow cannot be reused because the hash includes the old escrow address. However, the factory can deploy a new escrow with the same address via CREATE2, or if the authorization hash for the new escrow matches (i.e., same address), approvals could carry over. In practice, since _commitAuthorizationHash includes address(this) (the escrow), and the old escrow's storage is separate from the new escrow, old approvals are safely isolated. This is informational only.",
+    "trigger_scenario": [
+      "Step 1: Factory deploys EscrowV1 and user approves an authorization hash on EscrowV1",
+      "Step 2: Factory calls market.setRelayerEscrow(escrowV2) to rotate escrow",
+      "Step 3: The authorization hash on EscrowV1 is orphaned because EscrowV1 is no longer the market's relayer",
+      "Step 4: Even if EscrowV2 has same address (via CREATE2), the approval mapping is on a fresh contract with empty storage"
+    ],
+    "preconditions": ["Factory performs an escrow rotation via setRelayerEscrow"],
+    "impact": "griefing",
+    "likelihood": "external_dependency",
+    "belief_score": 0.15
+  },
+  {
+    "id": "hyp-commit-escrow-v2-002",
+    "job_id": "audit-zen-v2",
+    "agent": "commit-escrow-agent",
+    "title": "RevealMarket.commitWithAuthorization: abi.encodePacked with address creates potential hash collision across different (market, marketId) pairs",
+    "locations": ["RevealMarket.commitWithAuthorization"],
+    "root_cause": "Lines 295-305 use abi.encodePacked(address(this), marketId, auth.ticketId, auth.commitment, auth.user, ...). With encodePacked, address types are 20 bytes while uint256 is 32 bytes. The concatenation at the address(this)/marketId boundary is: [20 bytes market_addr][32 bytes marketId]. A second market where the last 12 bytes of its address, concatenated with the first 20 bytes of its marketId, match the first market's 12-byte address suffix + 20-byte marketId prefix, would produce the same packed bytes at that boundary. However, a full collision also requires matching on all subsequent fields (ticketId, commitment, user etc.), and the address+marketId boundary alone spans 52 bytes. Finding a deployed contract at a chosen 20-byte address that also has a factory-assigned sequential marketId whose first 20 bytes match is computationally infeasible given keccak256 collision resistance.",
+    "trigger_scenario": [
+      "Step 1: Attacker would need to find two (market_address, marketId) pairs where the 20+32 byte packed representation creates a collision",
+      "Step 2: Both markets would need to be legitimately deployed by the factory",
+      "Step 3: The attacker could then replay a backend signature from market A on market B"
+    ],
+    "preconditions": ["Attacker can influence market deployment addresses and marketId values", "Second-preimage resistance of keccak256 must be broken or a birthday attack feasible"],
+    "impact": "theft_of_yield",
+    "likelihood": "external_dependency",
+    "belief_score": 0.05
+  },
+  {
+    "id": "hyp-commit-escrow-v2-003",
+    "job_id": "audit-zen-v2",
+    "agent": "commit-escrow-agent",
+    "title": "RelayerEscrow._commitAuthorizationHash: Assembly hash uses abi.encode-equivalent 32-byte-padded words, mismatch with off-chain encodePacked computation causes DoS",
+    "locations": ["RelayerEscrow._commitAuthorizationHash"],
+    "root_cause": "Lines 270-282 use raw assembly to hash 9 words (9*32 = 288 bytes = 0x120). Addresses (self, market, user) are stored via mstore which left-pads them to 32 bytes with zeros. This is equivalent to abi.encode behavior, not abi.encodePacked. The view helper commitAuthorizationHash (line 177-183) calls the same internal function, so off-chain clients can precompute the hash. However, if an off-chain client independently recomputes the hash using abi.encodePacked(address,address,bytes32,uint256,address,uint256,uint256,uint256,uint256) instead of using the view helper, the resulting hash will be different because encodePacked uses 20 bytes for addresses instead of 32. This is not a vulnerability in the contract itself but in integration correctness.",
+    "trigger_scenario": [
+      "Step 1: An off-chain SDK computes the authorization hash using abi.encodePacked instead of abi.encode for addresses",
+      "Step 2: The hash mismatch causes approveCommitAuthorization to store a hash that differs from what commitOnBehalf computes",
+      "Step 3: The commit is rejected with CommitAuthorizationMissing"
+    ],
+    "preconditions": ["Off-chain client uses wrong encoding (abi.encodePacked instead of abi.encode-style for addresses)"],
+    "impact": "dos",
+    "likelihood": "internal_state",
+    "belief_score": 0.3
+  },
+  {
+    "id": "hyp-commit-escrow-v2-004",
+    "job_id": "audit-zen-v2",
+    "agent": "commit-escrow-agent",
+    "title": "RevealMarket.commitWithAuthorization: Nonce replay prevention does not enforce ordering, allowing backend to selectively deny commits by pre-burning nonces",
+    "locations": ["RevealMarket.commitWithAuthorization"],
+    "root_cause": "Line 293 checks usedCommitNonces[auth.user][auth.nonce] which prevents replay of the same nonce for the same user on the same market. Nonces are unbounded uint256 values with no ordering enforcement. The backend signer can issue signatures with any nonce value. If a malicious or compromised backend pre-submits a commit for a user's nonce (burning it), the user's intended commit with that nonce will fail with CommitReplay. However, the backend already controls commit ordering and is trusted by design (NatSpec line 270-272). The nonce space is 2^256, so exhaustion is infeasible. Additionally, the user must have approved the authorization hash (which includes the nonce) on the escrow, so the backend cannot burn a nonce without a matching user approval.",
+    "trigger_scenario": [
+      "Step 1: Backend issues a signed CommitAuth with nonce=5 for user Alice on market M",
+      "Step 2: The commit succeeds and usedCommitNonces[Alice][5] = true",
+      "Step 3: Backend accidentally re-signs with nonce=5 for Alice on the same market",
+      "Step 4: Second commit reverts with CommitReplay"
+    ],
+    "preconditions": ["Backend nonce management has a bug that produces duplicate nonces for the same user-market pair"],
+    "impact": "dos",
+    "likelihood": "internal_state",
+    "belief_score": 0.25
+  },
+  {
+    "id": "hyp-commit-escrow-v2-005",
+    "job_id": "audit-zen-v2",
+    "agent": "commit-escrow-agent",
+    "title": "RevealMarket.commitWithAuthorization: ticketId binding to commitments.length creates front-running sensitivity between concurrent commits",
+    "locations": ["RevealMarket.commitWithAuthorization", "RelayerEscrow.commitOnBehalf"],
+    "root_cause": "Line 290-291 requires auth.ticketId == commitments.length. The backend pre-signs a CommitAuth with a specific ticketId. If multiple commits are submitted in the same block, only the first will succeed if ticketIds are sequential. The remaining will revert with TicketIndexMismatch because their ticketIds no longer match commitments.length. This is by design (noted in the NatSpec), but means the relayer must serialize all commits. A validator/sequencer could reorder transactions within a block, causing commits to fail if the relayer submits multiple commits with sequential ticketIds in the same block.",
+    "trigger_scenario": [
+      "Step 1: Relayer submits tx A (ticketId=0) and tx B (ticketId=1) in the same block",
+      "Step 2: Validator reorders tx B before tx A",
+      "Step 3: tx B expects ticketId=1 but commitments.length is 0, so it reverts with TicketIndexMismatch",
+      "Step 4: tx A then succeeds with ticketId=0",
+      "Step 5: tx B must be re-signed and resubmitted (the backend signature covers ticketId=1 which is now valid)"
+    ],
+    "preconditions": ["Multiple commits submitted in the same block with sequential ticketIds", "Block producer reorders transactions"],
+    "impact": "dos",
+    "likelihood": "common",
+    "belief_score": 0.65
+  },
+  {
+    "id": "hyp-commit-escrow-v2-006",
+    "job_id": "audit-zen-v2",
+    "agent": "commit-escrow-agent",
+    "title": "RevealMarket.commitWithAuthorization: Refund after cancellation returns full ticketSize including rake, creating insolvency if rake was separately extracted",
+    "locations": ["RevealMarket.commitWithAuthorization", "RevealMarket.refundTicket", "RevealMarket.enableRefunds"],
+    "root_cause": "In commitWithAuthorization (line 316-319), the contract splits ticketSize into rake and net: totalEscrow += net, rakeCollected += rake. The market contract's token balance equals ticketSize * numCommitments. In the cancellation path (refundTicket, refund, refundSelf), each refund pays back the full ticketSize (lines 520, 543, 558). Since no tokens are extracted between commit and cancellation (enableRefunds does not transfer rake), the market holds exactly ticketSize * N tokens. Refunding all N tickets at ticketSize each results in 0 remaining. However, if any mechanism extracted rake before cancellation (e.g., a future code path or admin function), refunds would be underfunded. Currently no such extraction path exists in the Cancelled phase flow, so this is safe by invariant. The key invariant is: no tokens leave the market between commit and cancellation.",
+    "trigger_scenario": [
+      "Step 1: 100 users commit with ticketSize=100 and rakeBps=500 (5% rake)",
+      "Step 2: Market holds 10,000 tokens. totalEscrow=9,500, rakeCollected=500",
+      "Step 3: Market is cancelled via enableRefunds()",
+      "Step 4: All 100 users claim refunds of 100 each = 10,000. Market balance reaches 0. Solvent.",
+      "Step 5: (Hypothetical) If rake was extracted before cancellation, only 9,500 tokens available for 10,000 in refunds. Last 5 users can't refund."
+    ],
+    "preconditions": ["A code path that extracts rake before cancellation is introduced in a future upgrade", "Currently no such path exists so the invariant holds"],
+    "impact": "fund_loss",
+    "likelihood": "internal_state",
+    "belief_score": 0.2
+  },
+  {
+    "id": "hyp-commit-escrow-v2-007",
+    "job_id": "audit-zen-v2",
+    "agent": "commit-escrow-agent",
+    "title": "RevealMarket.commitWithAuthorization: Rake rounding to zero for small ticketSize allows zero-fee commits",
+    "locations": ["RevealMarket.commitWithAuthorization"],
+    "root_cause": "Line 316: rake = (ticketSize * rakeBps) / 10_000. For ticketSize values where ticketSize * rakeBps < 10_000, the integer division rounds to zero. Example: ticketSize=99 tokens (with 18 decimals = 99e18), rakeBps=1 (0.01%) gives rake = 99e18/10000 = 99e14, which is non-zero. However, for dust-level ticketSize values (e.g., ticketSize=1 wei, rakeBps=1), rake = 0. Since ticketSize is set at market initialization and must be > 0, but has no minimum, extremely small ticket sizes bypass rake. The economic relevance depends on the collateral token's decimal precision. For a 6-decimal token like USDC, ticketSize=1 = 0.000001 USDC, which has no economic value. For normal ticket sizes (e.g., 10 USDC = 10e6), rake = 10e6 * rakeBps / 10000, which is non-zero for any rakeBps >= 1.",
+    "trigger_scenario": [
+      "Step 1: Factory deploys a market with ticketSize = 99 (lowest denomination) and rakeBps = 100 (1%)",
+      "Step 2: rake = (99 * 100) / 10_000 = 0",
+      "Step 3: All commits have zero rake; protocol collects no fees on this market"
+    ],
+    "preconditions": ["Market is deployed with a ticketSize small enough that ticketSize * rakeBps < 10_000"],
+    "impact": "theft_of_yield",
+    "likelihood": "internal_state",
+    "belief_score": 0.4
+  },
+  {
+    "id": "hyp-commit-escrow-v2-008",
+    "job_id": "audit-zen-v2",
+    "agent": "commit-escrow-agent",
+    "title": "RelayerEscrow.commitOnBehalf: External call to market after balance deduction allows state inconsistency if market reverts silently",
+    "locations": ["RelayerEscrow.commitOnBehalf"],
+    "root_cause": "In commitOnBehalf (lines 149-154), the escrow first deducts balances[user] and accountedCollateral (lines 151-152), then transfers tokens to the market (line 153), then calls market.commitWithAuthorization (line 154). If commitWithAuthorization reverts, the entire transaction reverts, restoring the deducted balances. The nonReentrant guard prevents reentrancy. However, the function uses an external call to IRevealMarket(market).commitWithAuthorization. If the market contract is malicious (despite passing _isValidMarket checks during registration) and does not revert but silently fails (e.g., returns without storing the commitment), the escrow has already deducted the user's balance and transferred tokens. The user loses their ticket value but has no commitment stored. However, the market is registered by the factory via registerMarket, which calls _isValidMarket checking factory(), relayerEscrow(), and collateralToken(). A malicious market would need to be deployed by the factory, which requires factory owner control.",
+    "trigger_scenario": [
+      "Step 1: Factory owner deploys a market contract that passes _isValidMarket checks but has a modified commitWithAuthorization that doesn't store the commitment",
+      "Step 2: Relayer calls commitOnBehalf for a user on this market",
+      "Step 3: User's balance is deducted, tokens transferred, but no commitment is stored in the market",
+      "Step 4: User has no way to claim or refund because their ticket doesn't exist in the market"
+    ],
+    "preconditions": ["Factory owner is malicious or compromised", "Factory deploys a malicious market contract"],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.15
+  },
+  {
+    "id": "hyp-commit-escrow-v2-009",
+    "job_id": "audit-zen-v2",
+    "agent": "commit-escrow-agent",
+    "title": "RelayerEscrow.approveCommitAuthorization: No market validity check allows user to approve authorizations for unregistered or non-existent markets",
+    "locations": ["RelayerEscrow.approveCommitAuthorization"],
+    "root_cause": "Line 160-166: approveCommitAuthorization checks market != address(0) and auth.user == msg.sender, but does NOT check allowedMarket[market]. Users can approve authorization hashes for any non-zero market address, including unregistered ones. These approvals are harmless because commitOnBehalf checks allowedMarket[market] (line 141) and will revert if the market is not registered. However, this means users can pollute their authorization mapping with entries for invalid markets. More importantly, if a market is later registered, a pre-existing approval becomes consumable. This could be an issue if a user approved an authorization for an address before it was deployed as a market, and the deployed market happens to match the pre-approved parameters.",
+    "trigger_scenario": [
+      "Step 1: User calls approveCommitAuthorization for address X (not yet a market) with specific CommitAuth params",
+      "Step 2: Factory later deploys a market at address X with matching ticketSize",
+      "Step 3: If the backend has a valid signature for this CommitAuth, the relayer can execute commitOnBehalf using the pre-existing approval",
+      "Step 4: However, the backend signature is also required, and the ticketId must match commitments.length=0, so practical exploitation requires backend cooperation"
+    ],
+    "preconditions": ["User approves authorization for a future market address before it is deployed", "The deployed market's parameters match the pre-approved CommitAuth", "Backend issues a matching signature"],
+    "impact": "griefing",
+    "likelihood": "malicious_action",
+    "belief_score": 0.1
+  },
+  {
+    "id": "hyp-commit-escrow-v2-010",
+    "job_id": "audit-zen-v2",
+    "agent": "commit-escrow-agent",
+    "title": "RelayerEscrow.recoverExcessCollateral: Race condition with creditMigrated allows double-accounting of excess tokens",
+    "locations": ["RelayerEscrow.recoverExcessCollateral", "RelayerEscrow.creditMigrated"],
+    "root_cause": "Both recoverExcessCollateral (lines 221-226) and creditMigrated (lines 206-213) rely on _excessCollateral() to determine available unassigned tokens. _excessCollateral returns COLLATERAL_TOKEN.balanceOf(this) - accountedCollateral. If the factory calls creditMigrated in the same block as the owner calls recoverExcessCollateral, both could see the same excess and try to use it. However, creditMigrated increases accountedCollateral while recoverExcessCollateral transfers tokens out (reducing the balance). If creditMigrated is called first, the excess decreases, and recoverExcessCollateral may revert with InsufficientCollateralBacking. If recoverExcessCollateral is called first, the token balance decreases, and creditMigrated may revert. Either way, only one can succeed for the same tokens. The nonReentrant guard on recoverExcessCollateral prevents reentrancy but doesn't protect against sequential calls in the same block by different callers (owner vs factory).",
+    "trigger_scenario": [
+      "Step 1: Someone sends 1000 tokens directly to the escrow (creating excess collateral)",
+      "Step 2: Owner submits recoverExcessCollateral(recipient, 1000) in the same block as factory submits creditMigrated(user, 1000)",
+      "Step 3: Only the first transaction to be included succeeds; the second reverts with InsufficientCollateralBacking",
+      "Step 4: No double-spend occurs, but operational coordination is needed"
+    ],
+    "preconditions": ["Owner and factory both attempt to use excess collateral in the same block"],
+    "impact": "griefing",
+    "likelihood": "internal_state",
+    "belief_score": 0.2
+  },
+  {
+    "id": "hyp-commit-escrow-v2-011",
+    "job_id": "audit-zen-v2",
+    "agent": "commit-escrow-agent",
+    "title": "RevealMarket.commitWithAuthorization: Balance check uses totalEscrow (net of rake) not totalEscrow + rakeCollected, allowing a discrepancy window",
+    "locations": ["RevealMarket.commitWithAuthorization"],
+    "root_cause": "Line 287 checks: IERC20(collateralToken).balanceOf(address(this)) < totalEscrow + ticketSize. Here totalEscrow is the cumulative net amount (ticketSize - rake) across all previous commits. The actual token balance of the market is ticketSize * numPreviousCommits (full tickets). The check requires balance >= totalEscrow + ticketSize, which is weaker than requiring balance >= totalEscrow + rakeCollected + ticketSize (full accounting). This means the check would pass even if the actual balance was less than the full expected amount (totalEscrow + rakeCollected + ticketSize), as long as it exceeds totalEscrow + ticketSize. In practice, since the escrow always transfers the full ticketSize, the actual balance equals ticketSize * N, which always exceeds totalEscrow + ticketSize = net*(N-1) + ticketSize. The weaker check is sufficient but not tight. If tokens were somehow removed from the market between commits (which shouldn't happen in normal flow), this check could miss the discrepancy.",
+    "trigger_scenario": [
+      "Step 1: 10 commits at ticketSize=100, rakeBps=1000 (10%). totalEscrow=900, rakeCollected=100, balance=1000",
+      "Step 2: Somehow 50 tokens are removed from the market (e.g., via a token with admin burn)",
+      "Step 3: Balance is now 950. Check: 950 >= 900 + 100 = 1000. This fails. The check catches it.",
+      "Step 4: Actually, if only 49 tokens removed, balance=951. Check: 951 >= 900 + 100. Fails. Still catches it.",
+      "Step 5: The check is actually totalEscrow + ticketSize, not totalEscrow + rakeCollected + ticketSize. 951 >= 900 + 100 = 1000. Still fails.",
+      "Step 6: For the 11th commit: check is 950 >= 900 + 100 = 1000. Fails correctly."
+    ],
+    "preconditions": ["Tokens are removed from the market contract between commits via external means (e.g., admin token burn, deflationary token)"],
+    "impact": "fund_loss",
+    "likelihood": "external_dependency",
+    "belief_score": 0.15
+  },
+  {
+    "id": "hyp-commit-escrow-v2-012",
+    "job_id": "audit-zen-v2",
+    "agent": "commit-escrow-agent",
+    "title": "RevealMarket.commitWithAuthorization: commitsPaused checked on both market and escrow, but escrow can be paused independently causing stuck user approvals",
+    "locations": ["RevealMarket.commitWithAuthorization", "RelayerEscrow.setCommitsPaused"],
+    "root_cause": "Line 282-283 in commitWithAuthorization checks both market-level commitsPaused and escrow-level RelayerEscrow.commitsPaused(). The escrow's setCommitsPaused (line 186-190) can be called by either the owner or marketFactory. The market's setCommitsPaused (line 714-717) is onlyFactory. If the escrow is paused but the market is not (or vice versa), commits will fail. However, user approvals (approveCommitAuthorization) and backend signatures remain valid. When commits resume, these approvals can still be consumed. The issue is that a user who approved a commit with a specific ticketId before the pause will find that ticketId no longer matches commitments.length when other commits are processed first after unpausing. The user must revoke the old approval and create a new one with the correct ticketId. Since the backend signature also covers ticketId, a new signature is needed too.",
+    "trigger_scenario": [
+      "Step 1: User approves commit for ticketId=5 and backend signs for ticketId=5",
+      "Step 2: Escrow is paused. Commits 0-4 are pending.",
+      "Step 3: Escrow is unpaused. Commits 0-3 succeed.",
+      "Step 4: A different commit takes ticketId=4, making commitments.length=5.",
+      "Step 5: The user's commit for ticketId=5 can now proceed since commitments.length matches.",
+      "Step 6: If instead commits 0-4 plus more succeed, commitments.length > 5, and the user's ticketId=5 is taken. Their commit will fail with TicketAlreadyClaimed."
+    ],
+    "preconditions": ["Commits are paused and then resumed", "Other commits take the user's intended ticketId slot"],
+    "impact": "dos",
+    "likelihood": "common",
+    "belief_score": 0.5
+  },
+  {
+    "id": "hyp-commit-escrow-v2-013",
+    "job_id": "audit-zen-v2",
+    "agent": "commit-escrow-agent",
+    "title": "RelayerEscrow.withdraw: No minimum withdrawal amount allows dust withdrawals that cost more gas than value",
+    "locations": ["RelayerEscrow.withdraw"],
+    "root_cause": "withdraw (line 114-120) allows any amount <= balances[msg.sender], including amount=0. A zero-amount withdrawal would succeed (subtracting 0 from balance, transferring 0 tokens). The _safeTransferExact function would transfer 0 tokens and verify the balance change is 0, which passes. This is gas-wasteful but not exploitable. Similarly, dust amounts that cost more in gas than the token value transferred are allowed. This is a standard ERC20 pattern and not a vulnerability.",
+    "trigger_scenario": [
+      "Step 1: User calls withdraw(0)",
+      "Step 2: Balance check passes (0 < any balance)",
+      "Step 3: safeTransfer sends 0 tokens",
+      "Step 4: User wastes gas but nothing is harmed"
+    ],
+    "preconditions": ["User calls withdraw with amount=0 or very small amount"],
+    "impact": "griefing",
+    "likelihood": "common",
+    "belief_score": 0.7
+  },
+  {
+    "id": "hyp-commit-escrow-v2-014",
+    "job_id": "audit-zen-v2",
+    "agent": "commit-escrow-agent",
+    "title": "RelayerEscrow._safeTransferExact: recipientReceived check uses < instead of != allowing excess token delivery without revert",
+    "locations": ["RelayerEscrow._safeTransferExact"],
+    "root_cause": "Line 307: if (recipientReceived < amount) revert FeeOnTransferNotSupported(). This checks that the recipient received AT LEAST the expected amount. If the recipient received MORE than expected (e.g., a rebasing token that increases balances), the check passes. The sender-side check (line 302) ensures senderDebited == amount exactly. For standard ERC20 tokens, recipientReceived will equal senderDebited (which equals amount). For rebasing tokens, the recipient could receive more. However, this doesn't create a security issue because: (1) the sender deducted exactly the right amount, (2) the recipient receiving more is the recipient's gain, not the protocol's loss. The check is intentionally asymmetric: strict on debit, permissive on credit.",
+    "trigger_scenario": [
+      "Step 1: Escrow transfers 100 tokens to a rebasing token holder",
+      "Step 2: Between balanceOf calls, a rebase occurs increasing all balances by 1%",
+      "Step 3: senderDebited = 100, recipientReceived = 101",
+      "Step 4: senderDebited == amount (100 == 100) passes, recipientReceived >= amount (101 >= 100) passes",
+      "Step 5: Transfer succeeds despite the rebase"
+    ],
+    "preconditions": ["Collateral token is a rebasing token that increases balances between balanceOf calls"],
+    "impact": "unfair_treatment",
+    "likelihood": "external_dependency",
+    "belief_score": 0.1
+  },
+  {
+    "id": "hyp-commit-escrow-v2-015",
+    "job_id": "audit-zen-v2",
+    "agent": "commit-escrow-agent",
+    "title": "RelayerEscrow.commitOnBehalf: User authorization hash does not include marketId, allowing potential confusion if market contract is redeployed at same address",
+    "locations": ["RelayerEscrow._commitAuthorizationHash", "RelayerEscrow.commitOnBehalf"],
+    "root_cause": "The _commitAuthorizationHash (lines 256-284) includes the market contract address but NOT the market's marketId. If a market contract is destroyed and a new one is deployed at the same address (via CREATE2) with a different marketId, a user's pre-existing approval from the old market could be valid for the new market at the same address, provided all other hash fields match (commitment, ticketId, user, nonce, expiry, ticketValue, chainId). However, the backend ECDSA signature in commitWithAuthorization (line 295-311) DOES include marketId, so even if the escrow authorization passes, the market-side signature verification would fail unless the backend issues a new signature for the new marketId. The dual-gate prevents exploitation but the missing marketId in the user authorization hash is a design gap.",
+    "trigger_scenario": [
+      "Step 1: User approves authorization for market at address X with marketId=1",
+      "Step 2: Market at address X is destroyed and redeployed at same address with marketId=2",
+      "Step 3: User's approval on the escrow is still valid because the hash only includes the address, not marketId",
+      "Step 4: However, the backend ECDSA signature for the new market must include marketId=2, which won't match the old signature covering marketId=1",
+      "Step 5: commitWithAuthorization reverts with InvalidSignature on the new market"
+    ],
+    "preconditions": ["Market contract is destroyed and redeployed at the same address via CREATE2", "User has a pre-existing authorization approval"],
+    "impact": "griefing",
+    "likelihood": "external_dependency",
+    "belief_score": 0.15
+  },
+  {
+    "id": "hyp-commit-escrow-v2-016",
+    "job_id": "audit-zen-v2",
+    "agent": "commit-escrow-agent",
+    "title": "RevealMarket.commitWithAuthorization: SNARK field validation on commitment but not on other CommitAuth fields used in Poseidon leaves",
+    "locations": ["RevealMarket.commitWithAuthorization", "RevealMarket._computeLeaf"],
+    "root_cause": "Line 289 validates uint256(auth.commitment) < SNARK_SCALAR_FIELD to ensure the commitment is a valid BN254 scalar field element. However, at commit time, the contract does not validate that the internal components of the commitment (outcomeId, amount, payout, salt) are valid field elements. These components are validated later in _computeLeaf (lines 888-893) during claim/refund. If a user commits with a Poseidon hash that was computed using values >= SNARK_SCALAR_FIELD for internal components, the commitment itself could still be < SNARK_SCALAR_FIELD (since Poseidon output is always in-field). At claim time, _computeLeaf would revert with FieldElementOutOfRange when trying to recompute the leaf. This means the user has committed funds that can never be claimed via the standard Merkle proof path. The permissionless refundTicket path (line 549-561) would still work in the Cancelled phase, and claimWithOracleAuthorization would work in the Settled phase.",
+    "trigger_scenario": [
+      "Step 1: User computes a Poseidon commitment hash using amount = SNARK_SCALAR_FIELD (out of range for field element)",
+      "Step 2: The Poseidon hash output is still < SNARK_SCALAR_FIELD (Poseidon wraps modulo p)",
+      "Step 3: commitWithAuthorization succeeds because auth.commitment < SNARK_SCALAR_FIELD",
+      "Step 4: At claim time, claim() calls _computeLeaf with amount = SNARK_SCALAR_FIELD, which reverts with FieldElementOutOfRange",
+      "Step 5: User cannot claim via standard path. Must use claimWithOracleAuthorization or wait for cancellation refundTicket"
+    ],
+    "preconditions": ["User crafts a commitment using internal values that exceed the SNARK scalar field", "The Poseidon hash of these values is still within the field"],
+    "impact": "dos",
+    "likelihood": "malicious_action",
+    "belief_score": 0.45
+  },
+  {
+    "id": "hyp-commit-escrow-v2-017",
+    "job_id": "audit-zen-v2",
+    "agent": "commit-escrow-agent",
+    "title": "RelayerEscrow.commitOnBehalf: Reads ticketSize from market via external call before transfer, creating a potential TOCTOU if market is upgradeable",
+    "locations": ["RelayerEscrow.commitOnBehalf"],
+    "root_cause": "Line 143: uint256 ticket = IRevealMarket(market).ticketSize(). This reads the ticket size from the market contract. The value is then used to deduct balances[user] (line 151), deduct accountedCollateral (line 152), and transfer tokens (line 153). In commitWithAuthorization, the market also checks auth.ticketValue == ticketSize (line 285). If ticketSize could change between the escrow's read and the market's check, there would be a mismatch. However, ticketSize is set once during initialize() and there is no setter function. Even if the market contract were upgradeable (via proxy), changing ticketSize would require a storage-level manipulation. Since RevealMarket is not upgradeable (no proxy pattern visible), this is not exploitable.",
+    "trigger_scenario": [
+      "Step 1: Escrow reads market.ticketSize() = 100",
+      "Step 2: (Hypothetically) ticketSize changes to 200 between the read and the commitWithAuthorization call",
+      "Step 3: Escrow deducted 100 from user and transferred 100 to market",
+      "Step 4: Market checks auth.ticketValue (100) != ticketSize (200), reverts with InvalidPayment",
+      "Step 5: Entire transaction reverts, no funds lost"
+    ],
+    "preconditions": ["Market ticketSize changes between escrow's read and market's check, which requires an upgradeable proxy or storage manipulation"],
+    "impact": "dos",
+    "likelihood": "external_dependency",
+    "belief_score": 0.05
+  },
+  {
+    "id": "hyp-commit-escrow-v2-018",
+    "job_id": "audit-zen-v2",
+    "agent": "commit-escrow-agent",
+    "title": "RevealMarket.commitWithAuthorization: payable modifier accepts ETH but immediately reverts if msg.value != 0, wasting gas for accidental ETH sends",
+    "locations": ["RevealMarket.commitWithAuthorization"],
+    "root_cause": "Line 273 declares commitWithAuthorization as payable, but line 284 checks if (msg.value != 0) revert InvalidPayment(). The function is payable but rejects any ETH. This is intentional (the function signature in IRevealMarket also declares it payable), likely to allow future flexibility or to match an interface. However, if the escrow calls commitWithAuthorization with msg.value > 0 (which it doesn't since there's no {value: ...} in the call on line 154), the call would revert. The receive() function (line 981) also reverts. So ETH sent to the market is always rejected. This is a minor design note, not a vulnerability.",
+    "trigger_scenario": [
+      "Step 1: External caller tries to call commitWithAuthorization with msg.value > 0",
+      "Step 2: onlyRelayer modifier blocks non-escrow callers",
+      "Step 3: Even if the escrow sent ETH, the market would revert with InvalidPayment"
+    ],
+    "preconditions": ["Caller sends ETH with the commitWithAuthorization call"],
+    "impact": "griefing",
+    "likelihood": "common",
+    "belief_score": 0.8
+  },
+  {
+    "id": "hyp-commit-escrow-v2-019",
+    "job_id": "audit-zen-v2",
+    "agent": "commit-escrow-agent",
+    "title": "RelayerEscrow.commitOnBehalf: One-shot authorization consumption on line 147 before external calls allows authorization to be permanently consumed even if commit fails for unrelated reasons",
+    "locations": ["RelayerEscrow.commitOnBehalf"],
+    "root_cause": "Line 147 sets approvedCommitAuthorizations[user][authHash] = false before the token transfer (line 153) and market call (line 154). If the subsequent operations revert, the entire transaction reverts including the authorization consumption. This is correct behavior because Solidity reverts all state changes on revert. The one-shot consumption (set to false) prevents double-use. If the commit fails (e.g., market rejects due to TicketIndexMismatch), the authorization is NOT consumed because the transaction reverts. The user would need to re-approve only if they want to change parameters. This is safe.",
+    "trigger_scenario": [
+      "Step 1: User approves authorization hash H",
+      "Step 2: Relayer calls commitOnBehalf, authorization is consumed (set to false) on line 147",
+      "Step 3: Token transfer succeeds on line 153",
+      "Step 4: commitWithAuthorization reverts (e.g., TicketIndexMismatch)",
+      "Step 5: Entire transaction reverts, restoring approvedCommitAuthorizations[user][H] = true",
+      "Step 6: User's approval is preserved for retry"
+    ],
+    "preconditions": ["Commit transaction reverts after authorization consumption but before completion"],
+    "impact": "griefing",
+    "likelihood": "common",
+    "belief_score": 0.9
+  },
+  {
+    "id": "hyp-commit-escrow-v2-020",
+    "job_id": "audit-zen-v2",
+    "agent": "commit-escrow-agent",
+    "title": "RevealMarket.commitWithAuthorization: abi.encodePacked signature domain uses address(this) + auth.user (both 20 bytes), adjacent dynamic-length values create theoretical collision surface",
+    "locations": ["RevealMarket.commitWithAuthorization"],
+    "root_cause": "Lines 295-305: abi.encodePacked(address(this), marketId, auth.ticketId, auth.commitment, auth.user, auth.nonce, auth.expiry, auth.ticketValue, block.chainid). The auth.user field (address, 20 bytes) is between auth.commitment (bytes32, 32 bytes) and auth.nonce (uint256, 32 bytes). Since address is 20 bytes in encodePacked, the packed encoding is: [...][32 bytes commitment][20 bytes user][32 bytes nonce][...]. Two different (commitment, user, nonce) triples could produce the same packed bytes if the last 12 bytes of commitment_A match the first 12 bytes of a different (user_B, nonce_B) encoding, and vice versa. Formally: commitment_A[20:32] || user_A || nonce_A[0:12] == commitment_B[20:32] || user_B || nonce_B[0:12]. This requires finding a 44-byte collision, which is computationally infeasible with keccak256. Additionally, the address(this) field at the start is also 20 bytes, creating a similar boundary with marketId. The collision surface exists but is not practically exploitable.",
+    "trigger_scenario": [
+      "Step 1: Attacker attempts to find two (commitment, user, nonce) triples where the packed encoding matches",
+      "Step 2: This requires a 44-byte collision in the packed encoding, which is computationally infeasible",
+      "Step 3: Even if found, the attacker would need the backend to sign for the collision parameters"
+    ],
+    "preconditions": ["Attacker can find keccak256 second-preimage collision on the packed encoding"],
+    "impact": "fund_loss",
+    "likelihood": "external_dependency",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-commit-escrow-v2-021",
+    "job_id": "audit-zen-v2",
+    "agent": "commit-escrow-agent",
+    "title": "RelayerEscrow.deposit/depositFor: No upper bound on deposit amount allows potential overflow in balances or accountedCollateral",
+    "locations": ["RelayerEscrow.deposit", "RelayerEscrow.depositFor"],
+    "root_cause": "Lines 96-97 (deposit) and 108-109 (depositFor): balances[user] += received and accountedCollateral += received. In Solidity 0.8.x, these additions are checked for overflow. If a user has a very large balance and deposits more, the addition could overflow and revert. Since the maximum uint256 is ~1.15e77, and real token supplies are far below this, overflow is not a practical concern. However, there is no protocol-level cap on total deposits or individual user balances. This is by design since the escrow is meant to hold arbitrary amounts of collateral.",
+    "trigger_scenario": [
+      "Step 1: User deposits an extremely large amount of tokens",
+      "Step 2: balances[user] += received succeeds (within uint256 range)",
+      "Step 3: accountedCollateral += received succeeds (within uint256 range)",
+      "Step 4: No overflow for any real token supply"
+    ],
+    "preconditions": ["Token supply exceeds uint256 max, which is impossible"],
+    "impact": "dos",
+    "likelihood": "external_dependency",
+    "belief_score": 0.01
+  },
+  {
+    "id": "hyp-commit-escrow-v2-022",
+    "job_id": "audit-zen-v2",
+    "agent": "commit-escrow-agent",
+    "title": "RevealMarket.commitWithAuthorization: commitments array can grow up to MAX_COMMITMENTS_LIMIT (16384) without gas limit concern on reads",
+    "locations": ["RevealMarket.commitWithAuthorization"],
+    "root_cause": "Line 288 caps commitments.length at maxCommitments (<= MAX_COMMITMENTS_LIMIT = 16384). Each commit appends to both commitments[] and commitmentUsers[] arrays (lines 314-315). Reading these arrays (e.g., commitmentAt, _ticketOwner) uses direct index access which is O(1). The lockBatches function iterates over counts array (at most MAX_LOCK_BATCH_COUNT = 64 batches), not the commitments array. So gas consumption for read operations remains bounded. The primary gas concern is the lockBatches function which iterates and pushes up to 64 batch roots, but this is within acceptable gas limits.",
+    "trigger_scenario": [
+      "Step 1: Market receives 16384 commits, filling commitments[] array",
+      "Step 2: lockBatches processes 64 batches of 256 commitments each",
+      "Step 3: Each commit is O(1) gas for push, each read is O(1) for index access"
+    ],
+    "preconditions": ["Market reaches MAX_COMMITMENTS_LIMIT"],
+    "impact": "dos",
+    "likelihood": "common",
+    "belief_score": 0.15
+  },
+  {
+    "id": "hyp-commit-escrow-v2-023",
+    "job_id": "audit-zen-v2",
+    "agent": "commit-escrow-agent",
+    "title": "RelayerEscrow.creditFromMarket: Allowed market can credit arbitrary user balances, potentially inflating accountedCollateral if market has excess tokens",
+    "locations": ["RelayerEscrow.creditFromMarket"],
+    "root_cause": "Lines 193-203: creditFromMarket is callable by any allowedMarket. It transfers tokens from the market to the escrow and credits a user's balance. The function uses safeTransferFrom, which requires the market to have approved the escrow for token transfers. A market could repeatedly credit a user's balance by calling this function, as long as the market has token balance and has approved the escrow. Since markets are registered by the factory (trusted), this is a controlled path. However, if a market is compromised or has unexpected token holdings, it could inflate a user's escrow balance. The accountedCollateral invariant is maintained because the escrow actually receives the tokens.",
+    "trigger_scenario": [
+      "Step 1: Market M is an allowed market with 1000 tokens and has approved the escrow",
+      "Step 2: Market calls creditFromMarket(user, 1000)",
+      "Step 3: Escrow receives 1000 tokens, user's balance increases by 1000, accountedCollateral increases by 1000",
+      "Step 4: User can now withdraw 1000 from escrow",
+      "Step 5: This is the intended behavior for market payouts routed through the escrow"
+    ],
+    "preconditions": ["Market has token balance and has approved the escrow for transfers"],
+    "impact": "unfair_treatment",
+    "likelihood": "malicious_action",
+    "belief_score": 0.1
+  },
+  {
+    "id": "hyp-commit-escrow-v2-024",
+    "job_id": "audit-zen-v2",
+    "agent": "commit-escrow-agent",
+    "title": "RevealMarket.commitWithAuthorization: External call to RelayerEscrow.commitsPaused() on line 283 adds gas overhead and introduces dependency on escrow availability",
+    "locations": ["RevealMarket.commitWithAuthorization"],
+    "root_cause": "Line 283: if (RelayerEscrow(payable(relayerEscrow)).commitsPaused()) revert CommitsPaused(). This makes an external STATICCALL to the escrow contract during every commit. If the escrow contract is self-destructed (via SELFDESTRUCT in a future upgrade or exploit), this call would return false (default) rather than reverting, because calls to non-existent contracts succeed with empty returndata in Solidity. However, the ABI decoder would revert when trying to decode empty returndata as a bool. Actually, with the Solidity ABI decoder, if the call returns empty data (call to EOA/non-existent contract), the decoder reverts. So if the escrow is destroyed, all commits would fail. This creates a DoS vector if the escrow can be destroyed. However, there is no SELFDESTRUCT in the escrow contract, and even if one were added in a future upgrade, this is an externally dependent scenario.",
+    "trigger_scenario": [
+      "Step 1: Escrow contract is somehow destroyed (SELFDESTRUCT in future upgrade)",
+      "Step 2: commitWithAuthorization calls RelayerEscrow(relayerEscrow).commitsPaused()",
+      "Step 3: External call to non-existent contract returns empty data",
+      "Step 4: ABI decoder reverts, blocking all commits"
+    ],
+    "preconditions": ["Escrow contract is destroyed or becomes non-responsive"],
+    "impact": "dos",
+    "likelihood": "external_dependency",
+    "belief_score": 0.1
+  },
+  {
+    "id": "hyp-commit-escrow-v2-025",
+    "job_id": "audit-zen-v2",
+    "agent": "commit-escrow-agent",
+    "title": "RevealMarket.commitWithAuthorization: expiry check uses strict less-than allowing commits at exactly the expiry timestamp",
+    "locations": ["RevealMarket.commitWithAuthorization"],
+    "root_cause": "Line 292: if (auth.expiry < block.timestamp) revert CommitExpired(). The condition is strict less-than, meaning the commit is allowed when auth.expiry == block.timestamp. This means the authorization is valid during the exact second of its expiry. The commit deadline check (line 281) uses >=: if (block.timestamp >= commitDeadline) revert CommitWindowClosed(), meaning commits are blocked AT the deadline timestamp. These two checks use opposite comparison directions: expiry allows equality, deadline disallows equality. This is a minor inconsistency but not a vulnerability. The practical impact is one second of difference.",
+    "trigger_scenario": [
+      "Step 1: Backend issues CommitAuth with expiry = T",
+      "Step 2: Block is mined at timestamp T",
+      "Step 3: auth.expiry (T) < block.timestamp (T) is false, so the check passes",
+      "Step 4: The commit is accepted at the exact expiry timestamp"
+    ],
+    "preconditions": ["Block timestamp exactly equals the auth expiry"],
+    "impact": "unfair_treatment",
+    "likelihood": "common",
+    "belief_score": 0.7
+  },
+  {
+    "id": "hyp-commit-escrow-v2-026",
+    "job_id": "audit-zen-v2",
+    "agent": "commit-escrow-agent",
+    "title": "RelayerEscrow.setMarketFactory: FactoryLocked prevents changing factory but allows re-setting the same factory, no path to reset if factory is compromised",
+    "locations": ["RelayerEscrow.setMarketFactory"],
+    "root_cause": "Line 68-73: setMarketFactory checks if (marketFactory != address(0) && marketFactory != factory) revert FactoryLocked(). Once a factory is set, it cannot be changed to a different address. The factory can only be set to address(0) initially, then locked forever. If the factory is compromised or needs to be upgraded, the escrow's factory cannot be changed. The owner can still call most escrow functions directly (deposit, withdraw, commitOnBehalf), but market registration/unregistration is locked to the old factory. However, the escrow owner could deploy a new escrow entirely. The FactoryLocked design is intentional for immutability but creates a single point of failure.",
+    "trigger_scenario": [
+      "Step 1: Owner sets factory to address F1",
+      "Step 2: F1 is compromised and begins registering malicious markets",
+      "Step 3: Owner tries to setMarketFactory(F2) but reverts with FactoryLocked",
+      "Step 4: Owner cannot stop F1 from registering markets. Can only pause commits or deploy a new escrow."
+    ],
+    "preconditions": ["Factory is compromised after being set on the escrow"],
+    "impact": "loss_of_function",
+    "likelihood": "malicious_action",
+    "belief_score": 0.35
+  },
+  {
+    "id": "hyp-commit-escrow-v2-027",
+    "job_id": "audit-zen-v2",
+    "agent": "commit-escrow-agent",
+    "title": "RelayerEscrow.revokeCommitAuthorization: User can front-run relayer's commitOnBehalf with revocation, griefing the relayer's gas",
+    "locations": ["RelayerEscrow.revokeCommitAuthorization", "RelayerEscrow.commitOnBehalf"],
+    "root_cause": "revokeCommitAuthorization (line 169-174) allows a user to set approvedCommitAuthorizations[msg.sender][authHash] = false at any time. If a user front-runs the relayer's commitOnBehalf transaction with a revokeCommitAuthorization call, the commit will fail with CommitAuthorizationMissing (line 146). The relayer wastes gas on the failed transaction. This is by design (users have the right to revoke their own authorizations), but it creates an asymmetric grief vector: the user pays only the gas for revokeCommitAuthorization (cheap SSTORE from true to false = 2900 gas refund), while the relayer pays gas for the failed commitOnBehalf (more expensive due to ticketSize read, balance check, and hash computation before reverting). A malicious user could repeatedly approve and front-run-revoke to grief the relayer.",
+    "trigger_scenario": [
+      "Step 1: User approves commit authorization hash H",
+      "Step 2: Relayer submits commitOnBehalf(user, market, auth, sig) to the mempool",
+      "Step 3: User sees the pending transaction and submits revokeCommitAuthorization(market, auth) with higher gas price",
+      "Step 4: Revocation is mined first, setting approvedCommitAuthorizations[user][H] = false",
+      "Step 5: Relayer's commitOnBehalf reaches line 146 and reverts with CommitAuthorizationMissing"
+    ],
+    "preconditions": ["User monitors the mempool for relayer commitOnBehalf transactions", "Chain has a public mempool (not a private/sequencer-ordered chain)"],
+    "impact": "griefing",
+    "likelihood": "malicious_action",
+    "belief_score": 0.55
+  },
+  {
+    "id": "hyp-commit-escrow-v2-028",
+    "job_id": "audit-zen-v2",
+    "agent": "commit-escrow-agent",
+    "title": "RelayerEscrow.withdrawTo: Factory has irrevocable ability to drain any user's escrow balance to any recipient",
+    "locations": ["RelayerEscrow.withdrawTo"],
+    "root_cause": "withdrawTo (line 123-131) allows the factory (marketFactory) to withdraw any user's balance to any recipient with no user consent required. The factory is locked via setMarketFactory (line 70: FactoryLocked), making this permission irrevocable. If the factory contract has an owner-controlled function that calls withdrawTo, the factory owner can drain all user balances. This is a critical trust assumption: all users depositing into the escrow implicitly trust the factory contract. The function is intended for migration scenarios, but it provides unrestricted access. There is no limit on amount, no user approval, and no time delay. The only gate is msg.sender == marketFactory.",
+    "trigger_scenario": [
+      "Step 1: Factory contract has an admin function that calls escrow.withdrawTo(user, attacker, balances[user])",
+      "Step 2: Factory owner (or attacker who compromises factory owner key) calls this function",
+      "Step 3: User's entire escrow balance is transferred to the attacker",
+      "Step 4: User cannot prevent this because withdrawTo requires no user approval",
+      "Step 5: The factory cannot be changed on the escrow due to FactoryLocked"
+    ],
+    "preconditions": ["Factory contract has an external function that allows its owner to call withdrawTo on the escrow", "Factory owner key is compromised or malicious"],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.4
+  },
+  {
+    "id": "hyp-commit-escrow-v2-029",
+    "job_id": "audit-zen-v2",
+    "agent": "commit-escrow-agent",
+    "title": "RevealMarket.commitWithAuthorization: authorizationSigner can be rotated during Commit phase via setAuthorizationSigner, invalidating all in-flight signed commits",
+    "locations": ["RevealMarket.commitWithAuthorization", "RevealMarket.setAuthorizationSigner"],
+    "root_cause": "setAuthorizationSigner (line 642-647) allows the factory to rotate the authorization signer during the Commit phase. When the signer is rotated, all previously signed CommitAuth signatures become invalid because ECDSA.recover will return the old signer address which no longer matches authorizationSigner. Any commits that were signed by the old signer and are in-flight or pending will fail with InvalidSignature. The user's escrow authorizations (which don't depend on the authorization signer) remain valid, but the market-side signature verification fails. This is a known operational constraint: signer rotation invalidates all outstanding signatures.",
+    "trigger_scenario": [
+      "Step 1: Backend signs 10 CommitAuth messages with signer key A",
+      "Step 2: Factory rotates authorizationSigner from A to B via setAuthorizationSigner",
+      "Step 3: Relayer submits the 10 commits signed by A",
+      "Step 4: ECDSA.recover returns A, but authorizationSigner is now B",
+      "Step 5: All 10 commits fail with InvalidSignature"
+    ],
+    "preconditions": ["Factory rotates the authorization signer while commits signed by the old signer are in-flight"],
+    "impact": "dos",
+    "likelihood": "internal_state",
+    "belief_score": 0.5
+  }
+]

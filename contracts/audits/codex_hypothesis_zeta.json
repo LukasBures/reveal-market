@@ -1,0 +1,142 @@
+[
+  {
+    "id": "zeta-flow6-001",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "ZETA",
+    "title": "Verifier.setVerifyingKey: G2 coordinate order is not canonicalized on-chain so a structurally valid but semantically wrong VK can be installed and brick verification",
+    "locations": [
+      "Verifier.setVerifyingKey",
+      "Verifier._setVerifyingKey",
+      "Verifier._buildG2",
+      "Pairing.isValidG2Point"
+    ],
+    "root_cause": "_buildG2 stores beta/gamma/delta FQ2 limbs exactly as provided and _setVerifyingKey only checks non-infinity plus precompile acceptance. There is no canonicalization or on-chain recomputation against a pinned expected key hash at rotation time, so alternate serialization conventions (e.g., unswapped c0/c1 limbs) can pass curve-validity checks while representing a different verifying key.",
+    "trigger_scenario": [
+      "Owner rotates the verifier key using raw vk JSON coordinates from a tool that uses a different FQ2 limb order than the contract expects.",
+      "setVerifyingKey calls _buildG2 and accepts the coordinates as-is.",
+      "Pairing.isValidG2Point returns success because the swapped point is still a valid curve point.",
+      "The contract updates _vk and emits VerifyingKeyUpdated, so governance believes rotation succeeded.",
+      "Subsequent valid Groth16 proofs generated for the intended circuit fail in verifyProof because on-chain vk no longer matches the circuit semantics.",
+      "Settlement paths that depend on this verifier revert/fail, effectively freezing proof-based finalization until another key rotation occurs."
+    ],
+    "preconditions": [
+      "Key rotation is executed through tooling or manual input that does not enforce the verifier's exact FQ2 encoding convention.",
+      "The supplied coordinates remain curve-valid, so structural checks do not fail fast."
+    ],
+    "impact": "dos",
+    "likelihood": "internal_state",
+    "belief_score": 0.78
+  },
+  {
+    "id": "zeta-flow6-002",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "ZETA",
+    "title": "Verifier.setVerifyingKey: single-step privileged key rotation has no staged activation, enabling immediate protocol-wide settlement freeze on shared verifier instances",
+    "locations": [
+      "Verifier.setVerifyingKey",
+      "Verifier._setVerifyingKey",
+      "Verifier.verifyingKeyHash",
+      "Verifier.VerifyingKeyUpdated"
+    ],
+    "root_cause": "setVerifyingKey performs an immediate in-place replacement of _vk, _ic, circuitHash, and verifyingKeyHash in one owner transaction with no timelock, grace period, dual-approval, or staged next-key activation. Any mistake or compromised owner action instantly mutates the verifier anchor for every consumer using the same verifier address.",
+    "trigger_scenario": [
+      "Multiple active markets rely on one Verifier address and have operational assumptions tied to the current verifyingKeyHash.",
+      "Owner key is compromised, or owner executes an incorrect/untimely rotation.",
+      "Attacker/operator calls setVerifyingKey with new key material.",
+      "verifyingKeyHash and circuitHash change atomically in the same transaction.",
+      "Downstream settlement calls that require the previous key anchor fail immediately after rotation.",
+      "Markets cannot finalize until governance performs additional recovery actions, creating a liveness outage window."
+    ],
+    "preconditions": [
+      "Verifier ownership is a single high-privilege trust boundary without enforced timelock/multisig in this contract.",
+      "The verifier contract is shared by active markets that depend on stable key identity."
+    ],
+    "impact": "dos",
+    "likelihood": "malicious_action",
+    "belief_score": 0.7
+  },
+  {
+    "id": "zeta-flow6-003",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "ZETA",
+    "title": "Verifier.verifyProof: bool-return API is fail-hard for malformed proofs because decode and curve validation reverts are outside the catch boundary",
+    "locations": [
+      "Verifier.verifyProof",
+      "Verifier._decodeProof",
+      "Verifier._validateG1Point",
+      "Verifier._validateG2Point"
+    ],
+    "root_cause": "verifyProof only wraps this._pairingCheck(...) in try/catch. Earlier stages (_decodeProof, _buildG1/_buildG2, _validateG1Point, _validateG2Point) revert on malformed calldata or invalid points via InvalidProofEncoding/FieldOverflow/InvalidCurvePoint, so invalid proofs do not uniformly return false despite the interface's bool semantics.",
+    "trigger_scenario": [
+      "A relayer or integrator accepts proof payloads from an untrusted source and calls verifyProof via a state-changing workflow.",
+      "Attacker submits proof bytes with malformed encoding length or off-curve coordinates.",
+      "verifyProof hits _decodeProof or _validateG*Point and reverts before entering the try/catch around _pairingCheck.",
+      "The parent transaction bubbles the revert instead of receiving a simple false result.",
+      "If the parent batches multiple proofs in one transaction, one malformed element aborts the entire batch execution.",
+      "An attacker can repeatedly inject malformed payloads to create operational griefing for automated submitters that expect soft-fail boolean behavior."
+    ],
+    "preconditions": [
+      "Upstream workflow treats verifyProof as a non-reverting boolean filter and does not pre-simulate malformed payloads.",
+      "Proof submissions can be influenced by adversarial actors."
+    ],
+    "impact": "griefing",
+    "likelihood": "malicious_action",
+    "belief_score": 0.66
+  },
+  {
+    "id": "zeta-flow6-004",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "ZETA",
+    "title": "Pairing.isValidG2Point: verifier soundness is delegated entirely to precompile success semantics, so non-compliant BN254 implementations can silently weaken validation",
+    "locations": [
+      "Pairing.isValidG2Point",
+      "Verifier._setVerifyingKey",
+      "Verifier._validateG2Point",
+      "Verifier._pairingCheck"
+    ],
+    "root_cause": "G2 validation and final proof checking rely on bn254 precompiles (0x08) as the sole correctness oracle. isValidG2Point accepts any input where staticcall succeeds and performs no independent subgroup/consistency checks in Solidity. If a chain/client implementation deviates from EIP-197 failure behavior, malformed twist points can be accepted.",
+    "trigger_scenario": [
+      "Protocol deploys to an environment where bn254 precompile behavior is non-standard or buggy (e.g., missing strict subgroup checks).",
+      "Attacker provides malformed G2 data that should be rejected under canonical EIP-197 rules.",
+      "Pairing.isValidG2Point returns true because staticcall reports success on that environment.",
+      "Verifier accepts malformed key material during rotation or malformed proof points during verification.",
+      "pairing checks can then evaluate over invalid group elements, breaking Groth16 soundness assumptions.",
+      "Attacker may produce false-positive proof acceptance or induce systemic verification failure depending on the exact precompile deviation."
+    ],
+    "preconditions": [
+      "Deployment target does not enforce canonical bn254 precompile validity checks.",
+      "Attacker can submit crafted proof/key material to the verifier workflow."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "external_dependency",
+    "belief_score": 0.57
+  },
+  {
+    "id": "zeta-flow6-005",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "ZETA",
+    "title": "Pairing precompile wrappers forward gas() with fail-revert semantics, enabling high-cost griefing when automated submitters relay attacker-controlled malformed proofs",
+    "locations": [
+      "Pairing.add",
+      "Pairing.scalarMul",
+      "Pairing.pairing",
+      "Verifier.verifyProof"
+    ],
+    "root_cause": "Pairing.add/scalarMul/pairing forward all remaining gas into precompile staticcalls and use require(success, ...). On failure paths, large gas chunks can be consumed before reverting, and Verifier only soft-catches the final _pairingCheck call. There is no on-chain gas cap or cheap pre-screening path for untrusted off-chain proof submissions.",
+    "trigger_scenario": [
+      "An attacker feeds malformed proof payloads into a keeper/relayer pipeline that auto-submits settlement transactions.",
+      "The relayer submits transactions calling workflows that reach Verifier.verifyProof.",
+      "Precompile calls in Pairing consume substantial gas on failing validations/pairing operations.",
+      "The transaction reverts or returns false only after expensive cryptographic calls have run.",
+      "Attacker repeats submissions with varied malformed payloads.",
+      "Keeper operating budget is drained and settlement liveness degrades due repeated high-cost failures."
+    ],
+    "preconditions": [
+      "An automated submitter relays proofs from untrusted sources without strict off-chain simulation/validation.",
+      "Adversary can continuously supply malformed proof attempts."
+    ],
+    "impact": "griefing",
+    "likelihood": "malicious_action",
+    "belief_score": 0.61
+  }
+]

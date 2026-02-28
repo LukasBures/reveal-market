@@ -1,0 +1,571 @@
+[
+  {
+    "id": "hyp-settle-001",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "Verifier._pairingCheck: Gas-limited external self-call returns false instead of reverting -> Malicious proof accepted as invalid rather than causing revert",
+    "locations": ["Verifier.verifyProof", "Verifier._pairingCheck"],
+    "root_cause": "The Verifier uses `this._pairingCheck(proof, vkx)` wrapped in a try/catch (line 122-126 of Verifier.sol). The _pairingCheck function calls the bn128 pairing precompile (address 0x08) via staticcall. If the pairing precompile runs out of gas, the staticcall returns false (not revert), which propagates up through the `require(success, ...)` as a revert. The try/catch in verifyProof then catches this and returns `false`. This means gas manipulation cannot cause a valid proof to be silently rejected as invalid -- the caller (RevealMarket) will revert with `InvalidProof`, not settle with wrong data. However, this is a defense-in-depth concern: the `false` return path means no funds are at risk; the market simply cannot settle until a properly-gassed call is made.",
+    "trigger_scenario": [
+      "Step 1: Oracle submits verifyAndSettle or verifyAndSettleBatched with a valid proof but with carefully calculated gas that is sufficient to reach the _pairingCheck but insufficient for the precompile to execute.",
+      "Step 2: The pairing precompile staticcall fails due to insufficient gas, `require(success)` reverts inside _pairingCheck.",
+      "Step 3: The try/catch in verifyProof catches the revert and returns false.",
+      "Step 4: RevealMarket reverts with InvalidProof, preventing settlement."
+    ],
+    "preconditions": ["Oracle or gas-manipulating relayer can control the gas forwarded to the verifier call"],
+    "impact": "dos",
+    "likelihood": "malicious_action",
+    "belief_score": 0.25
+  },
+  {
+    "id": "hyp-settle-002",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "RevealMarket.verifyAndSettleBatched: Partial batch settlement never completed -> Market stuck in Locked phase permanently",
+    "locations": ["RevealMarket.verifyAndSettleBatched", "RevealMarket._verifyBatchProof"],
+    "root_cause": "In verifyAndSettleBatched (lines 418-442), _finalizeSettlement is only called when `settledBatchCount == batchCount` (line 438). If the oracle submits proofs for some batches but never submits the remaining ones, the market remains in Phase.Locked indefinitely. There is a mitigation via `enableRefunds()` (line 473) which allows the factory owner to cancel the market after `SETTLEMENT_TIMEOUT_SECONDS` (14 days) from `lockedAt`, but this requires factory owner intervention and leaves users unable to claim winning payouts.",
+    "trigger_scenario": [
+      "Step 1: Market is locked with multiple batches (e.g., 3 batches).",
+      "Step 2: Oracle posts the result and submits proofs for batch 0 and batch 1.",
+      "Step 3: Oracle goes offline or refuses to submit proof for batch 2.",
+      "Step 4: Market remains in Phase.Locked. Users cannot claim because phase != Settled.",
+      "Step 5: After 14 days, factory owner can call enableRefunds() to move to Cancelled phase, allowing refunds at ticketSize (full amount including rake)."
+    ],
+    "preconditions": ["Oracle must go offline or be compromised after partial settlement", "Multi-batch market (more than 1 batch)"],
+    "impact": "dos",
+    "likelihood": "external_dependency",
+    "belief_score": 0.55
+  },
+  {
+    "id": "hyp-settle-003",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "RevealMarket._verifyBatchProof: Accumulated settledEscrowSum across batches can be manipulated via per-batch signal values -> TotalsMismatch bypass if circuit allows flexibility",
+    "locations": ["RevealMarket._verifyBatchProof", "RevealMarket.verifyAndSettleBatched"],
+    "root_cause": "In _verifyBatchProof (lines 843-846), settledEscrowSum, settledLiabilitySum, settledPoolYesSum, and settledPoolNoSum accumulate signals[3], signals[4], signals[6], and signals[7] from each batch proof. The per-batch values are proven by the ZK circuit, so they cannot be arbitrarily chosen. However, the on-chain code does NOT validate that signals[3] (batch escrow) equals the expected escrow for that specific batch (batchCounts[i] * netTicketSize). The only aggregate check is `settledEscrowSum != totalEscrow` at line 439. If the ZK circuit does not independently constrain per-batch escrow to match the exact ticket count * net value for that batch, an attacker who can generate valid proofs with incorrect per-batch distributions could shift liability between batches. The circuit integrity is the defense here -- if the circuit properly constrains these values, this is not exploitable.",
+    "trigger_scenario": [
+      "Step 1: Market has 2 batches: batch 0 with 256 tickets, batch 1 with 1 ticket.",
+      "Step 2: Attacker generates a valid proof for batch 0 claiming totalEscrow = (256 + 1) * netTicket (all escrow in batch 0).",
+      "Step 3: Attacker generates a valid proof for batch 1 claiming totalEscrow = 0.",
+      "Step 4: settledEscrowSum = (257 * netTicket) + 0 = totalEscrow, passes TotalsMismatch check.",
+      "Step 5: However, the per-batch liability could be skewed, affecting settlement surplus/deficit calculations."
+    ],
+    "preconditions": ["ZK circuit must allow per-batch totalEscrow to differ from the actual batch ticket sum", "Attacker must be able to generate valid Groth16 proofs with manipulated signals"],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.15
+  },
+  {
+    "id": "hyp-settle-004",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "RevealMarket.lockBatches: Relayer signature does not commit to commitDeadline or totalEscrow -> Signature reuse across scenarios",
+    "locations": ["RevealMarket.lockBatches"],
+    "root_cause": "The relayer signature in lockBatches (lines 336-343) signs over `(address(this), factory, marketId, roots, counts, block.chainid)`. It does NOT include `totalEscrow`, `commitDeadline`, `commitments.length`, or `block.timestamp`. While the roots and counts are deterministic from the commitment data, the signature could theoretically be reused if the oracle calls lockBatches at different times producing the same roots/counts (e.g., if commitments happen to be identical). In practice, commitments are Poseidon hashes including unique ticket IDs and salts, so identical roots are astronomically unlikely. The bigger concern is that the relayer owner signs the roots before actually verifying them -- the signature attests agreement with the batch decomposition, but the relayer owner has no way to independently verify the Poseidon Merkle roots on-chain.",
+    "trigger_scenario": [
+      "Step 1: Oracle computes batch Merkle roots off-chain and requests relayer owner's signature.",
+      "Step 2: Relayer owner signs without independently verifying the roots (trusts oracle).",
+      "Step 3: Oracle provides malicious roots that don't match the actual commitments.",
+      "Step 4: lockBatches succeeds because the on-chain code does not verify roots against stored commitments.",
+      "Step 5: During settlement, proofs are verified against the malicious roots, and any valid proof for those roots would succeed."
+    ],
+    "preconditions": ["Oracle and relayer owner must not independently verify Merkle roots off-chain", "Oracle must be malicious or compromised"],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.35
+  },
+  {
+    "id": "hyp-settle-005",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "RevealMarket._finalizeSettlement: Surplus forwarding to protocolPool includes rakeCollected -> Protocol receives rake + surplus together",
+    "locations": ["RevealMarket._finalizeSettlement"],
+    "root_cause": "In _finalizeSettlement (lines 713-752), the contract computes `required = totalLiability_` (line 722), draws deficit from pool if needed (lines 726-729), then computes surplus as `tokenBalance - totalLiability_` (line 736). The market's token balance includes the rake amount (rakeCollected, stored at line 315). Since `totalEscrow = sum(ticketSize - rake)` and the market holds `sum(ticketSize)`, the actual balance is `totalEscrow + rakeCollected`. The surplus calculation at line 736 will include the rakeCollected in the surplus: `surplus = (totalEscrow + rakeCollected) - totalLiability_`. This means the rake is forwarded to protocolPool as part of the surplus transfer. The `rakeAmount` storage variable is set to `rakeCollected` (line 721) for accounting but the tokens are sent to protocolPool. This appears intentional -- rake goes to the protocol pool. However, if `totalLiability_ > totalEscrow`, the deficit draw covers the difference, and then surplus = (totalEscrow + deficit + rakeCollected) - totalLiability_ = rakeCollected. So rake always flows to protocolPool. This is by design.",
+    "trigger_scenario": [
+      "Step 1: Market collects 100 tickets at 1 ETH each with 2% rake. totalEscrow = 98 ETH, rakeCollected = 2 ETH, balance = 100 ETH.",
+      "Step 2: Settlement determines totalLiability = 95 ETH (all bettors on winning side).",
+      "Step 3: required = 95 ETH. Balance = 100 ETH. No deficit draw needed.",
+      "Step 4: surplus = 100 - 95 = 5 ETH (includes 2 ETH rake + 3 ETH actual surplus).",
+      "Step 5: 5 ETH sent to protocolPool. Market retains 95 ETH for claims."
+    ],
+    "preconditions": ["Normal market operation"],
+    "impact": "theft_of_yield",
+    "likelihood": "common",
+    "belief_score": 0.1
+  },
+  {
+    "id": "hyp-settle-006",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "RevealMarket._finalizeSettlement: ProtocolPool.draw called before balance recheck may overshoot if draw transfers more than requested -> Artificial surplus creation",
+    "locations": ["RevealMarket._finalizeSettlement", "ProtocolPool.draw"],
+    "root_cause": "In _finalizeSettlement (lines 726-729), when there's a deficit, the code calls `IProtocolPool(protocolPool).draw(address(this), deficit)` and then rechecks `IERC20(collateralToken).balanceOf(address(this))` at line 732. ProtocolPool.draw (lines 151-183 of ProtocolPool.sol) uses `safeTransfer` with fee-on-transfer checks that ensure exactly `amount` is debited from pool and received by market. So the draw cannot overshoot. However, if a malicious/compromised ProtocolPool contract is set (via factory owner rotating the protocolPool before lock), it could transfer extra tokens. This is mitigated by the fact that protocolPool can only be changed during Commit phase with zero commitments (line 660 of RevealMarket.sol: `if (commitments.length != 0) revert InvalidPhase()`).",
+    "trigger_scenario": [
+      "Step 1: Factory owner deploys a malicious ProtocolPool that, on draw(), transfers 2x the requested amount.",
+      "Step 2: Market settles with a deficit, calls draw(deficit).",
+      "Step 3: Market receives 2 * deficit, balance becomes totalEscrow + 2 * deficit.",
+      "Step 4: surplus = (totalEscrow + 2 * deficit) - totalLiability = deficit (extra surplus).",
+      "Step 5: Extra surplus is forwarded back to the malicious pool."
+    ],
+    "preconditions": ["Factory owner must set a malicious ProtocolPool during Commit phase before any commitments", "This is a trusted-admin attack"],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.05
+  },
+  {
+    "id": "hyp-settle-007",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "RevealMarket.verifyAndSettle vs verifyAndSettleBatched: Inconsistent settlement invariant checking for single-batch markets -> Potential double settlement path",
+    "locations": ["RevealMarket.verifyAndSettle", "RevealMarket.verifyAndSettleBatched"],
+    "root_cause": "verifyAndSettle (lines 391-415) can only be used when `batchRoots.length == 1` (line 396). It checks `publicSignals[3] != totalEscrow` directly (line 405). verifyAndSettleBatched (lines 418-442) does NOT check batchRoots.length > 1; it works for any batchRoots.length including 1. For a single-batch market, BOTH functions could potentially be called. However, verifyAndSettle requires `phase == Phase.Locked` (line 397), and upon calling _finalizeSettlement, phase is set to Phase.Settled (line 750). So a second call via verifyAndSettleBatched would fail at the phase check. Similarly, verifyAndSettleBatched requires phase == Locked (line 423). So there is no double-settlement risk. The two paths are consistent for single-batch markets.",
+    "trigger_scenario": [
+      "Step 1: Single-batch market is locked (batchRoots.length == 1).",
+      "Step 2: Oracle calls verifyAndSettle, which verifies the proof and finalizes settlement. Phase becomes Settled.",
+      "Step 3: Oracle attempts to call verifyAndSettleBatched. Fails with InvalidPhase because phase is Settled."
+    ],
+    "preconditions": ["Single-batch market"],
+    "impact": "fund_loss",
+    "likelihood": "common",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-settle-008",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "RevealMarket.lockBatches: Batch roots not validated against on-chain commitments -> Oracle can lock arbitrary roots",
+    "locations": ["RevealMarket.lockBatches"],
+    "root_cause": "lockBatches (lines 325-378) validates that the number of batches matches `ceil(commitments.length / BATCH_SIZE)` and that each batch count matches the expected size. However, it does NOT verify that the provided `roots[]` are actually the Poseidon Merkle roots of the stored `commitments[]`. The roots are taken at face value from the oracle's calldata. The on-chain contract stores individual commitments (line 310: `commitments.push(auth.commitment)`) but never builds the Merkle tree on-chain. The relayer signature attests to the roots, providing a second trust anchor. But if both oracle and relayer owner collude (or if the relayer owner blindly signs), arbitrary roots could be locked, enabling settlement proofs that don't correspond to actual user commitments.",
+    "trigger_scenario": [
+      "Step 1: Users commit tickets; commitments[] stores their Poseidon leaf hashes.",
+      "Step 2: Oracle computes fake roots that include a different set of leaves (e.g., all payouts going to attacker-controlled addresses).",
+      "Step 3: Oracle obtains relayer signature on the fake roots (relayer owner doesn't independently verify).",
+      "Step 4: Oracle calls lockBatches with fake roots. On-chain validation passes (counts match, roots.length matches).",
+      "Step 5: Oracle generates ZK proofs against fake roots, settles market.",
+      "Step 6: Claims using real commitments fail _verifyLeaf because the Merkle proof won't match the fake roots.",
+      "Step 7: Attacker can claim with the fake leaf data."
+    ],
+    "preconditions": ["Oracle must be malicious or compromised", "Relayer owner must sign the fake roots (colluding or not independently verifying)", "Attacker must be able to generate valid Groth16 proofs for the fake tree"],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.40
+  },
+  {
+    "id": "hyp-settle-009",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "RevealMarket._finalizeSettlement: Settlement invariant poolYes + poolNo == totalLiability does not enforce poolYes/poolNo correspondence to actual winning/losing bets -> Incorrect payout distribution",
+    "locations": ["RevealMarket._finalizeSettlement", "RevealMarket._verifyBatchProof"],
+    "root_cause": "The settlement invariant check at line 716 (`poolYes_ + poolNo_ != totalLiability_`) ensures the sum is correct but does not verify that poolYes corresponds to bets on outcome 0 and poolNo to outcome 1 (or vice versa). The public signals include winningOutcomeId (signals[2]) which is checked against the on-chain `winningOutcomeId` (lines 404, 831), so the circuit should be computing payouts for the correct outcome. The circuit is the sole enforcer of correctness in the poolYes/poolNo split. If the circuit has a bug where poolYes and poolNo are swapped, settlement would finalize with incorrect distribution, but `totalLiability` would still be correct, meaning the market holds enough funds. Claims would fail or succeed incorrectly depending on individual ticket matching.",
+    "trigger_scenario": [
+      "Step 1: Market has bets: 60% on outcome 0, 40% on outcome 1. Outcome 0 wins.",
+      "Step 2: Circuit correctly calculates poolYes (total payouts to outcome 0 bettors). Oracle proves this.",
+      "Step 3: If circuit has a bug and swaps poolYes/poolNo, totalLiability is still correct (same sum).",
+      "Step 4: _finalizeSettlement passes. Phase becomes Settled.",
+      "Step 5: Individual claims still verify against Merkle leaves which encode per-ticket payout, so the swap in pool totals doesn't directly affect individual claims.",
+      "Step 6: However, if a future version uses poolYes/poolNo for payout calculations, this could be exploited."
+    ],
+    "preconditions": ["Circuit must have a bug swapping poolYes and poolNo"],
+    "impact": "unfair_treatment",
+    "likelihood": "external_dependency",
+    "belief_score": 0.10
+  },
+  {
+    "id": "hyp-settle-010",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "RevealMarket._verifyBatchProof: Batch proof epoch tracking uses uint16 key but currentBatchProofEpoch is uint256 -> No truncation issue but mapping key space consideration",
+    "locations": ["RevealMarket._verifyBatchProof"],
+    "root_cause": "The `batchProofEpoch` mapping uses `uint16` keys (line 110: `mapping(uint16 => uint256)`) corresponding to batch indices. The `currentBatchProofEpoch` is `uint256` (line 111). When lockBatches is called, `currentBatchProofEpoch` increments by 1 (line 366). In `_verifyBatchProof`, the check `batchProofEpoch[batchIndex] == currentBatchProofEpoch` (line 830) compares the stored epoch for a batch index against the current epoch. Since batchIndex is uint16, the maximum batch index is 65535. With MAX_LOCK_BATCH_COUNT = 64, batchIndex is always < 64, so there's no truncation or collision risk. The epoch system correctly prevents replay of batch proofs across lock cycles.",
+    "trigger_scenario": [
+      "Step 1: Market is locked (epoch becomes 1). Batch 0 proof is submitted; batchProofEpoch[0] = 1.",
+      "Step 2: Market enters Cancelled state, then somehow returns to Commit and gets relocked (epoch becomes 2).",
+      "Step 3: Old proof for batch 0 is replayed. batchProofEpoch[0] is 1, currentBatchProofEpoch is 2. Check fails: 1 != 2. Replay rejected.",
+      "Step 4: Phase transitions prevent going from Cancelled/Settled back to Commit, so relocking is impossible in practice."
+    ],
+    "preconditions": ["Would require phase to cycle back to Commit, which is not possible in the current state machine"],
+    "impact": "griefing",
+    "likelihood": "internal_state",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-settle-011",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "RevealMarket.lockBatches: commitDeadline check error naming is misleading but logic is inverted safely -> No vulnerability",
+    "locations": ["RevealMarket.lockBatches"],
+    "root_cause": "Line 330: `if (block.timestamp < commitDeadline) revert CommitWindowClosed()`. The error name `CommitWindowClosed` is misleading -- it reverts when the commit window is still OPEN (timestamp < deadline). The actual logic is correct: lockBatches should only be callable after the commit deadline has passed. At `block.timestamp == commitDeadline`, the condition `block.timestamp < commitDeadline` is false, so lockBatches proceeds. Meanwhile, `commitWithAuthorization` checks `block.timestamp >= commitDeadline` and reverts with `CommitWindowClosed` (line 278). At exactly `commitDeadline`, commits are blocked (278 triggers) and locking is allowed (330 does not trigger). There is no gap or overlap -- the boundary is handled correctly.",
+    "trigger_scenario": [
+      "Step 1: commitDeadline = T.",
+      "Step 2: At block.timestamp = T-1: commits work (T-1 < T is false for >= check at line 278... wait, 278 checks >= so T-1 >= T is false, commit proceeds). Lock fails (T-1 < T is true, reverts).",
+      "Step 3: At block.timestamp = T: commits fail (T >= T is true, reverts). Lock succeeds (T < T is false, proceeds).",
+      "Step 4: No timing gap exists."
+    ],
+    "preconditions": ["None -- this is a code quality observation, not a vulnerability"],
+    "impact": "griefing",
+    "likelihood": "common",
+    "belief_score": 0.01
+  },
+  {
+    "id": "hyp-settle-012",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "RevealMarket._finalizeSettlement: LiabilityExceedsCoverage check uses protocolLiabilityCap from storage which can differ from ProtocolPool's liabilityCap -> Coverage gap",
+    "locations": ["RevealMarket._finalizeSettlement", "ProtocolPool.draw"],
+    "root_cause": "In _finalizeSettlement, line 723 checks `required > totalEscrow_ + protocolLiabilityCap`. The `protocolLiabilityCap` is the market's own stored value. When `draw()` is called on the ProtocolPool (line 729), the pool checks `newConsumed > liabilityCap[market]` (ProtocolPool line 158). If the factory owner updated the pool's cap (via `ProtocolPool.updateLiabilityCap`) to be lower than the market's `protocolLiabilityCap` after locking, the market's check at line 723 would pass but the pool's draw at line 729 would revert with `CapExceeded`. This would cause settlement to revert, creating a DoS. However, `updateProtocolLiabilityCap` in MarketFactory (line 341-346) updates BOTH the market and the pool simultaneously. Direct pool cap manipulation would require the pool owner (which is the same entity as the factory deployer). This is a trusted-admin scenario.",
+    "trigger_scenario": [
+      "Step 1: Market initialized with protocolLiabilityCap = 100 ETH. Pool registered with same cap.",
+      "Step 2: Market collects commitments and is locked.",
+      "Step 3: Pool owner directly calls protocolPool.updateLiabilityCap(market, 10 ETH) -- but this requires the factory role, not direct pool owner access.",
+      "Step 4: Settlement tries to draw 50 ETH deficit. Market's check passes (50 <= totalEscrow + 100). Pool's check fails (50 > 10).",
+      "Step 5: Settlement reverts. Market stuck in Locked phase."
+    ],
+    "preconditions": ["Factory owner must maliciously reduce pool cap after lock", "Factory owner must bypass the MarketFactory.updateProtocolLiabilityCap which syncs both"],
+    "impact": "dos",
+    "likelihood": "malicious_action",
+    "belief_score": 0.10
+  },
+  {
+    "id": "hyp-settle-013",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "RevealMarket.verifyAndSettleBatched: Multi-tx batch accumulation allows oracle to settle batches in separate transactions, each verified independently -> Accumulated sums bypass per-batch economic checks",
+    "locations": ["RevealMarket._verifyBatchProof", "RevealMarket.verifyAndSettleBatched"],
+    "root_cause": "verifyAndSettleBatched can be called multiple times before all batches are settled. Each call accumulates settledEscrowSum, settledLiabilitySum, etc. The final check `settledEscrowSum != totalEscrow` only happens when `settledBatchCount == batchCount` (lines 438-440). Between calls, the accumulated sums are in intermediate states. There is no per-batch escrow validation -- the contract doesn't know how much escrow each batch should contribute. The only constraint is that the ZK proof is valid for each batch's Merkle root. If the ZK circuit allows a batch to claim more escrow than it actually has (e.g., by manipulating the totalEscrow signal for a batch), intermediate accumulation could allow one batch to subsidize another. The aggregate check catches any discrepancy, but per-batch sums are not individually validated.",
+    "trigger_scenario": [
+      "Step 1: Market has 2 batches. Batch 0 has 256 tickets with 1 ETH net each (256 ETH escrow). Batch 1 has 1 ticket with 1 ETH net (1 ETH escrow). Total escrow = 257 ETH.",
+      "Step 2: Oracle submits proof for batch 0 with signals[3] = 257 ETH (claiming all escrow for batch 0).",
+      "Step 3: Oracle submits proof for batch 1 with signals[3] = 0 ETH.",
+      "Step 4: settledEscrowSum = 257 + 0 = 257 = totalEscrow. Check passes.",
+      "Step 5: The liability and pool distributions could be skewed between batches.",
+      "Step 6: If circuit properly constrains per-batch values, this attack is impossible."
+    ],
+    "preconditions": ["ZK circuit must not properly constrain per-batch escrow to match the batch's actual ticket count * net ticket value"],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.15
+  },
+  {
+    "id": "hyp-settle-014",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "RevealMarket.lockBatches: Relayer signature validation uses RelayerEscrow owner which can change -> Signature from old owner still valid if owner hasn't changed",
+    "locations": ["RevealMarket.lockBatches"],
+    "root_cause": "lockBatches (line 342) reads the current `RelayerEscrow(payable(relayerEscrow)).owner()` to validate the relayer signature. RelayerEscrow inherits Ownable2Step, so ownership transfers require a two-step process. If the relayer owner is transferred between when the signature was obtained and when lockBatches is called, the signature would be invalid (signed by old owner, validated against new owner). This is a standard operational concern, not a vulnerability -- the oracle would simply need to get a new signature from the new owner. Conversely, if an attacker obtains a signature from the current owner and ownership is NOT transferred, the signature remains valid indefinitely (no expiry in the signed data). However, the signed data includes the specific roots and counts, so it's only valid for that exact batch decomposition.",
+    "trigger_scenario": [
+      "Step 1: Relayer owner signs roots/counts for a market.",
+      "Step 2: Before oracle calls lockBatches, relayer ownership is transferred via Ownable2Step.",
+      "Step 3: lockBatches validates signature against new owner. Signature check fails with InvalidRelayerSignature.",
+      "Step 4: Oracle must obtain a new signature from the new owner."
+    ],
+    "preconditions": ["Relayer ownership must be transferred between signature creation and lockBatches call"],
+    "impact": "dos",
+    "likelihood": "internal_state",
+    "belief_score": 0.20
+  },
+  {
+    "id": "hyp-settle-015",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "RevealMarket._finalizeSettlement: SettlementInvariantMismatch check only validates poolYes + poolNo == totalLiability, not that totalLiability <= totalEscrow + protocolLiabilityCap for batched path -> Potential over-liability",
+    "locations": ["RevealMarket._finalizeSettlement"],
+    "root_cause": "In _finalizeSettlement (lines 713-752), the function checks: (1) poolYes + poolNo == totalLiability (line 716), (2) totalLiability <= totalEscrow + protocolLiabilityCap (line 723), (3) draws deficit from pool if needed (lines 726-729), (4) re-verifies balance is sufficient (line 732). For the batched path, totalEscrow_ is settledEscrowSum and totalLiability_ is settledLiabilitySum (line 440). The check at line 723 ensures the protocol can cover the liability. If settledLiabilitySum > settledEscrowSum, a deficit draw occurs. The draw amount is `required - balance` where balance includes the market's existing tokens. If the market's balance already covers totalLiability (because escrow was deposited), no draw occurs, and surplus is forwarded. The coverage check is sound: it ensures totalLiability is bounded by totalEscrow + cap, and that actual token balance covers totalLiability after any draw.",
+    "trigger_scenario": [
+      "Step 1: Market has totalEscrow = 100 ETH, protocolLiabilityCap = 50 ETH.",
+      "Step 2: ZK proofs show totalLiability = 140 ETH (lots of winning bets, leveraged by protocol pool).",
+      "Step 3: required = 140. balance = 100 (market only has escrow). 140 > 100, deficit = 40.",
+      "Step 4: 140 <= 100 + 50, so LiabilityExceedsCoverage check passes.",
+      "Step 5: Pool draw of 40 ETH. New balance = 140. required = 140 <= 140. InsufficientCoverage check passes.",
+      "Step 6: surplus = 140 - 140 = 0. Settlement finalizes correctly."
+    ],
+    "preconditions": ["Normal operation with pool coverage"],
+    "impact": "fund_loss",
+    "likelihood": "common",
+    "belief_score": 0.03
+  },
+  {
+    "id": "hyp-settle-016",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "MarketFactory.isVerifierCurrentlyApproved: Verifier key rotation between lock and settle could be detected and blocked, but refreshLockedVerifierKeyHash provides an escape hatch -> Key rotation safety",
+    "locations": ["RevealMarket.verifyAndSettle", "RevealMarket.verifyAndSettleBatched", "RevealMarket.refreshLockedVerifierKeyHash", "MarketFactory.isVerifierCurrentlyApproved"],
+    "root_cause": "Both verifyAndSettle (line 401) and verifyAndSettleBatched (line 427) check `IVerifier(verifier).verifyingKeyHash() != lockedVerifierKeyHash`. If the verifier owner rotates the key between lock and settle, this check fails. The factory provides `refreshMarketLockedVerifierKey` (MarketFactory line 317-323) which calls `market.refreshLockedVerifierKeyHash()` (RevealMarket line 678-683). However, refreshLockedVerifierKeyHash at line 682 ALSO checks `verifyingKeyHash() != lockedVerifierKeyHash` -- it reverts if they differ! This means `refreshLockedVerifierKeyHash` can only succeed when the key HASN'T changed (it's a no-op assertion). The factory's _validateVerifier also checks `verifyingKeyHash() != approvedVerifierKeyHash[verifier]` (MarketFactory line 530), which pins to the originally approved key hash. So if the verifier key is rotated, both settlement and refresh will fail, effectively bricking the market until the key is rotated BACK to the original. This is safe behavior -- it prevents settlement with unauthorized keys.",
+    "trigger_scenario": [
+      "Step 1: Market is locked with lockedVerifierKeyHash = H1.",
+      "Step 2: Verifier owner rotates the verifying key. New verifyingKeyHash = H2.",
+      "Step 3: Oracle tries to settle. verifyingKeyHash() (H2) != lockedVerifierKeyHash (H1). Reverts with VerifierKeyMismatch.",
+      "Step 4: Factory owner tries to refresh: refreshLockedVerifierKeyHash also checks H2 != H1. Reverts with VerifierKeyMismatch.",
+      "Step 5: Factory owner also cannot re-approve the verifier because pinnedVerifierKeyHash != new keyHash. Reverts with VerifierDrift.",
+      "Step 6: Market is stuck in Locked phase until SETTLEMENT_TIMEOUT_SECONDS passes and enableRefunds is called."
+    ],
+    "preconditions": ["Verifier owner rotates the key after a market is locked"],
+    "impact": "dos",
+    "likelihood": "internal_state",
+    "belief_score": 0.45
+  },
+  {
+    "id": "hyp-settle-017",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "RevealMarket.lockBatches: lockBatches can only be called once due to phase transition -> No epoch abuse",
+    "locations": ["RevealMarket.lockBatches"],
+    "root_cause": "lockBatches requires `phase == Phase.Commit` (line 329) and sets `phase = Phase.Locked` at line 376. Once locked, phase can only transition to Settled (via settlement) or Cancelled (via enableRefunds). There is no path back to Commit. Therefore, lockBatches is a one-time operation per market lifecycle. The `currentBatchProofEpoch` increment at line 366 and the reset of settled accumulators (lines 367-371) are single-use. The epoch mechanism appears designed for a scenario where lockBatches could be called multiple times, but the current state machine prevents this. This means epoch-based replay prevention is defense-in-depth but not strictly necessary given the phase check.",
+    "trigger_scenario": [
+      "Step 1: Market in Commit phase. Oracle calls lockBatches. Phase becomes Locked. currentBatchProofEpoch = 1.",
+      "Step 2: Attacker tries to call lockBatches again. phase == Locked != Commit. Reverts with InvalidPhase.",
+      "Step 3: No second lock is possible."
+    ],
+    "preconditions": ["None"],
+    "impact": "griefing",
+    "likelihood": "common",
+    "belief_score": 0.01
+  },
+  {
+    "id": "hyp-settle-018",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "ProtocolPool.reserveLiability: Reservation can lock up pool liquidity for up to SETTLEMENT_TIMEOUT_SECONDS + processing time -> LP liquidity DoS",
+    "locations": ["ProtocolPool.reserveLiability", "ProtocolPool.releaseLiabilityReservation", "RevealMarket.lockBatches", "RevealMarket._finalizeSettlement"],
+    "root_cause": "When lockBatches calls `protocolPool.reserveLiability(address(this), protocolLiabilityCap)` (RevealMarket line 373), the pool's `reservedTotal` increases by `protocolLiabilityCap`. This reduces available idle liquidity for LP withdrawals (`idle = balance - reservedTotal` in ProtocolPool line 253). The reservation is released in `_finalizeSettlement` (line 749) or `enableRefunds` (line 492). If settlement takes the full SETTLEMENT_TIMEOUT_SECONDS (14 days) before refunds are enabled, LP funds are locked for that duration plus the LOCK_DURATION. If many markets are locked simultaneously, all their reservations stack, potentially locking all pool liquidity. This is by design but could griefing LPs who want to withdraw.",
+    "trigger_scenario": [
+      "Step 1: Pool has 1000 ETH from LPs.",
+      "Step 2: 10 markets are created, each with protocolLiabilityCap = 100 ETH.",
+      "Step 3: All 10 markets are locked. reservedTotal = 1000 ETH.",
+      "Step 4: idle = 1000 - 1000 = 0. LPs cannot withdraw.",
+      "Step 5: Markets take 14 days to settle or timeout. LPs are locked out for that period."
+    ],
+    "preconditions": ["Multiple markets locked simultaneously", "Combined protocolLiabilityCap >= pool balance"],
+    "impact": "dos",
+    "likelihood": "internal_state",
+    "belief_score": 0.40
+  },
+  {
+    "id": "hyp-settle-019",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "RevealMarket._finalizeSettlement: Required == 0 when totalLiability is zero -> Settlement with no liability distributes all balance as surplus to protocolPool",
+    "locations": ["RevealMarket._finalizeSettlement"],
+    "root_cause": "If the ZK proof demonstrates that totalLiability = 0 (e.g., all bets are on the losing side, no winners), then required = 0. No deficit draw occurs. surplus = tokenBalance - 0 = tokenBalance (all escrow + rake). The entire market balance is sent to protocolPool. This is correct behavior -- if nobody wins, all funds go to the protocol. The poolYes + poolNo == 0 invariant would need to hold (line 716). This means both poolYes and poolNo are 0. The winning outcome's pool could be 0 if no one bet on it, which is valid.",
+    "trigger_scenario": [
+      "Step 1: Market with 100 tickets all on outcome 1. Outcome 0 wins.",
+      "Step 2: ZK proof shows totalLiability = 0, poolYes = 0, poolNo = 0.",
+      "Step 3: Settlement: required = 0, surplus = entire balance. All sent to protocolPool.",
+      "Step 4: No claims possible (totalLiability = 0, so any claim would fail OverClaimed)."
+    ],
+    "preconditions": ["All bets on the losing side"],
+    "impact": "unfair_treatment",
+    "likelihood": "common",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-settle-020",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "Verifier.verifyProof: Signal value >= SNARK_SCALAR_FIELD returns false without revert -> Malformed signals silently rejected",
+    "locations": ["Verifier.verifyProof"],
+    "root_cause": "In verifyProof (lines 106-110 of Verifier.sol), if any public signal is >= SNARK_SCALAR_FIELD, the function returns false without reverting. RevealMarket then reverts with InvalidProof. An attacker cannot exploit this to bypass verification because the false return triggers a revert upstream. However, there is a subtle concern: the on-chain signal checks in RevealMarket (e.g., signals[0] == batchRoots[batchIndex]) happen BEFORE the verifier call. If a signal value >= SNARK_SCALAR_FIELD happens to pass those checks due to wrapping or type casting, the verifier would return false and settlement would fail. Since batchRoots are bytes32 (full 256-bit), a value >= SNARK_SCALAR_FIELD could match a batch root. But the ZK proof would be invalid for such a value, so the verifier correctly rejects it.",
+    "trigger_scenario": [
+      "Step 1: Oracle locks batch roots including a root value >= SNARK_SCALAR_FIELD.",
+      "Step 2: Oracle constructs signals with signals[0] = that root value.",
+      "Step 3: On-chain check signals[0] == batchRoots[i] passes.",
+      "Step 4: Verifier checks signal >= SNARK_SCALAR_FIELD, returns false.",
+      "Step 5: RevealMarket reverts with InvalidProof. Settlement blocked."
+    ],
+    "preconditions": ["Batch root hash value >= SNARK_SCALAR_FIELD (probability ~18.5% for random hash)"],
+    "impact": "dos",
+    "likelihood": "internal_state",
+    "belief_score": 0.50
+  },
+  {
+    "id": "hyp-settle-021",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "RevealMarket.lockBatches: Poseidon Merkle root as bytes32 may exceed SNARK_SCALAR_FIELD -> Unsettleable market",
+    "locations": ["RevealMarket.lockBatches", "Verifier.verifyProof"],
+    "root_cause": "Batch roots are stored as bytes32 values and compared to signals[0] as uint256 in _verifyBatchProof (line 831: `signals[0] != uint256(batchRoots[batchIndex])`). The Verifier checks `signal >= SNARK_SCALAR_FIELD` and returns false if any signal exceeds the field. The SNARK_SCALAR_FIELD is approximately 2^254, so about 6.25% of the uint256 space exceeds it. However, Poseidon hash outputs are inherently within the BN254 scalar field because Poseidon operates over that field. So Poseidon-based Merkle roots should always be < SNARK_SCALAR_FIELD. The risk only exists if the off-chain computation produces incorrect roots or if a non-Poseidon hash is used. The contract does not validate that roots are < SNARK_SCALAR_FIELD in lockBatches.",
+    "trigger_scenario": [
+      "Step 1: Off-chain root computation has a bug producing a root >= SNARK_SCALAR_FIELD.",
+      "Step 2: Oracle calls lockBatches with this root. No on-chain validation of root range.",
+      "Step 3: Oracle attempts settlement with signals[0] = root value.",
+      "Step 4: Verifier rejects because signal >= SNARK_SCALAR_FIELD. Returns false.",
+      "Step 5: Market is unsettleable. Must wait for SETTLEMENT_TIMEOUT_SECONDS and use enableRefunds."
+    ],
+    "preconditions": ["Off-chain Merkle root computation bug producing out-of-field values"],
+    "impact": "dos",
+    "likelihood": "external_dependency",
+    "belief_score": 0.25
+  },
+  {
+    "id": "hyp-settle-022",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "ProtocolPool.draw: Draw during settlement decrements reservedLiability but does not fully release reservation -> Remaining reservation released in _finalizeSettlement",
+    "locations": ["ProtocolPool.draw", "RevealMarket._finalizeSettlement"],
+    "root_cause": "When _finalizeSettlement calls `protocolPool.draw(address(this), deficit)` (RevealMarket line 729), ProtocolPool.draw (line 159-162) checks if the market has a reservation. If it does, the draw amount must be <= reserved amount. The draw reduces `reservedLiability[market]` by the draw amount and `reservedTotal` by the same. After the draw, _finalizeSettlement calls `_releaseLiabilityReservation()` (line 749), which releases any remaining reservation. So the flow is: reserve(full cap) -> draw(deficit) -> release(remaining). If deficit < protocolLiabilityCap, the remaining reservation is released correctly. If deficit == protocolLiabilityCap, the draw consumes the entire reservation, and release is a no-op. If deficit > protocolLiabilityCap, the draw reverts with ReservationExceeded. But _finalizeSettlement already checks `required > totalEscrow_ + protocolLiabilityCap` (line 723), so deficit = required - balance <= protocolLiabilityCap. This is consistent.",
+    "trigger_scenario": [
+      "Step 1: Market has protocolLiabilityCap = 100 ETH. reservedLiability[market] = 100 after lock.",
+      "Step 2: Settlement: totalLiability = 150, totalEscrow = 80. Balance = 80. Deficit = 70.",
+      "Step 3: Check: 150 > 80 + 100? No (150 <= 180). Passes.",
+      "Step 4: draw(70). reserved = 100. 70 <= 100. Reserved becomes 30. Total drawn = 70.",
+      "Step 5: releaseLiabilityReservation. Reserved 30 released. reservedTotal decremented.",
+      "Step 6: Correct: pool consumed 70, released 30 of 100 reservation."
+    ],
+    "preconditions": ["Normal settlement with pool deficit"],
+    "impact": "fund_loss",
+    "likelihood": "common",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-settle-023",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "RevealMarket._finalizeSettlement: Balance check at line 732 uses totalLiability required but does not account for surplus transfer destination -> Surplus transfer to protocolPool at line 738 could fail if protocolPool is market itself",
+    "locations": ["RevealMarket._finalizeSettlement"],
+    "root_cause": "After the deficit draw and coverage recheck, _finalizeSettlement transfers surplus to `protocolPool` (line 738). If `protocolPool` were set to `address(this)` (the market itself), the transfer would be a self-transfer. The _safeTransferExact function checks that the sender's balance decreases and the recipient's balance increases by the transfer amount. For a self-transfer, sender and recipient are the same address, so sender balance before - after != amount (it would be 0). This would revert with FeeOnTransferNotSupported. However, setting protocolPool to the market address is impossible because: (1) it's set during initialize, where the factory creates the market, and (2) setProtocolPool requires phase == Commit and commitments.length == 0. The factory validates pool addresses. So this scenario is unreachable.",
+    "trigger_scenario": [
+      "Step 1: Hypothetically, protocolPool = address(market).",
+      "Step 2: Settlement computes surplus > 0.",
+      "Step 3: _safeTransferExact(address(this), surplus) is a self-transfer.",
+      "Step 4: senderBalanceBefore - senderBalanceAfter = 0 != surplus. Reverts.",
+      "Step 5: Settlement fails."
+    ],
+    "preconditions": ["protocolPool must be set to the market's own address -- impossible via normal factory flow"],
+    "impact": "dos",
+    "likelihood": "malicious_action",
+    "belief_score": 0.01
+  },
+  {
+    "id": "hyp-settle-024",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "RevealMarket.verifyAndSettleBatched: Oracle can submit batches in any order and across multiple transactions -> Non-sequential batch verification is safe",
+    "locations": ["RevealMarket.verifyAndSettleBatched", "RevealMarket._verifyBatchProof"],
+    "root_cause": "verifyAndSettleBatched accepts arbitrary batchIndexes (line 421). There's no requirement for sequential ordering. Batches can be submitted in any order (e.g., [2, 0, 1]) and across multiple transactions (e.g., first call proves batch 0, second call proves batches 1 and 2). Each batch is independently verified via _verifyBatchProof. The epoch-based double-submit prevention (line 830) ensures each batch is proven exactly once per epoch. The accumulation of settledEscrowSum etc. is additive and order-independent. The final check at line 438-439 triggers only when all batches are complete. This design is sound and allows flexible oracle operation.",
+    "trigger_scenario": [
+      "Step 1: Market has 3 batches (0, 1, 2).",
+      "Step 2: Oracle submits proof for batch 2 first. settledBatchCount = 1.",
+      "Step 3: Oracle submits proofs for batches 0 and 1 together. settledBatchCount = 3 = batchCount.",
+      "Step 4: settledEscrowSum == totalEscrow check passes. _finalizeSettlement called.",
+      "Step 5: Settlement succeeds regardless of submission order."
+    ],
+    "preconditions": ["None"],
+    "impact": "griefing",
+    "likelihood": "common",
+    "belief_score": 0.01
+  },
+  {
+    "id": "hyp-settle-025",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "Pairing.pairing: bn128 pairing precompile returns 0 for invalid points not caught by input validation -> False verification result",
+    "locations": ["Pairing.pairing", "Pairing.pairingProd4", "Verifier._pairingCheck"],
+    "root_cause": "The Pairing library calls precompile 0x08 (bn128 pairing) via staticcall. The precompile performs input validation and returns 0x00 (false) for invalid inputs or reverts on malformed input. The Verifier validates G1 and G2 points before calling the pairing (lines 101-103 of Verifier.sol). Point validation uses the scalar multiplication and pairing precompiles themselves (Pairing.isValidG1Point/isValidG2Point). If a proof contains a point at infinity (0,0), _validateG1Point returns early without validation (line 212-214). The point at infinity is valid in BN254 and represents the identity element. Including it in the pairing check would produce a trivially valid or invalid result depending on position. The proof point A is negated in _pairingCheck (line 233: `Pairing.negate(proof.A)`), and if A is the identity, -A is also the identity, which could weaken the pairing equation. However, generating a valid Groth16 proof with A = O (point at infinity) would require knowledge of the trapdoor (toxic waste). This is computationally infeasible under the discrete log assumption.",
+    "trigger_scenario": [
+      "Step 1: Attacker crafts a proof where A = (0, 0) (point at infinity).",
+      "Step 2: Verifier._validateG1Point returns early for (0,0) without on-curve check.",
+      "Step 3: Pairing equation becomes: e(O, B) * e(alpha, beta) * e(vkx, gamma) * e(C, delta) = 1.",
+      "Step 4: e(O, B) = 1 (identity), so equation reduces to e(alpha, beta) * e(vkx, gamma) * e(C, delta) = 1.",
+      "Step 5: Attacker needs to find C such that e(C, delta) = 1 / (e(alpha, beta) * e(vkx, gamma)).",
+      "Step 6: This requires solving the discrete log problem on BN254 -- computationally infeasible."
+    ],
+    "preconditions": ["Attacker must break BN254 discrete log assumption"],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.01
+  },
+  {
+    "id": "hyp-settle-026",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "RevealMarket.lockBatches: No check that commitments.length <= MAX_COMMITMENTS_LIMIT during lock -> Gas griefing in batch validation loop",
+    "locations": ["RevealMarket.lockBatches"],
+    "root_cause": "lockBatches iterates over the counts array (line 348-355) to validate batch sizes. The maximum number of batches is MAX_LOCK_BATCH_COUNT = 64, and each batch has at most BATCH_SIZE = 256 tickets. So maxCommitments = 64 * 256 = 16384. The commitWithAuthorization function already caps at `maxCommitments` (line 285). The loop in lockBatches is over `counts.length` which equals the number of batches (at most 64). This is bounded and gas-safe. The second loop (lines 360-363) also iterates over roots.length (at most 64). No gas griefing vector exists.",
+    "trigger_scenario": [
+      "Step 1: Market with maxCommitments = 16384. All 16384 tickets committed.",
+      "Step 2: lockBatches called with 64 batches. Loop iterates 64 times for validation, 64 times for storage.",
+      "Step 3: Total gas is bounded: 64 iterations * (SSTORE + array push) ~ manageable within block gas limit."
+    ],
+    "preconditions": ["Maximum commitments used"],
+    "impact": "dos",
+    "likelihood": "common",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-settle-027",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "RevealMarket._finalizeSettlement: rakeAmount set to rakeCollected but rake tokens already in market balance -> Double-counting risk in external accounting",
+    "locations": ["RevealMarket._finalizeSettlement"],
+    "root_cause": "At line 721, `rakeAmount = rakeCollected`. The rake was collected during commitWithAuthorization (lines 312-315): `rake = (ticketSize * rakeBps) / 10_000`, `totalEscrow += net` (where net = ticketSize - rake), `rakeCollected += rake`. The market's token balance = sum(ticketSize) = totalEscrow + rakeCollected. During settlement, `required = totalLiability`. If totalLiability < totalEscrow, the surplus includes both the unused escrow and the rake, all forwarded to protocolPool. The `rakeAmount` is set for off-chain accounting (emitted in the Settled event) but is not used in any on-chain calculation. There is no double-counting on-chain -- the surplus calculation at line 736 operates on actual token balances.",
+    "trigger_scenario": [
+      "Step 1: 100 tickets at 1 ETH, 2% rake. totalEscrow = 98 ETH, rakeCollected = 2 ETH, balance = 100 ETH.",
+      "Step 2: totalLiability = 50 ETH. required = 50.",
+      "Step 3: surplus = 100 - 50 = 50 ETH (includes 2 ETH rake).",
+      "Step 4: 50 ETH sent to protocolPool. Market retains 50 ETH for claims.",
+      "Step 5: rakeAmount emitted as 2 ETH in event. Off-chain systems can track this correctly."
+    ],
+    "preconditions": ["Normal operation"],
+    "impact": "unfair_treatment",
+    "likelihood": "common",
+    "belief_score": 0.03
+  },
+  {
+    "id": "hyp-settle-028",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "RevealMarket.verifyAndSettle: Single-batch path checks signals[3] != totalEscrow directly but does NOT check signals[4] (totalLiability) against any on-chain value -> Circuit is sole enforcer of liability correctness",
+    "locations": ["RevealMarket.verifyAndSettle"],
+    "root_cause": "In verifyAndSettle (lines 403-409), the code checks: signals[0] == batchRoots[0], signals[1] == marketId, signals[2] == winningOutcomeId, signals[3] == totalEscrow, signals[5] == rakeBps, signals[8] == circuitHash, signals[9] == 0. Notably, signals[4] (totalLiability), signals[6] (poolYes), and signals[7] (poolNo) are NOT checked against any on-chain values. They are passed directly to _finalizeSettlement which only checks poolYes + poolNo == totalLiability (line 716) and totalLiability <= totalEscrow + protocolLiabilityCap (line 723). The correctness of these values relies entirely on the ZK circuit. If the circuit is sound, these values are proven correct. If the circuit has a bug allowing arbitrary liability, the market could settle with inflated totalLiability, drawing from the protocol pool unnecessarily. This is a fundamental trust assumption of ZK-verified settlement.",
+    "trigger_scenario": [
+      "Step 1: Market has totalEscrow = 100 ETH, protocolLiabilityCap = 500 ETH.",
+      "Step 2: Honest circuit would compute totalLiability = 80 ETH.",
+      "Step 3: Buggy circuit allows oracle to prove totalLiability = 500 ETH.",
+      "Step 4: signals[3] = 100 (matches totalEscrow, passes check). signals[4] = 500. signals[6] = 500, signals[7] = 0.",
+      "Step 5: poolYes + poolNo = 500 == totalLiability. Passes invariant.",
+      "Step 6: 500 <= 100 + 500. Passes coverage check.",
+      "Step 7: deficit = 500 - 100 = 400. Drawn from pool. Market now has 500 ETH for claims.",
+      "Step 8: Attacker claims 500 ETH worth of fake winning tickets. Protocol pool loses 400 ETH."
+    ],
+    "preconditions": ["ZK circuit must have a soundness bug allowing arbitrary totalLiability values to pass proof verification"],
+    "impact": "protocol_insolvency",
+    "likelihood": "external_dependency",
+    "belief_score": 0.15
+  },
+  {
+    "id": "hyp-settle-029",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "RevealMarket.lockBatches: commitmentsRoot set to bytes32(0) for multi-batch markets -> Claim _verifyLeaf uses batchRoots not commitmentsRoot",
+    "locations": ["RevealMarket.lockBatches", "RevealMarket._verifyLeaf"],
+    "root_cause": "At line 375, `commitmentsRoot = roots.length == 1 ? roots[0] : bytes32(0)`. For multi-batch markets, commitmentsRoot is zeroed. The claim verification in _verifyLeaf (lines 876-898) uses `batchRoots[batchIndex]` (line 897), not `commitmentsRoot`. So the zeroed commitmentsRoot does not affect claim verification. The commitmentsRoot is used in the `marketState()` view function (line 611) for off-chain polling. Setting it to zero for multi-batch markets could confuse off-chain indexers but has no on-chain security impact.",
+    "trigger_scenario": [
+      "Step 1: Multi-batch market (257 tickets, 2 batches) is locked.",
+      "Step 2: commitmentsRoot = bytes32(0).",
+      "Step 3: User claims ticket 0 with Merkle proof against batchRoots[0]. Verification uses batchRoots[0], not commitmentsRoot.",
+      "Step 4: Claim succeeds correctly."
+    ],
+    "preconditions": ["Multi-batch market"],
+    "impact": "griefing",
+    "likelihood": "common",
+    "belief_score": 0.01
+  },
+  {
+    "id": "hyp-settle-030",
+    "job_id": "audit-revealmarket",
+    "agent": "SettlementAuditor",
+    "title": "ProtocolPool.reserveLiability: Market calls reserveLiability with its own address as the market parameter -> Self-authorization check may have edge case",
+    "locations": ["ProtocolPool.reserveLiability", "RevealMarket.lockBatches"],
+    "root_cause": "RevealMarket.lockBatches calls `IProtocolPool(protocolPool).reserveLiability(address(this), protocolLiabilityCap)` at line 373. In ProtocolPool.reserveLiability (line 113-129), the check is `!allowedMarket[msg.sender] || msg.sender != market`. Since RevealMarket passes `address(this)` as the market parameter, and msg.sender IS the market, the check becomes `!allowedMarket[marketAddress] || marketAddress != marketAddress`. The second condition is always false (address == itself). So the check reduces to `!allowedMarket[marketAddress]`. If the market was registered by the factory (which happens during createMarket at MarketFactory line 472), `allowedMarket[market] = true`. So the check passes. This is correct -- only registered markets can reserve liability, and they can only reserve for themselves.",
+    "trigger_scenario": [
+      "Step 1: Factory creates market and registers it with protocolPool.",
+      "Step 2: Oracle calls market.lockBatches().",
+      "Step 3: Market calls protocolPool.reserveLiability(address(this), cap).",
+      "Step 4: msg.sender = market address. market parameter = market address. allowedMarket[market] = true.",
+      "Step 5: Check passes. Reservation made."
+    ],
+    "preconditions": ["Market must be registered via factory"],
+    "impact": "fund_loss",
+    "likelihood": "common",
+    "belief_score": 0.01
+  }
+]

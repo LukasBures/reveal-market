@@ -1,0 +1,1018 @@
+[
+  {
+    "id": "alpha-H001",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "ALPHA",
+    "title": "RevealMarket.commitWithAuthorization global ticketId binding enables relayer-ordering censorship of pre-approved commits",
+    "locations": [
+      "RelayerEscrow.approveCommitAuthorization",
+      "RelayerEscrow._commitAuthorizationHash",
+      "RevealMarket.commitWithAuthorization",
+      "RelayerEscrow.commitOnBehalf"
+    ],
+    "root_cause": "The authorization object is bound to an exact `ticketId`, while `ticketId` is a single global queue (`commitments.length`) that can change between approval and execution. Because only `RelayerEscrow.owner()` can execute `commitOnBehalf`, the relayer fully controls sequencing and can invalidate previously approved authorizations by inserting other commits first.",
+    "trigger_scenario": [
+      "Two users obtain backend-signed commit authorizations that both target the current next ticket id.",
+      "Both users call `approveCommitAuthorization`, storing hashes that include that specific ticket id.",
+      "Relayer owner executes one commit first via `commitOnBehalf`, incrementing `commitments.length` in `RevealMarket`.",
+      "The second user's authorized payload now fails `auth.ticketId == commitments.length` in `commitWithAuthorization` with `TicketIndexMismatch`.",
+      "By repeatedly choosing ordering (or withholding execution) the relayer can force selected users to re-sign/re-approve until the commit window closes."
+    ],
+    "preconditions": [
+      "Commit execution is centralized through `RelayerEscrow.commitOnBehalf` (`onlyOwner`).",
+      "Authorizations are pre-signed for a concrete `ticketId` before on-chain execution.",
+      "There is contention or intentional ordering manipulation before `commitDeadline`."
+    ],
+    "impact": "unfair_treatment",
+    "likelihood": "malicious_action",
+    "belief_score": 0.84
+  },
+  {
+    "id": "alpha-H002",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "ALPHA",
+    "title": "RelayerEscrow.approveCommitAuthorization creates non-revocable approvals that relayer owner can execute at arbitrary later times",
+    "locations": [
+      "RelayerEscrow.approveCommitAuthorization",
+      "RelayerEscrow.commitOnBehalf"
+    ],
+    "root_cause": "Approved commit authorizations are stored as a persistent boolean and there is no user-side revoke/cancel path. Execution timing is entirely delegated to `onlyOwner` `commitOnBehalf`, so approvals stay live until consumed (or naturally expired in market checks), even if user intent changes.",
+    "trigger_scenario": [
+      "User approves a commit authorization with a long `expiry` via `approveCommitAuthorization`.",
+      "Relayer does not execute immediately and the approval remains `true` in `approvedCommitAuthorizations`.",
+      "User later changes intent but cannot revoke that authorization on-chain.",
+      "At any later point before expiry, relayer owner executes `commitOnBehalf` once user balance is sufficient.",
+      "User is forced into a commitment at relayer-chosen timing without a fresh consent transaction."
+    ],
+    "preconditions": [
+      "A valid approval exists for `(user, authHash)` and has not been consumed.",
+      "`auth.expiry` has not elapsed when execution is attempted.",
+      "Relayer owner behaves adversarially or is compromised."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.76
+  },
+  {
+    "id": "alpha-H003",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "ALPHA",
+    "title": "RelayerEscrow._safeTransferExact and RevealMarket.commitWithAuthorization trust token-reported balances, enabling phantom collateral if token is adversarial",
+    "locations": [
+      "RelayerEscrow._safeTransferExact",
+      "RelayerEscrow.commitOnBehalf",
+      "RevealMarket.commitWithAuthorization"
+    ],
+    "root_cause": "Collateral movement and backing checks are validated only via `IERC20.balanceOf` deltas from the same external token contract being checked. If the token is upgradeable/non-standard and can lie about balances, `_safeTransferExact` and market backing predicates can be satisfied without an economically equivalent transfer.",
+    "trigger_scenario": [
+      "Collateral token implementation is upgraded or deployed with adversarial `balanceOf` semantics.",
+      "`commitOnBehalf` calls `_safeTransferExact`, and token reports sender/recipient deltas consistent with an exact transfer even when real spendable balances did not move equivalently.",
+      "`commitWithAuthorization` passes `balanceOf(address(this)) >= totalEscrow + ticketSize` using the same manipulated view.",
+      "Escrow debits user accounting and market records commitment/rake based on assumed payment.",
+      "At settlement/claim time, liabilities are under-backed in real token terms, leading to insolvency or payout failure."
+    ],
+    "preconditions": [
+      "Collateral token is non-standard, malicious, or mutable (e.g., upgradeable) and can return deceptive balances.",
+      "Protocol relies exclusively on token-reported balances for transfer correctness and payment backing.",
+      "Commits continue under this token behavior before detection."
+    ],
+    "impact": "protocol_insolvency",
+    "likelihood": "external_dependency",
+    "belief_score": 0.58
+  },
+  {
+    "id": "beta-4eba4075-cf51-4772-a836-183d625a6690",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "BETA",
+    "title": "RevealMarket.extendCommitDeadline: Missing expiry guard allows reopening commits after deadline, enabling late-position insertion before lock",
+    "locations": [
+      "RevealMarket.extendCommitDeadline",
+      "RevealMarket.commitWithAuthorization",
+      "RevealMarket.lockBatches",
+      "MarketFactory.extendMarketCommitDeadline"
+    ],
+    "root_cause": "extendCommitDeadline() only checks monotonic increase and one-shot/max-range constraints, but never requires block.timestamp <= commitDeadline. Because commitWithAuthorization() gates on the mutable commitDeadline value, a factory owner can extend after the original deadline has already passed and reopen the commit window.",
+    "trigger_scenario": [
+      "Users submit commitments until the original commitDeadline and stop because commit window appears closed.",
+      "Original deadline passes, but oracle has not yet called lockBatches().",
+      "Factory owner calls extendMarketCommitDeadline(), which forwards to RevealMarket.extendCommitDeadline() and sets a new future deadline without checking that the previous deadline already expired.",
+      "Relayer resumes commitWithAuthorization() calls because block.timestamp is now below the new commitDeadline.",
+      "Oracle can no longer lock immediately since lockBatches() now requires waiting for the extended deadline.",
+      "Late commitments are inserted with more information than earlier participants had, breaking market fairness and deadline finality assumptions."
+    ],
+    "preconditions": [
+      "Market is still in Phase.Commit (not yet locked).",
+      "Original commit deadline has elapsed, and factory owner is willing to extend once.",
+      "Relayer continues accepting commits after extension."
+    ],
+    "impact": "unfair_treatment",
+    "likelihood": "malicious_action",
+    "belief_score": 0.86,
+    "description": null,
+    "category": null,
+    "severity": "informational",
+    "related_to": null,
+    "context_metadata": {
+      "repository": "reveal-market",
+      "commit": "5e1e80836cb2812e68c7deee1436e71b192858a4",
+      "scope_ids": [
+        "STATE_A_RevealMarketLifecycleAndBatchState"
+      ],
+      "affected_files": [
+        "contracts/zen/src/RevealMarket.sol",
+        "contracts/zen/src/MarketFactory.sol"
+      ]
+    },
+    "evidence": [
+      {
+        "type": "code",
+        "path": "contracts/zen/src/RevealMarket.sol",
+        "lines": "755-762",
+        "snippet": "extendCommitDeadline checks only newDeadline>commitDeadline, phase==Commit, one-shot flag, and max extension; no check that block.timestamp is still before current commitDeadline."
+      },
+      {
+        "type": "code",
+        "path": "contracts/zen/src/RevealMarket.sol",
+        "lines": "277-278",
+        "snippet": "commitWithAuthorization allows commits whenever block.timestamp < commitDeadline, so extending commitDeadline re-opens commit acceptance."
+      },
+      {
+        "type": "code",
+        "path": "contracts/zen/src/RevealMarket.sol",
+        "lines": "329-330",
+        "snippet": "lockBatches requires block.timestamp >= commitDeadline, so extension also delays locking and finalization."
+      },
+      {
+        "type": "code",
+        "path": "contracts/zen/src/MarketFactory.sol",
+        "lines": "351-354",
+        "snippet": "Factory owner can invoke extendMarketCommitDeadline at any time while market remains in commit phase."
+      }
+    ]
+  },
+  {
+    "id": "beta-9bab4b96-e729-40ce-bce7-dae2455beae8",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "BETA",
+    "title": "RevealMarket.enableRefunds: Timeout cancel path can discard posted results and accepted batch proofs, allowing privileged settlement rollback",
+    "locations": [
+      "RevealMarket.enableRefunds",
+      "RevealMarket.postResult",
+      "RevealMarket.verifyAndSettleBatched",
+      "RevealMarket._verifyBatchProof"
+    ],
+    "root_cause": "enableRefunds() allows transition from Locked -> Cancelled solely on timeout, without checking resultPosted status or settledBatchCount progress. This lets a privileged factory caller void a market after outcome publication and partial proof acceptance, effectively overriding in-flight settlement state.",
+    "trigger_scenario": [
+      "Market is locked and oracle posts the winning outcome via postResult().",
+      "Oracle submits one or more valid batch proofs through verifyAndSettleBatched(), so settledBatchCount and settled sums become non-zero, but not all batches are completed yet.",
+      "No final _finalizeSettlement() occurs before lockedAt + SETTLEMENT_TIMEOUT_SECONDS.",
+      "Factory owner calls enableMarketRefunds(), which forwards to enableRefunds() and flips phase to Cancelled without inspecting resultPosted or partial settlement progress.",
+      "All claim paths are disabled by phase check (requires Settled), and only refund paths remain.",
+      "Users who should have asymmetric winner payouts are instead forced into symmetric ticket refunds, rolling back economic finality after result revelation."
+    ],
+    "preconditions": [
+      "Phase is Locked and settlement timeout has elapsed.",
+      "Factory owner can call enableMarketRefunds().",
+      "Settlement is partially complete (or at least result is posted) but not finalized."
+    ],
+    "impact": "unfair_treatment",
+    "likelihood": "malicious_action",
+    "belief_score": 0.79,
+    "description": null,
+    "category": null,
+    "severity": "informational",
+    "related_to": null,
+    "context_metadata": {
+      "repository": "reveal-market",
+      "commit": "5e1e80836cb2812e68c7deee1436e71b192858a4",
+      "scope_ids": [
+        "FLOW_3_LockAndBatchSettlement",
+        "STATE_A_RevealMarketLifecycleAndBatchState"
+      ],
+      "affected_files": [
+        "contracts/zen/src/RevealMarket.sol"
+      ]
+    },
+    "evidence": [
+      {
+        "type": "code",
+        "path": "contracts/zen/src/RevealMarket.sol",
+        "lines": "473-493",
+        "snippet": "enableRefunds in Locked phase checks only timeout and then sets phase=Cancelled; it does not inspect resultPosted, settledBatchCount, or any settlement-progress fields."
+      },
+      {
+        "type": "code",
+        "path": "contracts/zen/src/RevealMarket.sol",
+        "lines": "381-387",
+        "snippet": "postResult persists outcome (resultPosted=true), but cancellation path does not require this to be false."
+      },
+      {
+        "type": "code",
+        "path": "contracts/zen/src/RevealMarket.sol",
+        "lines": "841-847",
+        "snippet": "_verifyBatchProof records partial progress (settledBatchCount and sums), which can still be abandoned by later enableRefunds timeout cancellation."
+      }
+    ]
+  },
+  {
+    "id": "beta-de16dec6-a64a-4e11-847b-68c230185d56",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "BETA",
+    "title": "RevealMarket._safeTransferExact: Strict balance-delta accounting can permanently DoS settlement/claims/refunds when collateral token behavior drifts",
+    "locations": [
+      "RevealMarket._safeTransferExact",
+      "RevealMarket._finalizeSettlement",
+      "RevealMarket.claim",
+      "RevealMarket.refundSelf",
+      "RevealMarket.refundTicket",
+      "RevealMarket.sweepUnclaimed",
+      "RevealMarket.sweepCancelledRefunds"
+    ],
+    "root_cause": "All payout paths hard-revert unless sender and recipient balance deltas are exactly compatible with a no-fee, non-rebasing token. _safeTransferExact() enforces senderDebited == amount and recipientReceived >= amount using pre/post balanceOf checks. If token mechanics change post-deployment (fee-on-transfer toggle, blacklist side effects, rebasing quirks), claims/refunds/sweeps and even surplus forwarding during finalization can revert indefinitely.",
+    "trigger_scenario": [
+      "Users commit funds and market reaches Locked or Settled lifecycle stages.",
+      "Collateral token behavior changes after deployment (e.g., transfer fee activation, blacklist semantics, unusual balance accounting).",
+      "Market executes _safeTransferExact() in _finalizeSettlement(), claim(), refund*(), or sweep*().",
+      "Pre/post balance checks fail strict invariants (senderDebited != amount or recipientReceived < amount).",
+      "Transaction reverts with FeeOnTransferNotSupported.",
+      "Because all outbound value paths share this helper, users can be stuck unable to claim or refund, and factory sweep fallback can also fail."
+    ],
+    "preconditions": [
+      "Collateral token does not maintain strict no-fee/no-rebase semantics for the full market lifetime.",
+      "Market reaches a state requiring token outflow (settle, claim, refund, or sweep)."
+    ],
+    "impact": "dos",
+    "likelihood": "external_dependency",
+    "belief_score": 0.83,
+    "description": null,
+    "category": null,
+    "severity": "informational",
+    "related_to": null,
+    "context_metadata": {
+      "repository": "reveal-market",
+      "commit": "5e1e80836cb2812e68c7deee1436e71b192858a4",
+      "scope_ids": [
+        "FLOW_3_LockAndBatchSettlement",
+        "STATE_A_RevealMarketLifecycleAndBatchState"
+      ],
+      "affected_files": [
+        "contracts/zen/src/RevealMarket.sol"
+      ]
+    },
+    "evidence": [
+      {
+        "type": "code",
+        "path": "contracts/zen/src/RevealMarket.sol",
+        "lines": "927-939",
+        "snippet": "_safeTransferExact requires senderDebited == amount and recipientReceived >= amount based on balanceOf deltas; otherwise it reverts FeeOnTransferNotSupported."
+      },
+      {
+        "type": "code",
+        "path": "contracts/zen/src/RevealMarket.sol",
+        "lines": "734-739",
+        "snippet": "_finalizeSettlement forwards surplus via _safeTransferExact(protocolPool, surplus), so finalization can fail on token semantic drift."
+      },
+      {
+        "type": "code",
+        "path": "contracts/zen/src/RevealMarket.sol",
+        "lines": "468-469,517-518,540-541,555-556,801-802,816-817",
+        "snippet": "Claims, refunds, and sweep paths all rely on _safeTransferExact, expanding any token-compatibility failure into a full lifecycle payout DoS."
+      }
+    ]
+  },
+  {
+    "id": "beta-c092858e-e0b7-4fd6-aa03-39f8aa7096d4",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "BETA",
+    "title": "RevealMarket.refreshLockedVerifierKeyHash: Locked verifier anchor is non-recoverable, so key drift hard-locks settlement until cancellation",
+    "locations": [
+      "RevealMarket.lockBatches",
+      "RevealMarket.verifyAndSettle",
+      "RevealMarket.verifyAndSettleBatched",
+      "RevealMarket.refreshLockedVerifierKeyHash",
+      "MarketFactory.refreshMarketLockedVerifierKey"
+    ],
+    "root_cause": "lockBatches snapshots lockedVerifierKeyHash once, and both verify paths require exact equality forever. The so-called refreshLockedVerifierKeyHash() path only re-checks equality and emits an event; it never updates the stored anchor. If verifier key hash drifts for operational reasons, market settlement becomes unrecoverable in Locked phase and can only exit via timeout cancellation.",
+    "trigger_scenario": [
+      "Market is locked and stores lockedVerifierKeyHash from current verifier.",
+      "Verifier key hash changes later (e.g., emergency rotation, verifier redeploy policy mismatch, or ownership/governance maintenance event).",
+      "verifyAndSettle()/verifyAndSettleBatched() revert due VerifierNotApproved or VerifierKeyMismatch checks.",
+      "Factory attempts refreshMarketLockedVerifierKey(), but market.refreshLockedVerifierKeyHash() enforces current key == lockedVerifierKeyHash and does not write new state.",
+      "Settlement cannot progress even before any batch proof is accepted.",
+      "After timeout, only cancellation/refund path remains, sacrificing intended settlement finality."
+    ],
+    "preconditions": [
+      "Phase is Locked with unsettled batches.",
+      "Verifier key hash no longer matches lockedVerifierKeyHash.",
+      "Factory cannot or does not finalize before timeout."
+    ],
+    "impact": "dos",
+    "likelihood": "external_dependency",
+    "belief_score": 0.72,
+    "description": null,
+    "category": null,
+    "severity": "informational",
+    "related_to": null,
+    "context_metadata": {
+      "repository": "reveal-market",
+      "commit": "5e1e80836cb2812e68c7deee1436e71b192858a4",
+      "scope_ids": [
+        "FLOW_3_LockAndBatchSettlement",
+        "STATE_A_RevealMarketLifecycleAndBatchState"
+      ],
+      "affected_files": [
+        "contracts/zen/src/RevealMarket.sol",
+        "contracts/zen/src/MarketFactory.sol"
+      ]
+    },
+    "evidence": [
+      {
+        "type": "code",
+        "path": "contracts/zen/src/RevealMarket.sol",
+        "lines": "365,401,427-428",
+        "snippet": "Locked key hash is captured once at lock and enforced by both settlement entry points."
+      },
+      {
+        "type": "code",
+        "path": "contracts/zen/src/RevealMarket.sol",
+        "lines": "678-683",
+        "snippet": "refreshLockedVerifierKeyHash checks equality and emits an event, but never updates lockedVerifierKeyHash."
+      },
+      {
+        "type": "code",
+        "path": "contracts/zen/src/MarketFactory.sol",
+        "lines": "317-323",
+        "snippet": "Factory refresh helper delegates to the no-op refresh path; there is no alternate state transition to rotate locked key anchor."
+      }
+    ]
+  },
+  {
+    "id": "02082bd2-32c4-4db3-abf3-0259bff055c9",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "DELTA",
+    "title": "MarketFactory.setVerifierApproval + RevealMarket.refreshLockedVerifierKeyHash pin verifier keys in a way that can deadlock locked markets after verifier key rotation",
+    "locations": [
+      "MarketFactory.setVerifierApproval",
+      "MarketFactory._validateVerifier",
+      "MarketFactory.refreshMarketLockedVerifierKey",
+      "RevealMarket.refreshLockedVerifierKeyHash",
+      "RevealMarket.verifyAndSettle",
+      "RevealMarket.verifyAndSettleBatched",
+      "Verifier.setVerifyingKey"
+    ],
+    "root_cause": "Factory governance permanently pins `approvedVerifierKeyHash` per verifier address, while `Verifier` allows owner key rotation. Once a market is locked, `refreshMarketLockedVerifierKey` does not actually write a new key hash (it only re-checks equality) and `setVerifier` is unavailable outside Commit phase, so a post-lock verifier key rotation creates an unrecoverable policy mismatch.",
+    "trigger_scenario": [
+      "A market enters `Phase.Locked` and stores `lockedVerifierKeyHash` during `lockBatches`.",
+      "The verifier owner rotates the proving key via `Verifier.setVerifyingKey`, changing `verifyingKeyHash` without changing verifier address.",
+      "`MarketFactory.isVerifierCurrentlyApproved` starts returning false because on-chain key hash no longer matches pinned `approvedVerifierKeyHash`.",
+      "`MarketFactory.refreshMarketLockedVerifierKey` cannot repair the lock because `_validateVerifier` now fails on drift and `RevealMarket.refreshLockedVerifierKeyHash` requires equality instead of updating state.",
+      "Settlement entrypoints (`verifyAndSettle` / `verifyAndSettleBatched`) fail verifier approval/key checks, leaving market stuck in Locked until timeout-driven refunds."
+    ],
+    "preconditions": [
+      "A locked market still needs settlement proofs.",
+      "Verifier key material is changed after market lock (maliciously or operationally).",
+      "Market cannot be moved back to Commit phase to rotate verifier address."
+    ],
+    "impact": "dos",
+    "likelihood": "internal_state",
+    "belief_score": 0.88,
+    "context_metadata": {
+      "repository": "reveal-market",
+      "commit": "5e1e80836cb2812e68c7deee1436e71b192858a4",
+      "scope_ids": [
+        "FLOW_1_FactoryEscrowOrchestration",
+        "STATE_B_CrossContractLiabilityAndCollateralState"
+      ],
+      "affected_files": [
+        "contracts/zen/src/MarketFactory.sol",
+        "contracts/zen/src/RevealMarket.sol",
+        "contracts/zen/src/Verifier.sol"
+      ]
+    },
+    "evidence": [
+      {
+        "type": "code",
+        "file": "contracts/zen/src/MarketFactory.sol",
+        "location": "MarketFactory.setVerifierApproval",
+        "lines": "177-203",
+        "snippet": "Pins verifier key hash per address and re-approval reverts on drift."
+      },
+      {
+        "type": "code",
+        "file": "contracts/zen/src/RevealMarket.sol",
+        "location": "RevealMarket.refreshLockedVerifierKeyHash",
+        "lines": "678-684",
+        "snippet": "Checks current key equals locked key but never writes a new locked key hash."
+      }
+    ]
+  },
+  {
+    "id": "c3572b19-b543-4253-b7ba-65d7937ec218",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "DELTA",
+    "title": "MarketFactory.setRelayerCommitsPaused is fail-open: pause fanout errors are swallowed so active relayers can remain live during emergency stop",
+    "locations": [
+      "MarketFactory.setRelayerCommitsPaused",
+      "MarketFactory.setRelayerCommitsPausedBatch",
+      "MarketFactory._setRelayerCommitsPausedBatch",
+      "RelayerEscrow.setCommitsPaused"
+    ],
+    "root_cause": "Emergency pause propagation uses nested `try/catch` and never reverts on failure; it only emits `RelayerPausePropagationFailed`. The outer function still emits global pause success even if one or more active relayers reject or ignore the pause call.",
+    "trigger_scenario": [
+      "At least one market points to an active relayer in `activeRelayers`.",
+      "That relayer reverts or behaves non-standardly when `setCommitsPaused(true)` is called.",
+      "Owner invokes `setRelayerCommitsPaused(true)` expecting a protocol-wide commit stop.",
+      "`_setRelayerCommitsPausedBatch` catches the failure and continues without reverting the transaction.",
+      "The transaction emits pause events, but the failing relayer stays unpaused and can continue forwarding commits for its markets."
+    ],
+    "preconditions": [
+      "An active relayer contract can fail/ignore pause updates (misconfiguration, upgrade drift, or malicious relayer implementation).",
+      "Operators rely on factory-level pause fanout as an emergency circuit breaker."
+    ],
+    "impact": "griefing",
+    "likelihood": "malicious_action",
+    "belief_score": 0.81,
+    "context_metadata": {
+      "repository": "reveal-market",
+      "commit": "5e1e80836cb2812e68c7deee1436e71b192858a4",
+      "scope_ids": [
+        "FLOW_1_FactoryEscrowOrchestration"
+      ],
+      "affected_files": [
+        "contracts/zen/src/MarketFactory.sol",
+        "contracts/zen/src/RelayerEscrow.sol"
+      ]
+    },
+    "evidence": [
+      {
+        "type": "code",
+        "file": "contracts/zen/src/MarketFactory.sol",
+        "location": "MarketFactory._setRelayerCommitsPausedBatch",
+        "lines": "541-561",
+        "snippet": "Pause propagation failures emit events but do not revert."
+      },
+      {
+        "type": "code",
+        "file": "contracts/zen/src/MarketFactory.sol",
+        "location": "MarketFactory.setRelayerCommitsPaused",
+        "lines": "405-422",
+        "snippet": "Global pause event is emitted after best-effort fanout, regardless of per-relayer failures."
+      }
+    ]
+  },
+  {
+    "id": "d7105366-e138-4d3b-9194-931058be5b5d",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "DELTA",
+    "title": "MarketFactory.migrateMarketRelayerBalances migrates global user escrow balances (not market-scoped), enabling cross-market collateral misrouting",
+    "locations": [
+      "MarketFactory.migrateMarketRelayerBalances",
+      "RelayerEscrow.balances",
+      "RelayerEscrow.withdrawTo",
+      "RelayerEscrow.creditMigrated"
+    ],
+    "root_cause": "Relayer balances are stored per-user globally in `RelayerEscrow` (no market dimension), but `migrateMarketRelayerBalances` is invoked per market and moves `oldRelayer.balances(user)` in full. This couples one market's relayer migration to all of a user's collateral parked on the old relayer.",
+    "trigger_scenario": [
+      "A user keeps collateral on an old relayer for multiple markets.",
+      "Factory owner rotates a single market to a new relayer and calls `migrateMarketRelayerBalances` for that market.",
+      "The function reads `oldRelayer.balances(user)` and withdraws the full amount, then credits it on the target relayer.",
+      "Other markets still tied to the old relayer lose access to that user's previously available escrow balance.",
+      "Commits for those markets fail until users manually rebalance collateral across relayers."
+    ],
+    "preconditions": [
+      "A user balance on old relayer is intended to serve more than one market.",
+      "Factory performs per-market relayer migration using the provided helper."
+    ],
+    "impact": "loss_of_function",
+    "likelihood": "internal_state",
+    "belief_score": 0.79,
+    "context_metadata": {
+      "repository": "reveal-market",
+      "commit": "5e1e80836cb2812e68c7deee1436e71b192858a4",
+      "scope_ids": [
+        "FLOW_1_FactoryEscrowOrchestration",
+        "STATE_B_CrossContractLiabilityAndCollateralState"
+      ],
+      "affected_files": [
+        "contracts/zen/src/MarketFactory.sol",
+        "contracts/zen/src/RelayerEscrow.sol"
+      ]
+    },
+    "evidence": [
+      {
+        "type": "code",
+        "file": "contracts/zen/src/MarketFactory.sol",
+        "location": "MarketFactory.migrateMarketRelayerBalances",
+        "lines": "289-304",
+        "snippet": "Migrates `oldRelayer.balances(user)` (entire user balance) per user during a single-market migration."
+      },
+      {
+        "type": "code",
+        "file": "contracts/zen/src/RelayerEscrow.sol",
+        "location": "RelayerEscrow.balances",
+        "lines": "16-20",
+        "snippet": "Escrow accounting is `mapping(address => uint256)` without market-level partitioning."
+      }
+    ]
+  },
+  {
+    "id": "3f21f78b-ebe8-4ae9-a552-c7e1a9a75e55",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "DELTA",
+    "title": "RelayerEscrow/ProtocolPool assume non-rebasing collateral; supply rebases can violate backing and reservation invariants across contracts",
+    "locations": [
+      "RelayerEscrow.withdraw",
+      "RelayerEscrow.commitOnBehalf",
+      "RelayerEscrow._excessCollateral",
+      "ProtocolPool.reserveLiability",
+      "ProtocolPool.draw",
+      "ProtocolPool.withdraw"
+    ],
+    "root_cause": "Cross-contract accounting is done in raw token amounts (`balances`, `accountedCollateral`, `reservedTotal`, `reservedLiability`) with no share-based normalization and no token capability gate beyond fee-on-transfer checks. If collateral token balances change asynchronously (negative/positive rebasing), internal accounting can diverge from actual transferable balance.",
+    "trigger_scenario": [
+      "Protocol deploys with an ERC20 that can rebase balances without transfers.",
+      "Users deposit into relayer escrow and markets reserve pool liability under pre-rebase balances.",
+      "A negative rebase reduces actual token balances in escrow/pool while `balances`, `accountedCollateral`, and reservation state remain unchanged.",
+      "Escrow withdraw/commit transfers and pool draw/withdraw checks begin reverting due insufficient real balance relative to accounting expectations.",
+      "Users/markets face withdrawal and settlement DoS until external recapitalization occurs."
+    ],
+    "preconditions": [
+      "Collateral token supports asynchronous supply/balance rebasing or similar non-standard balance mutation.",
+      "Protocol does not hard-restrict collateral to strictly non-rebasing ERC20 implementations."
+    ],
+    "impact": "dos",
+    "likelihood": "external_dependency",
+    "belief_score": 0.74,
+    "context_metadata": {
+      "repository": "reveal-market",
+      "commit": "5e1e80836cb2812e68c7deee1436e71b192858a4",
+      "scope_ids": [
+        "STATE_B_CrossContractLiabilityAndCollateralState"
+      ],
+      "affected_files": [
+        "contracts/zen/src/RelayerEscrow.sol",
+        "contracts/zen/src/ProtocolPool.sol"
+      ]
+    },
+    "evidence": [
+      {
+        "type": "code",
+        "file": "contracts/zen/src/RelayerEscrow.sol",
+        "location": "RelayerEscrow._excessCollateral",
+        "lines": "217-223",
+        "snippet": "Excess is computed from `balanceOf - accountedCollateral` with no share/rebase adaptation."
+      },
+      {
+        "type": "code",
+        "file": "contracts/zen/src/ProtocolPool.sol",
+        "location": "ProtocolPool.reserveLiability",
+        "lines": "121-129",
+        "snippet": "Reservations rely on instantaneous `balanceOf` and `reservedTotal` invariants in raw token units."
+      }
+    ]
+  },
+  {
+    "id": "a5b08519-2c60-4c17-b569-f07fd4bb2247",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "DELTA",
+    "title": "Factory routing rotations are non-atomic across dependencies, leaving stale `allowedMarket` permissions and cross-contract authorization drift",
+    "locations": [
+      "MarketFactory.updateMarketRelayer",
+      "MarketFactory.updateMarketProtocolPool",
+      "RelayerEscrow.unregisterMarket",
+      "ProtocolPool.registerMarket",
+      "ProtocolPool.draw",
+      "ProtocolPool.reserveLiability",
+      "ProtocolPool.releaseLiabilityReservation"
+    ],
+    "root_cause": "Dependency rotations only apply forward registration on the new endpoint, while old endpoint cleanup is missing (`updateMarketProtocolPool`) or best-effort only (`updateMarketRelayer` with swallowed unregister failures). This permits stale `allowedMarket` trust edges to outlive factory routing state.",
+    "trigger_scenario": [
+      "A market is deployed and registered in initial relayer/pool allowlists.",
+      "Factory rotates the market to new dependencies.",
+      "Old relayer unregister can fail without reverting, and old protocol pool is never explicitly de-authorized.",
+      "Factory/market now reference new dependencies, but old dependencies still retain market-level authorization flags.",
+      "Subsequent operational rollbacks, misrouting, or unexpected call paths can exercise stale permissions that operators assume were revoked."
+    ],
+    "preconditions": [
+      "At least one dependency rotation occurs for an existing market.",
+      "Operators assume de-registration is strict and atomic across all protocol-owned dependencies."
+    ],
+    "impact": "griefing",
+    "likelihood": "internal_state",
+    "belief_score": 0.58,
+    "context_metadata": {
+      "repository": "reveal-market",
+      "commit": "5e1e80836cb2812e68c7deee1436e71b192858a4",
+      "scope_ids": [
+        "FLOW_1_FactoryEscrowOrchestration",
+        "STATE_B_CrossContractLiabilityAndCollateralState"
+      ],
+      "affected_files": [
+        "contracts/zen/src/MarketFactory.sol",
+        "contracts/zen/src/RelayerEscrow.sol",
+        "contracts/zen/src/ProtocolPool.sol"
+      ]
+    },
+    "evidence": [
+      {
+        "type": "code",
+        "file": "contracts/zen/src/MarketFactory.sol",
+        "location": "MarketFactory.updateMarketRelayer",
+        "lines": "275-281",
+        "snippet": "Old relayer unregister failures are caught and rotation continues."
+      },
+      {
+        "type": "code",
+        "file": "contracts/zen/src/MarketFactory.sol",
+        "location": "MarketFactory.updateMarketProtocolPool",
+        "lines": "335-337",
+        "snippet": "New pool registration occurs with no corresponding old pool de-registration path."
+      }
+    ]
+  },
+  {
+    "id": "epsilon-H1-withdraw-rounding-underburn",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "EPSILON",
+    "title": "BaseLpVault.withdraw rounds share burn down, allowing over-withdrawal that dilutes other LPs",
+    "locations": [
+      "BaseLpVault.withdraw",
+      "BaseLpVault.convertToShares"
+    ],
+    "root_cause": "`withdraw()` computes shares to burn via `convertToShares(assets)`, and `convertToShares` uses `Math.mulDiv(... )` with floor rounding. For exact-asset withdrawals, rounding down under-burns shares whenever `assets * totalSupply / totalAssets` is non-integer; ERC4626-style safety requires rounding up for withdraw paths.",
+    "trigger_scenario": [
+      "Vault has non-integer price-per-share, e.g. `totalAssets=150` and `totalSupply=100` after hedging profit donation.",
+      "Attacker owns 50 shares (half of supply).",
+      "Attacker repeatedly calls `withdraw(2, attacker, attacker)`.",
+      "Each call burns `floor(2*100/150)=1` share but transfers 2 assets out.",
+      "After 50 calls, attacker burns 50 shares and withdraws 100 assets, even though fair value for 50 shares was 75 assets.",
+      "The extra 25 assets are transferred from remaining LPs (value extraction via rounding drift)."
+    ],
+    "preconditions": [
+      "`totalSupply() > 0` and `totalAssets()`/`totalSupply()` yields non-integer conversion for chosen withdrawal amounts.",
+      "Attacker can perform multiple withdrawals (or choose a single amount with favorable floor rounding).",
+      "Vault has enough `idleAssets()` to satisfy requested withdrawals."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "internal_state",
+    "belief_score": 0.98
+  },
+  {
+    "id": "epsilon-H2-outbound-transfer-accounting-gap",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "EPSILON",
+    "title": "BaseLpVault outbound transfers are assumed exact, so non-standard assets can desynchronize accounting and real balances",
+    "locations": [
+      "BaseLpVault.withdraw",
+      "BaseLpVault.redeem",
+      "BaseLpVault.borrowForHedge"
+    ],
+    "root_cause": "The vault validates exact amounts only on inbound `safeTransferFrom` paths (`deposit`, `repayFromHedge`) but does not enforce exact sender/receiver deltas for outbound `safeTransfer` paths (`withdraw`, `redeem`, `borrowForHedge`). If the configured 6-decimal asset has directional fees/surcharges/burn semantics on outbound transfers, internal accounting (`utilizedAssets`, burned shares) assumes exact movement while token balances realize different movement.",
+    "trigger_scenario": [
+      "Vault is deployed with a 6-decimal token that behaves non-standard on outbound transfers (e.g., sender surcharge or recipient haircut).",
+      "LP calls `withdraw`/`redeem` or hedger calls `borrowForHedge`.",
+      "Vault updates state as if `amount` moved exactly (burns shares or increments `utilizedAssets`).",
+      "Token transfer applies non-standard fee behavior so actual debited/received value differs from `amount`.",
+      "Vault accounting diverges from real balances, causing LP underpayment, utilization mismeasurement, or insolvency drift."
+    ],
+    "preconditions": [
+      "Configured `ASSET` is not strict vanilla USDC behavior on outbound transfers.",
+      "Outbound transfer paths (`withdraw`, `redeem`, or `borrowForHedge`) are exercised."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "external_dependency",
+    "belief_score": 0.72
+  },
+  {
+    "id": "epsilon-H3-protocolpool-unbounded-fifo-gas-dos",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "EPSILON",
+    "title": "ProtocolPool LP unlock accounting is unbounded per-user, enabling withdrawal liveness failure via deposit-fragmentation",
+    "locations": [
+      "ProtocolPool.deposit",
+      "ProtocolPool.lpWithdraw",
+      "ProtocolPool._burnUnlockedShares",
+      "ProtocolPool._unlockedSharesOf",
+      "ProtocolPool.maxRedeemable"
+    ],
+    "root_cause": "Each `deposit()` appends a new `DepositRecord` and records are never compacted/removed. `lpWithdraw`, `unlockedShares`, and `maxRedeemable` iterate the full per-user `_deposits` array. This creates O(n) gas with unbounded n, so sufficiently fragmented deposit history can make redemption paths exceed block gas limits.",
+    "trigger_scenario": [
+      "An LP (or automation acting for the LP) performs a very large number of small deposits over time.",
+      "After lock expiry, LP calls `lpWithdraw` to redeem unlocked shares.",
+      "`_burnUnlockedShares` scans the entire `_deposits[lp]` array and may run out of gas before completion.",
+      "The same O(n) scan affects `maxRedeemable` and `unlockedShares` queries, degrading front-end and keeper operations.",
+      "LP funds become practically stuck until transaction gas limits increase or custom off-chain splitting strategy is used."
+    ],
+    "preconditions": [
+      "Per-user deposit record count grows large (many fragmented deposits).",
+      "User must rely on loop-based withdrawal path over full historical records."
+    ],
+    "impact": "loss_of_function",
+    "likelihood": "malicious_action",
+    "belief_score": 0.69
+  },
+  {
+    "id": "epsilon-H4-slippage-fields-not-binding-execution",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "EPSILON",
+    "title": "HedgeStrategyExecutor executes signed borrows without enforcing minOut/slippage against realized hedge outcome",
+    "locations": [
+      "HedgeStrategyExecutor.executeBorrow",
+      "HedgeStrategyExecutor._validateOrder"
+    ],
+    "root_cause": "`Order.minOut` is never used for any on-chain condition and `Order.maxSlippageBps` is only compared to a global admin cap, not to any observed execution result. `executeBorrow` only moves funds from vault to receiver, so signed price-protection fields are not cryptographically bound to downstream execution quality.",
+    "trigger_scenario": [
+      "Signer issues a valid order with conservative `minOut` / `maxSlippageBps` expecting slippage protection.",
+      "Any caller submits `executeBorrow` with that signature.",
+      "Executor validates signature, nonce, deadline, amount, and receiver allowlist, then borrows funds to receiver.",
+      "No on-chain check compares downstream hedge fill to `minOut` or realized slippage.",
+      "If receiver-side execution is compromised or adverse, vault funds are still borrowed with no protocol-level slippage enforcement."
+    ],
+    "preconditions": [
+      "Receiver is allowed and order signature is valid.",
+      "Downstream hedge execution happens off-contract (or not at all), outside enforceable checks in `executeBorrow`."
+    ],
+    "impact": "theft_of_yield",
+    "likelihood": "malicious_action",
+    "belief_score": 0.56
+  },
+  {
+    "id": "gamma-flow4-001",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "GAMMA",
+    "title": "RevealMarket.claimWithOracleAuthorization: Oracle-signed payout is not bound to the committed leaf -> compromised oracle can drain all settled liquidity through one owned ticket",
+    "locations": [
+      "RevealMarket.claimWithOracleAuthorization",
+      "RevealMarket._ticketOwner",
+      "RevealMarket.claim"
+    ],
+    "root_cause": "claimWithOracleAuthorization() verifies only (ticketId, owner, payout, expiry) against an oracle signature and never recomputes the Poseidon commitment leaf or checks Merkle inclusion for the ticket. The only quantitative guard is claimedLiability <= totalLiability, so any oracle-signed payout amount is accepted even if it does not match the ticket's committed (outcome, amount, payout, salt) preimage.",
+    "trigger_scenario": [
+      "Attacker commits at least one ticket in the market (winning or losing).",
+      "After settlement, the oracle key is compromised (or malicious oracle operator acts).",
+      "Attacker signs/obtains an oracle authorization for their own ticketId with payout equal to the entire remaining totalLiability and a valid expiry.",
+      "Attacker calls claimWithOracleAuthorization(ticketId, hugePayout, expiry, sig).",
+      "The contract marks the ticket claimed, updates claimedLiability, and transfers hugePayout to that ticket owner because no leaf/proof validation runs on this path.",
+      "Subsequent legitimate tickets fail to claim due to OverClaimed or depleted market balance."
+    ],
+    "preconditions": [
+      "Oracle signing key is compromised or oracle is malicious.",
+      "Attacker controls at least one committed ticket owner address."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.89
+  },
+  {
+    "id": "gamma-flow4-002",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "GAMMA",
+    "title": "RevealMarket.claimWithOracleAuthorization: Missing per-ticket nonce/version lets stale low-value signatures be frontrun -> ticket can be permanently underpaid",
+    "locations": [
+      "RevealMarket.claimWithOracleAuthorization"
+    ],
+    "root_cause": "Oracle claim authorizations include payout and expiry but no monotonic nonce/version tracked per ticket. The contract accepts the first valid signature submitted and sets claimedTickets[ticketId] = true, so older signatures remain valid until expiry and cannot be revoked on-chain.",
+    "trigger_scenario": [
+      "Oracle issues a first authorization for ticketId with payout P1 (for example during an initial off-chain calculation).",
+      "Oracle later issues a corrected authorization for the same ticket with payout P2 > P1.",
+      "Both signatures are observable by third parties (API leak, relayer logs, or mempool exposure).",
+      "An attacker submits the stale P1 signature first via claimWithOracleAuthorization.",
+      "The contract marks the ticket as claimed and transfers only P1.",
+      "The corrected P2 authorization becomes unusable because TicketAlreadyClaimed now blocks all further claims for that ticket."
+    ],
+    "preconditions": [
+      "More than one valid oracle authorization exists for the same ticketId.",
+      "At least one stale/lower authorization is still unexpired when submitted."
+    ],
+    "impact": "unfair_treatment",
+    "likelihood": "malicious_action",
+    "belief_score": 0.72
+  },
+  {
+    "id": "gamma-flow4-003",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "GAMMA",
+    "title": "RevealMarket.setClaimsPaused/_effectiveClaimDeadline: Ongoing pause time extends claim deadline in real-time -> claims and sweep can be frozen indefinitely",
+    "locations": [
+      "RevealMarket.setClaimsPaused",
+      "RevealMarket._effectiveClaimDeadline",
+      "RevealMarket.claim",
+      "RevealMarket.sweepUnclaimed"
+    ],
+    "root_cause": "When claims are paused in Settled phase, _effectiveClaimDeadline() adds (block.timestamp - claimPauseStartedAt) continuously. claim() is blocked by claimsPaused, and sweepUnclaimed() requires block.timestamp > _effectiveClaimDeadline(). While paused, effective deadline moves forward with current time, so sweep condition can never become true until an explicit unpause occurs. No max pause duration or emergency sweep bypass exists.",
+    "trigger_scenario": [
+      "Market reaches Settled and claimDeadline is initialized.",
+      "Factory owner calls setClaimsPaused(true), setting claimPauseStartedAt = now.",
+      "Users cannot call claim because ClaimsPaused reverts.",
+      "As time passes, _effectiveClaimDeadline grows by the same amount (now - claimPauseStartedAt), so it stays ahead of block.timestamp.",
+      "Factory cannot call sweepUnclaimed because ClaimWindowOpen keeps reverting while paused.",
+      "If pause is never lifted (operator failure, key loss, or malicious governance), both user claims and terminal sweeping are permanently blocked."
+    ],
+    "preconditions": [
+      "Market is in Settled phase.",
+      "Claims are paused and not later unpaused by factory governance."
+    ],
+    "impact": "dos",
+    "likelihood": "internal_state",
+    "belief_score": 0.86
+  },
+  {
+    "id": "gamma-flow4-004",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "GAMMA",
+    "title": "RevealMarket._verifyLeaf path depends on unverified lockBatches roots -> oracle+relayer can make trustless claims impossible and force trusted payout path",
+    "locations": [
+      "RevealMarket.lockBatches",
+      "RevealMarket._verifyLeaf",
+      "RevealMarket.claim",
+      "RevealMarket.claimWithOracleAuthorization"
+    ],
+    "root_cause": "claim() requires both commitments[ticketId] == leaf and a Merkle proof to batchRoots[batchIndex], but lockBatches() never recomputes/validates roots from on-chain commitments. It only checks counts and a relayer-owner signature over supplied roots. If supplied roots do not correspond to stored commitments, users cannot satisfy _verifyLeaf even with correct preimages.",
+    "trigger_scenario": [
+      "Users commit valid ticket leaves, which are stored in commitments[].",
+      "At lock time, oracle submits batch roots that are inconsistent with commitments[] but still passes count checks.",
+      "Relayer owner signature is provided (collusion, compromise, or blind signing of incorrect roots).",
+      "Settlement completes against those roots.",
+      "Winning users call claim with correct (ticketId, outcome, amount, payout, salt) and fail InvalidMerkleProof because no proof can satisfy both commitment equality and mismatched batch root.",
+      "Only claimWithOracleAuthorization remains, shifting payout correctness from cryptographic leaf membership to trusted oracle signatures."
+    ],
+    "preconditions": [
+      "Oracle submits incorrect batch roots during lock.",
+      "Relayer owner signs or is compromised for those roots."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.64
+  },
+  {
+    "id": "gamma-flow4-005",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "GAMMA",
+    "title": "RevealMarket claim/refund payout recipient is immutable ticket owner -> blacklist/frozen addresses become unclaimable and are swept to protocol pool",
+    "locations": [
+      "RevealMarket.claim",
+      "RevealMarket.refund",
+      "RevealMarket.refundSelf",
+      "RevealMarket.refundTicket",
+      "RevealMarket._safeTransferExact",
+      "RevealMarket.sweepUnclaimed",
+      "RevealMarket.sweepCancelledRefunds"
+    ],
+    "root_cause": "All payout paths transfer only to the recorded ticket owner (or provided user constrained by _ticketOwner check) and provide no alternate recipient or rescue mechanism. If collateral token policy blocks transfers to that address (blacklist/freeze/compliance lock), claim/refund always reverts. After deadlines, sweeps move leftover market balance to protocolPool, effectively confiscating unclaimable user funds.",
+    "trigger_scenario": [
+      "User commits a ticket and becomes the recorded owner in commitmentUsers[].",
+      "Before claiming/refunding, collateral token marks that address as blocked (or otherwise non-receivable).",
+      "User (or relayer) attempts claim/refund; _safeTransferExact reverts because token transfer to owner fails.",
+      "Ticket remains unclaimed as deadlines continue.",
+      "After claim/refund window closes, factory executes sweepUnclaimed or sweepCancelledRefunds.",
+      "Remaining balance, including the blocked user's entitlement, is transferred to protocolPool."
+    ],
+    "preconditions": [
+      "Collateral token can block/freeze transfers for specific recipient addresses.",
+      "Affected ticket owner is blocked before successful claim/refund."
+    ],
+    "impact": "unfair_treatment",
+    "likelihood": "external_dependency",
+    "belief_score": 0.58
+  },
+  {
+    "id": "zeta-flow6-001",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "ZETA",
+    "title": "Verifier.setVerifyingKey: G2 coordinate order is not canonicalized on-chain so a structurally valid but semantically wrong VK can be installed and brick verification",
+    "locations": [
+      "Verifier.setVerifyingKey",
+      "Verifier._setVerifyingKey",
+      "Verifier._buildG2",
+      "Pairing.isValidG2Point"
+    ],
+    "root_cause": "_buildG2 stores beta/gamma/delta FQ2 limbs exactly as provided and _setVerifyingKey only checks non-infinity plus precompile acceptance. There is no canonicalization or on-chain recomputation against a pinned expected key hash at rotation time, so alternate serialization conventions (e.g., unswapped c0/c1 limbs) can pass curve-validity checks while representing a different verifying key.",
+    "trigger_scenario": [
+      "Owner rotates the verifier key using raw vk JSON coordinates from a tool that uses a different FQ2 limb order than the contract expects.",
+      "setVerifyingKey calls _buildG2 and accepts the coordinates as-is.",
+      "Pairing.isValidG2Point returns success because the swapped point is still a valid curve point.",
+      "The contract updates _vk and emits VerifyingKeyUpdated, so governance believes rotation succeeded.",
+      "Subsequent valid Groth16 proofs generated for the intended circuit fail in verifyProof because on-chain vk no longer matches the circuit semantics.",
+      "Settlement paths that depend on this verifier revert/fail, effectively freezing proof-based finalization until another key rotation occurs."
+    ],
+    "preconditions": [
+      "Key rotation is executed through tooling or manual input that does not enforce the verifier's exact FQ2 encoding convention.",
+      "The supplied coordinates remain curve-valid, so structural checks do not fail fast."
+    ],
+    "impact": "dos",
+    "likelihood": "internal_state",
+    "belief_score": 0.78
+  },
+  {
+    "id": "zeta-flow6-002",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "ZETA",
+    "title": "Verifier.setVerifyingKey: single-step privileged key rotation has no staged activation, enabling immediate protocol-wide settlement freeze on shared verifier instances",
+    "locations": [
+      "Verifier.setVerifyingKey",
+      "Verifier._setVerifyingKey",
+      "Verifier.verifyingKeyHash",
+      "Verifier.VerifyingKeyUpdated"
+    ],
+    "root_cause": "setVerifyingKey performs an immediate in-place replacement of _vk, _ic, circuitHash, and verifyingKeyHash in one owner transaction with no timelock, grace period, dual-approval, or staged next-key activation. Any mistake or compromised owner action instantly mutates the verifier anchor for every consumer using the same verifier address.",
+    "trigger_scenario": [
+      "Multiple active markets rely on one Verifier address and have operational assumptions tied to the current verifyingKeyHash.",
+      "Owner key is compromised, or owner executes an incorrect/untimely rotation.",
+      "Attacker/operator calls setVerifyingKey with new key material.",
+      "verifyingKeyHash and circuitHash change atomically in the same transaction.",
+      "Downstream settlement calls that require the previous key anchor fail immediately after rotation.",
+      "Markets cannot finalize until governance performs additional recovery actions, creating a liveness outage window."
+    ],
+    "preconditions": [
+      "Verifier ownership is a single high-privilege trust boundary without enforced timelock/multisig in this contract.",
+      "The verifier contract is shared by active markets that depend on stable key identity."
+    ],
+    "impact": "dos",
+    "likelihood": "malicious_action",
+    "belief_score": 0.7
+  },
+  {
+    "id": "zeta-flow6-003",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "ZETA",
+    "title": "Verifier.verifyProof: bool-return API is fail-hard for malformed proofs because decode and curve validation reverts are outside the catch boundary",
+    "locations": [
+      "Verifier.verifyProof",
+      "Verifier._decodeProof",
+      "Verifier._validateG1Point",
+      "Verifier._validateG2Point"
+    ],
+    "root_cause": "verifyProof only wraps this._pairingCheck(...) in try/catch. Earlier stages (_decodeProof, _buildG1/_buildG2, _validateG1Point, _validateG2Point) revert on malformed calldata or invalid points via InvalidProofEncoding/FieldOverflow/InvalidCurvePoint, so invalid proofs do not uniformly return false despite the interface's bool semantics.",
+    "trigger_scenario": [
+      "A relayer or integrator accepts proof payloads from an untrusted source and calls verifyProof via a state-changing workflow.",
+      "Attacker submits proof bytes with malformed encoding length or off-curve coordinates.",
+      "verifyProof hits _decodeProof or _validateG*Point and reverts before entering the try/catch around _pairingCheck.",
+      "The parent transaction bubbles the revert instead of receiving a simple false result.",
+      "If the parent batches multiple proofs in one transaction, one malformed element aborts the entire batch execution.",
+      "An attacker can repeatedly inject malformed payloads to create operational griefing for automated submitters that expect soft-fail boolean behavior."
+    ],
+    "preconditions": [
+      "Upstream workflow treats verifyProof as a non-reverting boolean filter and does not pre-simulate malformed payloads.",
+      "Proof submissions can be influenced by adversarial actors."
+    ],
+    "impact": "griefing",
+    "likelihood": "malicious_action",
+    "belief_score": 0.66
+  },
+  {
+    "id": "zeta-flow6-004",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "ZETA",
+    "title": "Pairing.isValidG2Point: verifier soundness is delegated entirely to precompile success semantics, so non-compliant BN254 implementations can silently weaken validation",
+    "locations": [
+      "Pairing.isValidG2Point",
+      "Verifier._setVerifyingKey",
+      "Verifier._validateG2Point",
+      "Verifier._pairingCheck"
+    ],
+    "root_cause": "G2 validation and final proof checking rely on bn254 precompiles (0x08) as the sole correctness oracle. isValidG2Point accepts any input where staticcall succeeds and performs no independent subgroup/consistency checks in Solidity. If a chain/client implementation deviates from EIP-197 failure behavior, malformed twist points can be accepted.",
+    "trigger_scenario": [
+      "Protocol deploys to an environment where bn254 precompile behavior is non-standard or buggy (e.g., missing strict subgroup checks).",
+      "Attacker provides malformed G2 data that should be rejected under canonical EIP-197 rules.",
+      "Pairing.isValidG2Point returns true because staticcall reports success on that environment.",
+      "Verifier accepts malformed key material during rotation or malformed proof points during verification.",
+      "pairing checks can then evaluate over invalid group elements, breaking Groth16 soundness assumptions.",
+      "Attacker may produce false-positive proof acceptance or induce systemic verification failure depending on the exact precompile deviation."
+    ],
+    "preconditions": [
+      "Deployment target does not enforce canonical bn254 precompile validity checks.",
+      "Attacker can submit crafted proof/key material to the verifier workflow."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "external_dependency",
+    "belief_score": 0.57
+  },
+  {
+    "id": "zeta-flow6-005",
+    "job_id": "codex-solidity-audit-2026-02-28",
+    "agent": "ZETA",
+    "title": "Pairing precompile wrappers forward gas() with fail-revert semantics, enabling high-cost griefing when automated submitters relay attacker-controlled malformed proofs",
+    "locations": [
+      "Pairing.add",
+      "Pairing.scalarMul",
+      "Pairing.pairing",
+      "Verifier.verifyProof"
+    ],
+    "root_cause": "Pairing.add/scalarMul/pairing forward all remaining gas into precompile staticcalls and use require(success, ...). On failure paths, large gas chunks can be consumed before reverting, and Verifier only soft-catches the final _pairingCheck call. There is no on-chain gas cap or cheap pre-screening path for untrusted off-chain proof submissions.",
+    "trigger_scenario": [
+      "An attacker feeds malformed proof payloads into a keeper/relayer pipeline that auto-submits settlement transactions.",
+      "The relayer submits transactions calling workflows that reach Verifier.verifyProof.",
+      "Precompile calls in Pairing consume substantial gas on failing validations/pairing operations.",
+      "The transaction reverts or returns false only after expensive cryptographic calls have run.",
+      "Attacker repeats submissions with varied malformed payloads.",
+      "Keeper operating budget is drained and settlement liveness degrades due repeated high-cost failures."
+    ],
+    "preconditions": [
+      "An automated submitter relays proofs from untrusted sources without strict off-chain simulation/validation.",
+      "Adversary can continuously supply malformed proof attempts."
+    ],
+    "impact": "griefing",
+    "likelihood": "malicious_action",
+    "belief_score": 0.61
+  }
+]

@@ -1,0 +1,914 @@
+[
+  {
+    "id": "hyp-xstate-v2-001",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "RevealMarket.refund: Refund pays ticketSize (gross) while totalEscrow tracked net of rake, leaving market insolvent for full refunds",
+    "locations": [
+      "RevealMarket.commitWithAuthorization",
+      "RevealMarket.refund",
+      "RevealMarket.refundSelf",
+      "RevealMarket.refundTicket",
+      "RevealMarket.enableRefunds"
+    ],
+    "root_cause": "In commitWithAuthorization (line 316-318), totalEscrow accumulates `ticketSize - rake` (the net amount), and rakeCollected accumulates the rake. However, in refund/refundSelf/refundTicket (lines 520, 543, 558), the refundAmount is always `ticketSize` (the gross amount). When the market is cancelled after commits, the market contract holds `totalEscrow + rakeCollected` tokens in total. For N tickets: totalEscrow = N*(ticketSize - rake), rakeCollected = N*rake, so balance = N*ticketSize. Each refund pays ticketSize, so N refunds pay N*ticketSize. The accounting is actually balanced by the full token balance, not by totalEscrow. This is correct because the market holds the full ticketSize per ticket. However, if any tokens are donated or swept out before refunds complete, or if the surplus transfer mechanism in _finalizeSettlement has already moved tokens, the refunds could be underfunded. In the cancelled path specifically: enableRefunds calls _releaseLiabilityReservation but does NOT forward surplus to the pool. The market retains its full token balance. So under normal conditions this is sound. HOWEVER: if the market transitions from Locked to Cancelled (via enableRefunds after SETTLEMENT_TIMEOUT_SECONDS), the pool.reserveLiability was already called during lockBatches. enableRefunds calls _releaseLiabilityReservation which releases the reservation. No pool draw occurred. No tokens moved. The market holds exactly N*ticketSize. Refunds pay N*ticketSize. This appears solvent. Belief lowered because the accounting appears correct for the cancel path.",
+    "trigger_scenario": [
+      "Step 1: Market created with rakeBps=200 (2%), ticketSize=100",
+      "Step 2: 10 users commit via escrow. Market holds 1000 tokens. totalEscrow=980, rakeCollected=20",
+      "Step 3: Commit deadline passes, oracle locks batches. pool.reserveLiability called for protocolLiabilityCap",
+      "Step 4: SETTLEMENT_TIMEOUT_SECONDS (14 days) passes without settlement",
+      "Step 5: Factory owner calls enableMarketRefunds. Phase -> Cancelled. _releaseLiabilityReservation releases pool reservation",
+      "Step 6: All 10 users call refundTicket. Each gets ticketSize=100. Total payout = 1000 = market balance. Solvent.",
+      "Step 7: (Deviation) If an external actor somehow sends tokens to market or if partial settlement occurred before cancel, the accounting could diverge"
+    ],
+    "preconditions": [
+      "Market has been locked (phase=Locked) with non-zero rake",
+      "Settlement times out and refunds are enabled"
+    ],
+    "impact": "fund_loss",
+    "likelihood": "external_dependency",
+    "belief_score": 0.15
+  },
+  {
+    "id": "hyp-xstate-v2-002",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "RevealMarket._finalizeSettlement: Surplus transfer to pool can silently break if pool is not the expected recipient, leaking protocol funds",
+    "locations": [
+      "RevealMarket._finalizeSettlement",
+      "ProtocolPool.draw"
+    ],
+    "root_cause": "In _finalizeSettlement (lines 760-764), surplus tokens (tokenBalance - totalLiability) are transferred to `protocolPool` via _safeTransferExact. The protocolPool address is set at initialization and can be rotated via factory's setProtocolPool, but only in Commit phase with zero commitments. Once locked, protocolPool is immutable for that market. The surplus includes rake and any excess escrow beyond totalLiability. The pool receives these funds but has no accounting mechanism to track that this surplus came from a specific market. The pool's consumedLiability tracks draws FROM the pool to markets, not inflows. If the pool drew funds to the market (protocolTopUp > 0), the surplus sent back does not reduce consumedLiability. This means consumedLiability permanently inflates, reducing the effective liabilityCap for future usage of that market slot. Since the market slot is single-use (each market is a clone), this is not a practical issue for the same market. But it means the pool's consumedLiability[market] can be non-zero permanently with no way to reset it, and the pool's total accounting includes phantom consumed liability.",
+    "trigger_scenario": [
+      "Step 1: Market created with protocolLiabilityCap=1000",
+      "Step 2: 100 users commit, totalEscrow = 98*100 = 9800 (net of 2% rake)",
+      "Step 3: Market locks, pool.reserveLiability(1000) reserves 1000 from pool",
+      "Step 4: Settlement reveals totalLiability=10500, deficit=10500-9800=700 (market balance is 10000 with rake)",
+      "Step 5: _finalizeSettlement calls pool.draw(market, 700). consumedLiability[market]=700, reservedLiability[market] reduced by 700",
+      "Step 6: After draw, market balance = 10000 + 700 = 10700. surplus = 10700 - 10500 = 200",
+      "Step 7: Surplus 200 sent to pool. But consumedLiability[market] remains 700 permanently",
+      "Step 8: releaseLiabilityReservation releases remaining reservation (1000-700=300). reservedTotal decreases",
+      "Step 9: Pool accounting: consumedLiability[market]=700 (permanent), liabilityCap[market]=1000. The 700 is phantom debt"
+    ],
+    "preconditions": [
+      "Market draws from pool during settlement (protocolTopUp > 0)",
+      "Market also has surplus to send back after settlement"
+    ],
+    "impact": "griefing",
+    "likelihood": "common",
+    "belief_score": 0.35
+  },
+  {
+    "id": "hyp-xstate-v2-003",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "ProtocolPool.registerMarket: Re-registration of a market resets consumedLiability and reservedLiability to zero, potentially allowing double-draws",
+    "locations": [
+      "ProtocolPool.registerMarket",
+      "MarketFactory.updateMarketProtocolPool",
+      "MarketFactory.createMarket"
+    ],
+    "root_cause": "ProtocolPool.registerMarket (lines 98-105) unconditionally sets consumedLiability[market]=0, reservedLiability[market]=0, and allowedMarket[market]=true. If a market is registered on a NEW pool via updateMarketProtocolPool, the old pool retains the consumed/reserved state while the new pool starts clean. The factory's updateMarketProtocolPool (line 346) requires phase==Commit AND nextTicketId==0, so no tokens have flowed yet, making this safe for the normal flow. However, registerMarket itself has no protection against being called multiple times for the same market. The factory calls registerMarket once during createMarket and once during updateMarketProtocolPool. Since both paths are onlyOwner->onlyFactory gated, an external attacker cannot trigger re-registration. But if the factory owner calls updateMarketProtocolPool pointing back to the same pool, the market gets re-registered with zeros. This requires the pool to be different first (line 348 calls newPool.registerMarket), so the owner would need to rotate pool away and back. With the ProtocolPoolRotationLocked check (line 346), this can only happen before any commits. So no funds are at risk. The consumedLiability would be zero anyway since no draws happened.",
+    "trigger_scenario": [
+      "Step 1: Market M created on Pool A. consumedLiability[M]=0 on Pool A",
+      "Step 2: Factory owner calls updateMarketProtocolPool(M, PoolB). Phase=Commit, nextTicketId=0. PoolB.registerMarket(M) called. M now points to PoolB",
+      "Step 3: Factory owner calls updateMarketProtocolPool(M, PoolA). Phase=Commit, nextTicketId=0. PoolA.registerMarket(M) called again. consumedLiability[M] reset to 0 (was already 0)",
+      "Step 4: No material impact since nextTicketId must be 0 for rotation, so no draws could have occurred"
+    ],
+    "preconditions": [
+      "Factory owner rotates pool twice (away and back) before any commits",
+      "Market must be in Commit phase with zero tickets"
+    ],
+    "impact": "griefing",
+    "likelihood": "malicious_action",
+    "belief_score": 0.1
+  },
+  {
+    "id": "hyp-xstate-v2-004",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "RevealMarket.setRelayerEscrow: No phase guard allows relayer rotation during Locked/Settled/Cancelled phases, potentially breaking refund/claim authorization",
+    "locations": [
+      "RevealMarket.setRelayerEscrow",
+      "MarketFactory.updateMarketRelayer",
+      "RevealMarket.refund"
+    ],
+    "root_cause": "RevealMarket.setRelayerEscrow (lines 658-662) only checks that the new address is non-zero and that the caller is the factory. It does NOT check the market phase. The factory's updateMarketRelayer (line 285) DOES check `rm.phase() != IRevealMarket.Phase.Commit || rm.nextTicketId() != 0` and reverts if the market has any commits or is not in Commit phase. So the factory correctly guards this. However, RevealMarket.setRelayerEscrow is a public function callable by the factory at any phase. If the factory contract were upgraded or a different factory were set (factory is set once in initialize and cannot be changed), this would be a risk. Since factory is immutable after initialization and the factory has the phase guard, the market-level lack of phase guard is defense-in-depth only. The real risk would be if a future factory version removes the phase check. Additionally, `refund()` uses `onlyRelayerOrFactoryOwner` modifier which resolves `RelayerEscrow(payable(relayerEscrow)).owner()` dynamically. If the relayer escrow were changed to a malicious contract, the modifier could return an attacker-controlled owner, granting refund access. But since setRelayerEscrow is factory-only and the factory guards phase+ticketCount, this vector is blocked.",
+    "trigger_scenario": [
+      "Step 1: Market is in Locked phase with commitments",
+      "Step 2: (Hypothetical) If factory allowed setRelayerEscrow during Locked phase, attacker-controlled relayer could be set",
+      "Step 3: onlyRelayerOrFactoryOwner modifier would resolve to attacker's relayer.owner()",
+      "Step 4: Attacker could call refund() to drain market tokens to arbitrary users",
+      "Step 5: (Blocked) MarketFactory.updateMarketRelayer reverts with RelayerRotationLocked when phase != Commit or nextTicketId != 0"
+    ],
+    "preconditions": [
+      "Factory must allow relayer rotation outside commit phase (currently blocked by MarketFactory.updateMarketRelayer line 285)"
+    ],
+    "impact": "fund_loss",
+    "likelihood": "external_dependency",
+    "belief_score": 0.1
+  },
+  {
+    "id": "hyp-xstate-v2-005",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "RevealMarket._verifyBatchProof: settledEscrowSum accumulates per-batch escrow values from ZK proof signals without verifying they match per-batch commitment counts, enabling forged batch totals",
+    "locations": [
+      "RevealMarket._verifyBatchProof",
+      "RevealMarket.verifyAndSettleBatched",
+      "RevealMarket._finalizeSettlement"
+    ],
+    "root_cause": "In _verifyBatchProof (lines 869-872), the function accumulates signals[3] (escrow), signals[4] (liability), signals[6] (poolYes), signals[7] (poolNo) from each batch proof into settledEscrowSum, settledLiabilitySum, settledPoolYesSum, settledPoolNoSum. After all batches are verified, verifyAndSettleBatched checks settledEscrowSum == totalEscrow (line 443). The ZK circuit is responsible for ensuring each batch's escrow equals the sum of (ticketSize - rake) for commitments in that batch. If the ZK circuit is sound, this sum across all batches will equal totalEscrow. However, the on-chain code does NOT independently verify that each batch's signals[3] corresponds to the expected escrow for that batch (batchCounts[i] * netTicketSize). It relies entirely on the ZK proof's soundness for this invariant. If the ZK circuit has a bug where batch-level escrow can be arbitrarily distributed across batches (e.g., one batch claims all escrow, others claim zero) but the sum is correct, the per-batch liability/poolYes/poolNo could also be skewed. But since only the sum matters for _finalizeSettlement and the sum check is performed (line 443), the aggregate invariant holds if the circuit is sound. The real question is whether the circuit enforces per-batch correctness.",
+    "trigger_scenario": [
+      "Step 1: Market has 3 batches with 256, 256, and 100 commitments",
+      "Step 2: Oracle posts result. Oracle submits batched proofs",
+      "Step 3: Batch 0 proof has signals[3]=totalEscrow (all escrow attributed to batch 0), signals[4]=totalLiability",
+      "Step 4: Batch 1 and 2 proofs have signals[3]=0, signals[4]=0",
+      "Step 5: ZK verifier accepts all three proofs (depends on circuit constraints)",
+      "Step 6: settledEscrowSum = totalEscrow (passes line 443 check)",
+      "Step 7: _finalizeSettlement uses the accumulated sums. If per-batch distribution is wrong but totals are right, settlement proceeds correctly",
+      "Step 8: The concern is that a malicious oracle with a circuit bug could game per-batch values to produce incorrect totalLiability decomposition"
+    ],
+    "preconditions": [
+      "ZK circuit must have a bug allowing arbitrary per-batch value distribution while maintaining correct totals",
+      "Oracle must be malicious or compromised"
+    ],
+    "impact": "protocol_insolvency",
+    "likelihood": "external_dependency",
+    "belief_score": 0.15
+  },
+  {
+    "id": "hyp-xstate-v2-006",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "ProtocolPool.draw + RevealMarket._finalizeSettlement: Pool draw reduces reservedLiability but settlement then calls releaseLiabilityReservation which double-releases the already-consumed portion",
+    "locations": [
+      "ProtocolPool.draw",
+      "ProtocolPool.releaseLiabilityReservation",
+      "RevealMarket._finalizeSettlement"
+    ],
+    "root_cause": "During _finalizeSettlement, if there is a deficit, pool.draw(market, deficit) is called (line 754). In ProtocolPool.draw (lines 162-165), when reserved != 0, the draw amount is subtracted from reservedLiability[market] and reservedTotal. After settlement completes, _finalizeSettlement calls _releaseLiabilityReservation (line 774), which calls pool.releaseLiabilityReservation(market). In releaseLiabilityReservation (lines 138-150), the ENTIRE remaining reservedLiability[market] is set to 0 and subtracted from reservedTotal. The sequence is: (1) lockBatches: reservedLiability[market] = cap, reservedTotal += cap. (2) draw(deficit): reservedLiability[market] -= deficit, reservedTotal -= deficit. (3) releaseLiabilityReservation: reservedTotal -= reservedLiability[market] (which is cap - deficit). Net effect on reservedTotal: +cap - deficit - (cap - deficit) = 0. This is mathematically correct. The reservation is fully unwound. No double-release occurs because draw reduces the reservation first, then release cleans up the remainder.",
+    "trigger_scenario": [
+      "Step 1: Market locks. pool.reserveLiability(market, 1000). reservedLiability[market]=1000, reservedTotal+=1000",
+      "Step 2: Settlement requires pool draw of 700. pool.draw(market, 700). reservedLiability[market]=300, reservedTotal-=700. consumedLiability[market]=700",
+      "Step 3: _finalizeSettlement calls _releaseLiabilityReservation. reservedLiability[market]=0, reservedTotal-=300",
+      "Step 4: Net: reservedTotal went +1000, -700, -300 = 0 change. Correct.",
+      "Step 5: consumedLiability[market]=700. This is the permanent record of what was consumed."
+    ],
+    "preconditions": [
+      "Market must draw from pool during settlement",
+      "Standard settlement flow with pool coverage"
+    ],
+    "impact": "protocol_insolvency",
+    "likelihood": "common",
+    "belief_score": 0.05
+  },
+  {
+    "id": "hyp-xstate-v2-007",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "ProtocolPool.reserveLiability: Market can call reserveLiability multiple times because lockBatches can be re-entered via verifier key refresh resetting settlement and re-locking",
+    "locations": [
+      "RevealMarket.lockBatches",
+      "RevealMarket.refreshLockedVerifierKeyHash",
+      "ProtocolPool.reserveLiability"
+    ],
+    "root_cause": "In lockBatches (line 377), pool.reserveLiability is called with protocolLiabilityCap. This reserves funds in the pool. lockBatches transitions phase from Commit to Locked and can only be called once (phase check on line 333). refreshLockedVerifierKeyHash (line 687) only resets the settlement progress (batch proof epoch, settled counts) but does NOT release or re-reserve pool liability. It operates within the Locked phase. So reserveLiability is called exactly once per market lifecycle during lockBatches. There is no path to call lockBatches twice since phase must be Commit and it sets phase to Locked. enableRefunds from Locked phase calls _releaseLiabilityReservation. HOWEVER: what if lockBatches itself reverts after the external call to reserveLiability but before setting phase to Locked? In Solidity, if any part of lockBatches reverts, the entire transaction reverts including the reserveLiability call. So this is not possible. The reservation is atomic with the phase transition.",
+    "trigger_scenario": [
+      "Step 1: Market in Commit phase, commit deadline passed",
+      "Step 2: Oracle calls lockBatches. pool.reserveLiability(market, cap) succeeds. Phase set to Locked",
+      "Step 3: Factory owner calls refreshMarketLockedVerifierKey. Settlement progress reset but reservation NOT touched",
+      "Step 4: Settlement proceeds with new verifier key. No double-reservation possible",
+      "Step 5: (Alternative) Could lockBatches be called again? No, phase is Locked, line 333 reverts"
+    ],
+    "preconditions": [
+      "Market must transition through lock and settlement"
+    ],
+    "impact": "protocol_insolvency",
+    "likelihood": "common",
+    "belief_score": 0.05
+  },
+  {
+    "id": "hyp-xstate-v2-008",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "RevealMarket.enableRefunds from Locked: Pool reservation released but if pool had insufficient balance at reserve time and somehow became solvent later, the release could increase pool idle liquidity beyond what LPs deposited",
+    "locations": [
+      "RevealMarket.enableRefunds",
+      "ProtocolPool.releaseLiabilityReservation",
+      "ProtocolPool.lpWithdraw"
+    ],
+    "root_cause": "When a market is locked, pool.reserveLiability(market, cap) is called, which increases reservedTotal by cap. This reduces the pool's idle liquidity (balance - reservedTotal), preventing LP withdrawals of reserved funds. If the market is subsequently cancelled (enableRefunds from Locked), _releaseLiabilityReservation decreases reservedTotal by the full reservation. If capacity tracking is enabled, capacity is restored (capped at capacityLimit). The LP withdrawal check (line 258-260) uses `balance - reservedTotal` for idle liquidity. After release, idle liquidity increases by the released amount. This is correct behavior: the funds were reserved but never drawn, so they become available again. If capacity tracking is enabled and capacity was reduced during reservation, it is restored. The concern is whether capacity could be restored beyond capacityLimit. Line 146-148 caps capacity at capacityLimit. This is safe.",
+    "trigger_scenario": [
+      "Step 1: Pool has 10000 balance, capacityEnabled=true, capacity=5000, capacityLimit=5000",
+      "Step 2: Market locks, reserveLiability(market, 3000). capacity becomes 2000, reservedTotal=3000",
+      "Step 3: Another market locks, reserveLiability(market2, 2000). capacity becomes 0, reservedTotal=5000",
+      "Step 4: Market 1 cancelled, releaseLiabilityReservation releases 3000. capacity = 0 + 3000 = 3000 (< capacityLimit=5000). reservedTotal=2000",
+      "Step 5: Idle liquidity = 10000 - 2000 = 8000. LPs can withdraw up to 8000",
+      "Step 6: No issue, accounting is correct"
+    ],
+    "preconditions": [
+      "Capacity tracking enabled",
+      "Market cancelled from locked state"
+    ],
+    "impact": "protocol_insolvency",
+    "likelihood": "common",
+    "belief_score": 0.05
+  },
+  {
+    "id": "hyp-xstate-v2-009",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "RelayerEscrow.commitOnBehalf + RevealMarket.commitWithAuthorization: Escrow deducts ticketSize but market accounts net of rake, creating a permanent rake residual in market contract that is only swept post-settlement",
+    "locations": [
+      "RelayerEscrow.commitOnBehalf",
+      "RevealMarket.commitWithAuthorization",
+      "RevealMarket._finalizeSettlement",
+      "RevealMarket.sweepUnclaimed"
+    ],
+    "root_cause": "In commitOnBehalf (line 143-153), the escrow deducts ticketSize from the user's balance and transfers ticketSize to the market. In commitWithAuthorization (lines 287, 316-319), the market verifies IERC20 balance >= totalEscrow + ticketSize, then sets totalEscrow += (ticketSize - rake) and rakeCollected += rake. The market now holds ticketSize tokens for that commitment but only accounts totalEscrow as the net amount. The rake remains in the market as an accounting surplus: market_balance = totalEscrow + rakeCollected. During _finalizeSettlement, surplus = market_balance - totalLiability is sent to the pool. This surplus includes rake and any escrow excess. During cancellation (refunds), each ticket refunds ticketSize (gross), which correctly depletes the full balance. The question is whether the accounting divergence between escrow (which tracks gross) and market (which tracks net) creates any exploitable gap. The answer is no: the escrow accounting (accountedCollateral) decreases by ticketSize, the market receives ticketSize tokens, and the market's internal accounting correctly separates totalEscrow and rakeCollected. The invariant market_balance >= totalEscrow + rakeCollected holds after each commit.",
+    "trigger_scenario": [
+      "Step 1: User has 100 in escrow. ticketSize=100, rakeBps=200 (2%)",
+      "Step 2: Relayer calls commitOnBehalf. Escrow: balances[user] -= 100, accountedCollateral -= 100. Transfers 100 to market",
+      "Step 3: Market: totalEscrow += 98, rakeCollected += 2. balance check: 100 >= 0 + 100 (before commit state changes) passes",
+      "Step 4: Market balance = 100. totalEscrow = 98, rakeCollected = 2. Consistent",
+      "Step 5: On settlement: surplus includes the 2 rake (if totalLiability < 100). On cancel: refund pays 100 (full gross). Either way, balanced"
+    ],
+    "preconditions": [
+      "Standard commit flow via escrow with non-zero rake"
+    ],
+    "impact": "fund_loss",
+    "likelihood": "common",
+    "belief_score": 0.05
+  },
+  {
+    "id": "hyp-xstate-v2-010",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "MarketFactory.updateMarketRelayer: Old relayer unregistration failure is silently caught, leaving allowedMarket[market]=true on old relayer, enabling stale commitOnBehalf calls to the old relayer for this market",
+    "locations": [
+      "MarketFactory.updateMarketRelayer",
+      "RelayerEscrow.commitOnBehalf",
+      "RelayerEscrow.unregisterMarket"
+    ],
+    "root_cause": "In updateMarketRelayer (lines 288-290), the factory tries to unregister the market from the old relayer via `RelayerEscrow(payable(oldRelayer)).unregisterMarket(market)`. If this reverts, it catches the error and emits RelayerUnregisterFailed, but continues. The market's relayerEscrow is then updated to the new relayer (line 293). After rotation, the old relayer still has allowedMarket[market]=true. However, commitOnBehalf on the old relayer cannot succeed because: (1) the old relayer calls IRevealMarket(market).commitWithAuthorization which has `onlyRelayer` modifier checking msg.sender == relayerEscrow, and relayerEscrow now points to the new relayer. So the old relayer's commitOnBehalf would transfer tokens to the market but the market.commitWithAuthorization call would revert with NotRelayer. BUT: the _safeTransferExact in commitOnBehalf (line 153) happens BEFORE the external call to market.commitWithAuthorization (line 154). If the market call reverts, the entire transaction reverts (no try/catch). So the token transfer is also rolled back. The old relayer's commitOnBehalf would revert entirely. The stale allowedMarket entry is a cosmetic issue, not a fund risk. Still, creditFromMarket on the old relayer could be called by the market (since allowedMarket is still true), but the market would only call creditFromMarket if it were paying users through escrow, which is not the current design.",
+    "trigger_scenario": [
+      "Step 1: Market M is on Relayer A. allowedMarket[M]=true on Relayer A",
+      "Step 2: Factory owner rotates to Relayer B. unregisterMarket on A fails (silently caught). allowedMarket[M] still true on A",
+      "Step 3: Market's relayerEscrow now points to B",
+      "Step 4: Relayer A's owner tries commitOnBehalf(user, M, ...). Transfers ticketSize to M. Calls M.commitWithAuthorization. M checks msg.sender == relayerEscrow (B). Reverts NotRelayer. Entire tx reverts. Funds safe",
+      "Step 5: However, if market M somehow calls A.creditFromMarket(user, amount), it would succeed since allowedMarket[M]=true on A. This requires M to approve and transfer tokens to A first"
+    ],
+    "preconditions": [
+      "Relayer rotation with unregistration failure on old relayer",
+      "Old relayer must still be operational"
+    ],
+    "impact": "griefing",
+    "likelihood": "internal_state",
+    "belief_score": 0.2
+  },
+  {
+    "id": "hyp-xstate-v2-011",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "MarketFactory.migrateMarketRelayerBalances: withdrawTo sends tokens to new relayer, then creditMigrated attributes them, but if withdrawTo target is not the new relayer address, tokens are lost",
+    "locations": [
+      "MarketFactory.migrateMarketRelayerBalances",
+      "RelayerEscrow.withdrawTo",
+      "RelayerEscrow.creditMigrated"
+    ],
+    "root_cause": "In migrateMarketRelayerBalances (lines 315-317), the factory calls oldRelayer.withdrawTo(user, targetRelayerAddress, balance) which transfers tokens from the old relayer to targetRelayerAddress, then calls targetRelayer.creditMigrated(user, balance) which attributes those tokens to the user's balance. withdrawTo checks msg.sender == marketFactory, deducts from balances[user] and accountedCollateral, then transfers tokens to the recipient. creditMigrated checks msg.sender == marketFactory and that _excessCollateral() >= amount before crediting. _excessCollateral() = COLLATERAL_TOKEN.balanceOf(this) - accountedCollateral. If withdrawTo correctly transferred `balance` tokens to the target relayer, then the target relayer's actual token balance increased by `balance` while accountedCollateral stayed the same, so excessCollateral >= balance. This check passes. The flow is correct. However, if there's a reentrancy via the token transfer in withdrawTo (e.g., ERC777 token), the attacker could interleave another operation between withdrawTo and creditMigrated. But the contracts use SafeERC20 and withdrawTo has nonReentrant. Additionally, the COLLATERAL_TOKEN is set at construction and is expected to be a trusted ERC20. Migration flow appears safe.",
+    "trigger_scenario": [
+      "Step 1: User has 500 balance in old relayer. Market points to new relayer",
+      "Step 2: Factory calls migrateMarketRelayerBalances(market, oldRelayer, [user])",
+      "Step 3: oldRelayer.withdrawTo(user, newRelayer, 500): balances[user] -= 500, accountedCollateral -= 500, transfer 500 to newRelayer",
+      "Step 4: newRelayer.creditMigrated(user, 500): excessCollateral = newBalance - accountedCollateral >= 500. balances[user] += 500, accountedCollateral += 500",
+      "Step 5: User's balance migrated correctly. No double-spend possible because withdrawTo uses nonReentrant"
+    ],
+    "preconditions": [
+      "Relayer rotation has occurred",
+      "Users have balances in old relayer"
+    ],
+    "impact": "fund_loss",
+    "likelihood": "external_dependency",
+    "belief_score": 0.05
+  },
+  {
+    "id": "hyp-xstate-v2-012",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "RevealMarket.claimWithOracleAuthorization: Per-ticket payout capped at totalLiability but not at per-ticket net contribution, allowing compromised oracle to redistribute payouts unfairly across tickets",
+    "locations": [
+      "RevealMarket.claimWithOracleAuthorization",
+      "RevealMarket.claim"
+    ],
+    "root_cause": "claimWithOracleAuthorization (line 579) checks `payout > totalLiability` for each individual ticket payout. This prevents a single ticket from claiming more than the total market liability. The aggregate guard is `claimedLiability > totalLiability` (line 603). However, there is no per-ticket maximum derived from the ticket's contribution (ticketSize - rake). A compromised oracle could sign payouts that give ticket A a large payout and ticket B zero, as long as the sum does not exceed totalLiability. This is by design: in a prediction market, winners get more than their contribution and losers get nothing. The payout distribution is determined by the commitment details revealed during settlement. The oracle authorization path is explicitly documented as trusting the oracle (code comment on lines 565-567). The on-chain guard caps cumulative at totalLiability. This is not a vulnerability but rather the intended trust model for the oracle fallback path.",
+    "trigger_scenario": [
+      "Step 1: Market settled with totalLiability = 1000",
+      "Step 2: Compromised oracle signs ticket 0 with payout = 1000, ticket 1 with payout = 0",
+      "Step 3: Ticket 0 claims 1000. claimedLiability = 1000. Succeeds",
+      "Step 4: Ticket 1 tries to claim 0. No-op (payout is 0)",
+      "Step 5: Ticket 2 (legitimate winner) tries to claim 500. claimedLiability would be 1500 > 1000. Reverts with OverClaimed",
+      "Step 6: Legitimate winners are denied their payouts because compromised oracle front-ran with bad authorizations"
+    ],
+    "preconditions": [
+      "Oracle private key compromised",
+      "Market is in Settled phase with available claims"
+    ],
+    "impact": "unfair_treatment",
+    "likelihood": "malicious_action",
+    "belief_score": 0.55
+  },
+  {
+    "id": "hyp-xstate-v2-013",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "RevealMarket.verifyAndSettleBatched: Partial batch submission does not finalize, leaving market in Locked phase indefinitely if oracle submits N-1 of N batches then stalls",
+    "locations": [
+      "RevealMarket.verifyAndSettleBatched",
+      "RevealMarket.enableRefunds"
+    ],
+    "root_cause": "In verifyAndSettleBatched (lines 442-445), settlement only finalizes when settledBatchCount == batchCount. If the oracle submits proofs for some but not all batches, the market remains in Locked phase with partial settlement progress. The escape hatch is enableRefunds, which can be called after lockedAt + SETTLEMENT_TIMEOUT_SECONDS (14 days) when phase == Locked (line 484). So after 14 days of stalled settlement, the factory owner can cancel the market and enable refunds. However, during those 14 days, pool liquidity remains reserved (reservedLiability + reservedTotal are not released). This could block LP withdrawals and new market reservations if the pool is liquidity-constrained. After enableRefunds, _releaseLiabilityReservation releases the reservation. The 14-day timeout is the maximum griefing window. Pool capacity is the resource being locked.",
+    "trigger_scenario": [
+      "Step 1: Market with 3 batches locks. pool.reserveLiability(market, 5000). reservedTotal += 5000",
+      "Step 2: Oracle submits proof for batch 0. settledBatchCount=1",
+      "Step 3: Oracle stalls. Does not submit batches 1 and 2",
+      "Step 4: For 14 days, pool has 5000 in reservedTotal. LP withdrawals and new reservations are constrained",
+      "Step 5: After 14 days, factory owner calls enableMarketRefunds. Phase -> Cancelled. Reservation released",
+      "Step 6: Pool liquidity freed. Users can refund tickets"
+    ],
+    "preconditions": [
+      "Oracle submits partial batches then becomes unresponsive",
+      "Pool has limited liquidity relative to reservation"
+    ],
+    "impact": "dos",
+    "likelihood": "malicious_action",
+    "belief_score": 0.55
+  },
+  {
+    "id": "hyp-xstate-v2-014",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "ProtocolPool.draw: Draw without reservation bypasses drawsPaused check only when reserved!=0, allowing market to drain pool during pause via prior reservation",
+    "locations": [
+      "ProtocolPool.draw",
+      "RevealMarket._finalizeSettlement"
+    ],
+    "root_cause": "In ProtocolPool.draw (line 159), the drawsPaused/marketDrawPaused check is only enforced when `reserved == 0`. If `reserved != 0` (i.e., the market had a prior reservation from lockBatches), the draw proceeds regardless of drawsPaused. This is by design: a reservation represents a prior commitment by the pool to fund the market, so pausing draws should not break an existing reservation commitment. However, this means that if the pool owner pauses draws as an emergency measure (e.g., suspecting oracle compromise), markets with existing reservations can still draw from the pool. The pool owner would need to also pause each market's draws individually via setMarketDrawPaused, but even that is bypassed when reserved != 0 (same line 159 check). The ONLY way to prevent a reserved market from drawing is to (1) cancel the market via enableRefunds (which releases the reservation), or (2) the pool not having sufficient balance. This is a deliberate design choice documented by the code structure, but could surprise an operator who pauses draws expecting all draws to stop.",
+    "trigger_scenario": [
+      "Step 1: Market locks, pool.reserveLiability(market, 5000). reservedLiability[market]=5000",
+      "Step 2: Pool owner detects oracle compromise, calls setDrawsPaused(true)",
+      "Step 3: Compromised oracle settles market with inflated totalLiability, requiring pool.draw(market, 5000)",
+      "Step 4: pool.draw: reserved=5000 != 0, so drawsPaused check is SKIPPED. Draw proceeds",
+      "Step 5: Pool loses 5000 despite draws being paused",
+      "Step 6: Mitigation: pool owner must also call enableMarketRefunds to cancel the market and release reservation before settlement"
+    ],
+    "preconditions": [
+      "Market is in Locked phase with pool reservation",
+      "Pool owner has paused draws as emergency measure",
+      "Oracle is compromised and attempts settlement with inflated liability"
+    ],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.6
+  },
+  {
+    "id": "hyp-xstate-v2-015",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "Verifier.setVerifyingKey: Owner can rotate verifying key after market locks, changing verifyingKeyHash to differ from lockedVerifierKeyHash, blocking settlement until factory refreshes",
+    "locations": [
+      "Verifier.setVerifyingKey",
+      "RevealMarket.lockBatches",
+      "RevealMarket.verifyAndSettleBatched",
+      "MarketFactory.refreshMarketLockedVerifierKey"
+    ],
+    "root_cause": "In lockBatches (line 369), lockedVerifierKeyHash is set to verifier.verifyingKeyHash() at lock time. During settlement (verifyAndSettleBatched line 431, _verifyBatchProof line 854), the code checks verifier.verifyingKeyHash() == lockedVerifierKeyHash. If the verifier owner rotates the key (via Verifier.setVerifyingKey), verifyingKeyHash changes, and this check fails. Settlement is blocked until the factory owner calls refreshMarketLockedVerifierKey, which updates lockedVerifierKeyHash and resets settlement progress. The verifier owner is checked to be the factory owner (via _requireVerifierOwnership), so this requires the same trusted entity. However, if the factory owner inadvertently rotates the verifier key (for a different market or circuit), all locked markets using that verifier are blocked until their lockedVerifierKeyHash is refreshed. This is a griefing/DoS vector if the factory owner is operationally careless. The factory's setVerifierApproval also checks for drift via pinnedVerifierCodehash/pinnedVerifierKeyHash, but this does not prevent the verifier owner from changing the key directly. The drift check only applies at approval time, not continuously.",
+    "trigger_scenario": [
+      "Step 1: Markets M1 and M2 share verifier V. Both are locked. lockedVerifierKeyHash matches V.verifyingKeyHash()",
+      "Step 2: Factory owner rotates V's verifying key for a new circuit (calls V.setVerifyingKey with new params)",
+      "Step 3: V.verifyingKeyHash() changes. M1 and M2's settlement attempts now fail: verifierKeyHash != lockedVerifierKeyHash",
+      "Step 4: Factory owner must call refreshMarketLockedVerifierKey for each affected market",
+      "Step 5: This resets settlement progress (if any batch proofs were accepted), requiring re-submission of all proofs with the new key",
+      "Step 6: If this happens near the SETTLEMENT_TIMEOUT_SECONDS boundary, it could push markets past the timeout into cancellation"
+    ],
+    "preconditions": [
+      "Verifier key is rotated while markets are locked",
+      "Multiple markets share the same verifier contract"
+    ],
+    "impact": "dos",
+    "likelihood": "internal_state",
+    "belief_score": 0.5
+  },
+  {
+    "id": "hyp-xstate-v2-016",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "RevealMarket._finalizeSettlement: totalLiability set from ZK proof output can exceed totalEscrow + protocolLiabilityCap, but the check is present; however individual batch signal[4] values are uncapped before accumulation",
+    "locations": [
+      "RevealMarket._verifyBatchProof",
+      "RevealMarket._finalizeSettlement"
+    ],
+    "root_cause": "In _verifyBatchProof (line 870), settledLiabilitySum += signals[4] accumulates liability from each batch. The ZK proof outputs are uint256 values that passed the SNARK_SCALAR_FIELD check in the verifier (Verifier.verifyProof line 108). However, the accumulation in settledLiabilitySum could overflow if signals[4] values are close to uint256 max. Since signals[4] < SNARK_SCALAR_FIELD (~2^254), and there are at most MAX_LOCK_BATCH_COUNT=64 batches, the maximum settledLiabilitySum would be 64 * 2^254, which does overflow uint256. In Solidity 0.8.x, this would revert with arithmetic overflow. So an attacker cannot cause silent overflow, but they could cause a permanent DoS if the ZK circuit allows signals[4] to be very large. The _finalizeSettlement check (line 748) `required > totalEscrow_ + protocolLiabilityCap` would catch any excessive totalLiability after accumulation, but the overflow revert would prevent reaching this check. The real question is whether the ZK circuit constrains signals[4] to reasonable values. If signals[4] is constrained to be <= totalEscrow per batch, then 64 * totalEscrow << uint256 max and no overflow occurs.",
+    "trigger_scenario": [
+      "Step 1: Market with 64 batches. Each batch's ZK proof has signals[4] close to SNARK_SCALAR_FIELD (~2^254)",
+      "Step 2: Oracle submits verifyAndSettleBatched with all 64 proofs",
+      "Step 3: _verifyBatchProof accumulates settledLiabilitySum. After ~4 batches, sum exceeds uint256 max. Arithmetic overflow revert",
+      "Step 4: Settlement permanently blocked. Market must wait for SETTLEMENT_TIMEOUT_SECONDS then cancel via enableRefunds",
+      "Step 5: (Requires) ZK circuit to allow signals[4] values near SNARK_SCALAR_FIELD while still producing valid proofs"
+    ],
+    "preconditions": [
+      "ZK circuit allows arbitrarily large liability signals per batch",
+      "Oracle submits proofs with inflated per-batch liability values"
+    ],
+    "impact": "dos",
+    "likelihood": "external_dependency",
+    "belief_score": 0.15
+  },
+  {
+    "id": "hyp-xstate-v2-017",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "MarketFactory.updateProtocolLiabilityCap: Cap can be increased after commitments exist but before lock, allowing pool reservation larger than originally planned",
+    "locations": [
+      "MarketFactory.updateProtocolLiabilityCap",
+      "RevealMarket.setProtocolLiabilityCap",
+      "RevealMarket.lockBatches",
+      "ProtocolPool.reserveLiability"
+    ],
+    "root_cause": "RevealMarket.setProtocolLiabilityCap (lines 707-711) only requires phase == Commit. It does NOT require nextTicketId == 0 (unlike setProtocolPool or setRelayerEscrow). The factory's updateProtocolLiabilityCap (lines 354-359) also does not check nextTicketId. This means the factory owner can increase protocolLiabilityCap after users have already committed, which would increase the pool reservation at lock time. The factory also calls pool.updateLiabilityCap(market, newCap) (line 358), which checks newCap >= consumedLiability + reservedLiability. Before lock, both are zero, so any newCap passes. At lock time, pool.reserveLiability(market, protocolLiabilityCap) reserves the updated cap. This is a trusted admin operation (onlyOwner). The risk is that the factory owner could set an arbitrarily large protocolLiabilityCap, reserving a disproportionate share of pool liquidity for one market. This could starve other markets of pool capacity. The pool's own balance check (reserveLiability line 125) ensures the pool actually has the funds, so insolvency is not possible, but capacity starvation is.",
+    "trigger_scenario": [
+      "Step 1: Market created with protocolLiabilityCap=1000. Pool has 10000 balance",
+      "Step 2: 100 users commit to the market",
+      "Step 3: Factory owner calls updateProtocolLiabilityCap(market, 9000). Market's cap now 9000. Pool's liabilityCap[market] now 9000",
+      "Step 4: Oracle locks market. pool.reserveLiability(market, 9000). reservedTotal=9000. Idle = 1000",
+      "Step 5: Other markets cannot reserve more than 1000 from the pool. LP withdrawals capped at 1000",
+      "Step 6: Pool capacity monopolized by one market's inflated cap"
+    ],
+    "preconditions": [
+      "Factory owner increases liability cap after commits but before lock",
+      "Pool has limited liquidity"
+    ],
+    "impact": "dos",
+    "likelihood": "malicious_action",
+    "belief_score": 0.35
+  },
+  {
+    "id": "hyp-xstate-v2-018",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "RevealMarket.sweepUnclaimed + claim race: Claim transaction submitted before sweep but mined after sweep would fail, but sweepUnclaimed drains entire balance including unswept rake",
+    "locations": [
+      "RevealMarket.sweepUnclaimed",
+      "RevealMarket.claim",
+      "RevealMarket._finalizeSettlement"
+    ],
+    "root_cause": "In sweepUnclaimed (lines 817-829), the function transfers the ENTIRE remaining token balance to the protocol pool (line 825-828). After _finalizeSettlement, the market's balance should be exactly totalLiability (since surplus was sent to pool in lines 760-764). If users have claimed some tickets, balance = totalLiability - claimedLiability. sweepUnclaimed sends all of this remaining balance. The function requires (1) phase == Settled, (2) claim deadline passed, (3) recipient == protocolPool, (4) !claimsSwept. After sweep, claimsSwept = true and claimsPaused = true. Any pending claim transactions that were submitted before the sweep but mined after would revert due to either claimsSwept check (line 460) or insufficient balance. The design appears intentional: after the claim window closes, any unclaimed funds go to the protocol. The concern is a front-running race where a user submits a claim just before the deadline but it gets mined after the sweep. In practice, the sweep can only happen AFTER the deadline (line 819), and claims check the deadline (line 461). Both use `block.timestamp > _effectiveClaimDeadline()`. If both transactions are in the same block, the claim would see timestamp > deadline and revert (ClaimWindowClosed), while sweep would also see timestamp > deadline and proceed. So the race is benign: both see the same block.timestamp.",
+    "trigger_scenario": [
+      "Step 1: Market settled. Claim deadline is block N",
+      "Step 2: User submits claim tx in block N (timestamp = deadline). block.timestamp > deadline is false. Claim succeeds if mined in block N",
+      "Step 3: In block N+1, factory owner calls sweepUnclaimed. timestamp > deadline is true. Sweep proceeds",
+      "Step 4: Any user claim not yet mined by block N+1 would now see timestamp > deadline and revert with ClaimWindowClosed (not due to sweep, but due to deadline)",
+      "Step 5: No race condition: the deadline is the cutoff, not the sweep transaction"
+    ],
+    "preconditions": [
+      "Market is settled and approaching claim deadline",
+      "Users have unclaimed tickets"
+    ],
+    "impact": "fund_loss",
+    "likelihood": "common",
+    "belief_score": 0.05
+  },
+  {
+    "id": "hyp-xstate-v2-019",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "ProtocolPool LP vault: Market draws reduce pool balance, diluting LP share value below 1:1 with no mechanism for LPs to recoup losses from future surplus",
+    "locations": [
+      "ProtocolPool.draw",
+      "ProtocolPool._lpShareValue",
+      "ProtocolPool.lpWithdraw"
+    ],
+    "root_cause": "The LP vault uses 1:1 shares (deposit amount = shares). _lpShareValue (lines 337-341) caps share value at 1:1 but allows it to go below 1 when totalAssets < totalShares (the pool is 'underwater'). Market draws via draw() transfer tokens out of the pool, reducing totalAssets(). If draws exceed the protocol surplus (owner funds + rake + surplus from settlements), LP principal is impaired. When the pool receives surplus from settled markets (_finalizeSettlement sends surplus to pool), this increases totalAssets but the surplus accrues to the protocol (owner), not to LPs (LP share value is capped at 1:1 per line 340). This means LPs bear losses from market draws but cannot benefit from market surpluses. This is documented behavior (contract comment line 13: 'LPs bear losses from market draws but cannot profit beyond their principal'). The risk is that unsophisticated LPs may not understand this asymmetric risk/return profile. From a code correctness perspective, if pool goes underwater and multiple LPs try to withdraw, they get proportionally less (Math.mulDiv(shares, totalAssets, totalShares)). First-to-withdraw gets more absolute value than last-to-withdraw if draws continue. This creates a bank-run incentive once the pool is underwater.",
+    "trigger_scenario": [
+      "Step 1: LP deposits 10000. totalShares=10000, totalAssets=10000",
+      "Step 2: Market draws 3000 from pool. totalAssets=7000. LP share value = min(10000, mulDiv(10000, 7000, 10000)) = min(10000, 7000) = 7000",
+      "Step 3: LP wants to withdraw all 10000 shares. Assets = 7000 (capped at proportional). LP gets 7000, losing 3000",
+      "Step 4: Market settles and sends 5000 surplus back to pool. totalAssets = 7000 + 5000 = 12000 (if LP hasn't withdrawn yet)",
+      "Step 5: LP share value = min(10000, mulDiv(10000, 12000, 10000)) = min(10000, 12000) = 10000. LP recovers full principal",
+      "Step 6: The 2000 excess (12000 - 10000) is protocol surplus, not LP profit",
+      "Step 7: Risk: if LP withdrew in step 3 before surplus arrived, they crystallized the 3000 loss permanently"
+    ],
+    "preconditions": [
+      "LP has deposits in pool",
+      "Market draw impairs pool below total LP shares",
+      "LP withdraws before surplus is returned"
+    ],
+    "impact": "fund_loss",
+    "likelihood": "common",
+    "belief_score": 0.45
+  },
+  {
+    "id": "hyp-xstate-v2-020",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "MarketFactory.setVerifierApproval: Clearing approval (approved=false) does not check if markets are currently locked with this verifier, potentially blocking their settlement",
+    "locations": [
+      "MarketFactory.setVerifierApproval",
+      "RevealMarket._isVerifierApprovedForSettlement",
+      "RevealMarket.verifyAndSettleBatched"
+    ],
+    "root_cause": "setVerifierApproval(verifier, false) (lines 202-206) sets approvedVerifier[verifier] = false immediately. isVerifierCurrentlyApproved (lines 220-232) returns false when approvedVerifier[verifier] is false. _isVerifierApprovedForSettlement in RevealMarket calls factory.isVerifierCurrentlyApproved. During settlement (_verifyBatchProof line 853, verifyAndSettle line 404, verifyAndSettleBatched line 430), the check `!_isVerifierApprovedForSettlement()` reverts with VerifierNotApproved. If the factory owner revokes a verifier's approval while markets are locked and pending settlement with that verifier, all those markets' settlements are blocked. The only recovery paths are: (1) Re-approve the verifier, (2) Rotate to a new verifier via refreshMarketLockedVerifierKey (but this requires the verifier to be approved), or (3) Wait for SETTLEMENT_TIMEOUT_SECONDS and cancel via enableRefunds. This is a deliberate security mechanism (revoking compromised verifiers), but it could be triggered inadvertently.",
+    "trigger_scenario": [
+      "Step 1: Markets M1, M2, M3 are locked using Verifier V. Settlement in progress",
+      "Step 2: Factory owner revokes V: setVerifierApproval(V, false)",
+      "Step 3: Oracle tries to settle M1. _isVerifierApprovedForSettlement returns false. Reverts VerifierNotApproved",
+      "Step 4: Factory owner cannot call refreshMarketLockedVerifierKey because it also checks _isVerifierApprovedForSettlement (line 690)",
+      "Step 5: Only options: (a) re-approve V, (b) deploy new Verifier V2, approve V2, rotate market's verifier (but setVerifier requires Commit phase, which is impossible for locked markets), or (c) wait 14 days and cancel",
+      "Step 6: All three markets' pool reservations locked for up to 14 days"
+    ],
+    "preconditions": [
+      "Verifier approval revoked while markets are in Locked phase",
+      "Markets using the revoked verifier need to settle"
+    ],
+    "impact": "dos",
+    "likelihood": "internal_state",
+    "belief_score": 0.65
+  },
+  {
+    "id": "hyp-xstate-v2-021",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "RevealMarket._finalizeSettlement + ProtocolPool.draw: Settlement draws from pool but pool.draw checks balance >= reservedTotal first, which could fail if other markets reserved liquidity concurrently",
+    "locations": [
+      "ProtocolPool.draw",
+      "RevealMarket._finalizeSettlement",
+      "ProtocolPool.reserveLiability"
+    ],
+    "root_cause": "In pool.draw (line 157), the first check is `if (balance < reservedTotal) revert InsufficientPool()`. If market A has a reservation of 5000 and market B also has a reservation of 5000, reservedTotal = 10000. If pool balance is 10000, a draw by market A of 3000 proceeds: reserved[A] -= 3000 (from 5000 to 2000), reservedTotal -= 3000 (from 10000 to 7000). Balance after transfer = 7000. reservedTotal = 7000. 7000 >= 7000 (post-draw check would pass). But the draw transfers BEFORE checking post-state (line 177 transfers, then line 178-185 check post-state). Actually, draw checks balance >= reservedTotal at the start (line 157), then if reserved, checks amount <= reserved (line 163), does the transfer (line 177), then checks balanceAfter (lines 178-185). The initial balance check (line 157) passes if balance >= reservedTotal. The draw amount comes from the reservation, so reservedTotal decreases by the draw amount. After transfer, new balance = balance - amount. New reservedTotal = reservedTotal - amount. Since balance >= reservedTotal initially, balance - amount >= reservedTotal - amount, so post-draw the invariant holds. This is mathematically sound. No issue found.",
+    "trigger_scenario": [
+      "Step 1: Pool has 10000 balance. Market A reserved 5000, Market B reserved 5000. reservedTotal = 10000",
+      "Step 2: Market A settles, needs draw of 4000. pool.draw(A, 4000)",
+      "Step 3: Check: balance(10000) >= reservedTotal(10000). Pass",
+      "Step 4: reserved[A] = 5000. amount(4000) <= reserved(5000). Pass. reserved[A] = 1000. reservedTotal = 6000",
+      "Step 5: Transfer 4000 to A. Pool balance = 6000",
+      "Step 6: Post-check: 6000 >= 6000. Pass. debited = 4000. Market received = 4000. All checks pass",
+      "Step 7: Market B's reservation (5000) is still intact. 6000 >= 6000. B can draw up to 5000"
+    ],
+    "preconditions": [
+      "Multiple markets with concurrent pool reservations",
+      "Pool balance equals total reservations"
+    ],
+    "impact": "protocol_insolvency",
+    "likelihood": "common",
+    "belief_score": 0.05
+  },
+  {
+    "id": "hyp-xstate-v2-022",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "RevealMarket.enableRefunds from Locked: Market cancelled but pool.draw never called, so consumedLiability stays 0, yet refunds pay ticketSize from market balance which includes both escrow and rake",
+    "locations": [
+      "RevealMarket.enableRefunds",
+      "RevealMarket.refundTicket",
+      "ProtocolPool.releaseLiabilityReservation"
+    ],
+    "root_cause": "When a market is cancelled from Locked phase: (1) pool reservation is released via _releaseLiabilityReservation, (2) pool.draw is never called, (3) consumedLiability[market] stays 0 on the pool. Refund payouts come from the market's own token balance, which holds N * ticketSize tokens (all commitments' gross amounts). Each refund pays ticketSize. Total refund obligations = N * ticketSize = market's balance. No pool interaction needed for refunds. The pool's consumedLiability stays clean (0). This is correct: the pool was never tapped, so its state is consistent. The market handles refunds entirely from its own funds. Value conservation holds: users get back their full ticketSize. The rake that was accounted internally (totalEscrow=net, rakeCollected=rake) is irrelevant because the market holds the full gross amount and refunds the full gross amount.",
+    "trigger_scenario": [
+      "Step 1: Market locked with 100 commitments. Market balance = 100 * ticketSize",
+      "Step 2: Settlement times out. Factory enables refunds. Phase -> Cancelled",
+      "Step 3: Pool reservation released. consumedLiability stays 0",
+      "Step 4: All 100 users call refundTicket. Each gets ticketSize. Total = 100 * ticketSize = market balance. Solvent",
+      "Step 5: No pool funds involved. Correct behavior"
+    ],
+    "preconditions": [
+      "Market cancelled from Locked phase",
+      "Users refund their tickets"
+    ],
+    "impact": "fund_loss",
+    "likelihood": "common",
+    "belief_score": 0.03
+  },
+  {
+    "id": "hyp-xstate-v2-023",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "MarketFactory.clearVerifierPin + setVerifierApproval: After clearing pin and re-approving with a new key, markets locked with the old key cannot be refreshed to the new key if approval check requires key match",
+    "locations": [
+      "MarketFactory.clearVerifierPin",
+      "MarketFactory.setVerifierApproval",
+      "MarketFactory.refreshMarketLockedVerifierKey",
+      "RevealMarket.refreshLockedVerifierKeyHash"
+    ],
+    "root_cause": "Sequence: (1) Verifier V approved with keyHash K1. Market M locks, lockedVerifierKeyHash = K1. (2) V's key rotated to K2. (3) Factory revokes V. (4) Factory clears V's pin (clearVerifierPin). pinnedVerifierCodehash/pinnedVerifierKeyHash deleted. (5) Factory re-approves V. New pin: K2. approvedVerifierKeyHash[V] = K2. (6) Factory calls refreshMarketLockedVerifierKey(M). This calls _validateVerifier(M.verifier, M.circuitHash) which checks verifier.verifyingKeyHash() == approvedVerifierKeyHash[V]. Since V's key is now K2 and approvedVerifierKeyHash[V] = K2, this passes. Then M.refreshLockedVerifierKeyHash() sets lockedVerifierKeyHash = V.verifyingKeyHash() = K2. Settlement progress is reset. (7) Oracle must re-submit proofs using the K2 key. This flow works correctly. The factory allows key rotation through the pin-clear-reapprove cycle. The concern is whether proofs generated with K1 are still valid under K2. They would not be (different verification key), so the oracle must regenerate proofs. This adds operational delay but is not a vulnerability.",
+    "trigger_scenario": [
+      "Step 1: V approved with K1. M locked with lockedVerifierKeyHash=K1. M has 3 batches, 2 settled with K1",
+      "Step 2: V's key rotated to K2 (owner calls V.setVerifyingKey)",
+      "Step 3: Factory revokes V, clears pin, re-approves V (now pinned to K2)",
+      "Step 4: Factory calls refreshMarketLockedVerifierKey(M). lockedVerifierKeyHash = K2. Settlement progress reset (2 batches lost)",
+      "Step 5: Oracle must regenerate all 3 proofs with K2 and resubmit",
+      "Step 6: If this takes too long, SETTLEMENT_TIMEOUT_SECONDS forces cancellation"
+    ],
+    "preconditions": [
+      "Verifier key rotation mid-settlement",
+      "Proofs already partially submitted under old key"
+    ],
+    "impact": "dos",
+    "likelihood": "internal_state",
+    "belief_score": 0.4
+  },
+  {
+    "id": "hyp-xstate-v2-024",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "RevealMarket.commitWithAuthorization: Balance check uses >= totalEscrow + ticketSize (net accumulation + gross new ticket) creating a stricter-than-necessary check that could spuriously reject valid commits",
+    "locations": [
+      "RevealMarket.commitWithAuthorization"
+    ],
+    "root_cause": "Line 287: `IERC20(collateralToken).balanceOf(address(this)) < totalEscrow + ticketSize`. Here totalEscrow is the net accumulated escrow (after rake), and ticketSize is the gross amount of the new ticket. The market's actual balance before this commit is: previousCommits * ticketSize (each commit transferred ticketSize from escrow). The balance check ensures the market has received the tokens for this commit (which the escrow transferred just before calling commitWithAuthorization). After the commit, totalEscrow will be += (ticketSize - rake), so the new totalEscrow = old_totalEscrow + ticketSize - rake. The balance after all N commits should be N * ticketSize. totalEscrow after N commits = N * (ticketSize - rake). The check for commit N+1 requires balance >= totalEscrow + ticketSize = N*(ticketSize-rake) + ticketSize. Actual balance at this point is (N+1)*ticketSize (escrow transferred before this call). So: (N+1)*ticketSize >= N*(ticketSize - rake) + ticketSize. Simplifying: N*ticketSize + ticketSize >= N*ticketSize - N*rake + ticketSize. This gives: 0 >= -N*rake, which is always true (rake >= 0). So the check always passes for valid commits. Actually this is a redundant safety check that ensures the escrow actually transferred the tokens. It cannot spuriously reject valid commits.",
+    "trigger_scenario": [
+      "Step 1: 10 commits made. balance=1000, totalEscrow=980 (rake=2% of 100 per ticket)",
+      "Step 2: 11th commit. Escrow transfers 100 to market. balance=1100",
+      "Step 3: Check: 1100 < 980 + 100 = 1080? No. Check passes",
+      "Step 4: After commit: totalEscrow = 1078, rakeCollected = 22, balance = 1100. Consistent"
+    ],
+    "preconditions": [
+      "Standard commit flow"
+    ],
+    "impact": "dos",
+    "likelihood": "common",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-xstate-v2-025",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "ProtocolPool.setCapacity: Resets capacity and capacityLimit while reservedTotal must be 0, but consumedLiability can be non-zero, creating inconsistency between capacity tracking and actual consumption",
+    "locations": [
+      "ProtocolPool.setCapacity",
+      "ProtocolPool.draw",
+      "ProtocolPool.reserveLiability"
+    ],
+    "root_cause": "setCapacity (lines 200-206) requires reservedTotal == 0 (no active reservations) but does not check consumedLiability for any market. It resets capacity = capacityLimit = newCapacity and capacityEnabled = (newCapacity != 0). consumedLiability represents funds already drawn from the pool by markets. These funds are no longer in the pool. If capacity is set to the pool's current balance, it does not account for the fact that consumedLiability funds are already out. Example: Pool has 10000 balance, consumedLiability = 3000 across markets (those 3000 tokens were transferred out). setCapacity(10000) sets capacity = 10000. But the pool's idle balance available for new draws is 10000 (actual token balance). Capacity of 10000 is correct for the token balance. consumedLiability is a historical record, not a current balance reservation. It tracks how much each market has ever drawn, which only matters for per-market cap checks. The global capacity limit is about how much new commitment the pool can make, which correctly relates to the current balance minus reservedTotal. No inconsistency: capacity controls future reservation/draw authorization, consumedLiability controls per-market cap checks.",
+    "trigger_scenario": [
+      "Step 1: Pool has 10000 balance. Market A drew 3000. consumedLiability[A]=3000. Balance = 7000 (3000 left pool)",
+      "Step 2: Wait - correction: after draw, pool balance = 10000 - 3000 = 7000. reservedTotal is 0 (reservation was consumed during draw)",
+      "Step 3: Owner calls setCapacity(7000). capacity=7000, capacityLimit=7000",
+      "Step 4: New market B wants to reserve 5000. reserveLiability(B, 5000). capacity -= 5000. capacity = 2000. reservedTotal = 5000. balance(7000) >= reservedTotal(5000). Pass",
+      "Step 5: Correct: 7000 - 5000 = 2000 idle. capacity = 2000 matches idle. No inconsistency"
+    ],
+    "preconditions": [
+      "Owner sets capacity after some markets have consumed liability"
+    ],
+    "impact": "protocol_insolvency",
+    "likelihood": "common",
+    "belief_score": 0.05
+  },
+  {
+    "id": "hyp-xstate-v2-026",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "RevealMarket._finalizeSettlement: LiabilityExceedsCoverage check uses totalEscrow_ from ZK proof output, not the on-chain totalEscrow, creating a trust dependency on proof correctness for solvency guarantee",
+    "locations": [
+      "RevealMarket._finalizeSettlement",
+      "RevealMarket.verifyAndSettle",
+      "RevealMarket.verifyAndSettleBatched"
+    ],
+    "root_cause": "In _finalizeSettlement (line 748): `if (required > totalEscrow_ + protocolLiabilityCap) revert LiabilityExceedsCoverage()`. The totalEscrow_ parameter comes from the ZK proof's publicSignals[3] in verifyAndSettle (line 418). In verifyAndSettle, line 409 checks `publicSignals[3] != totalEscrow` which ensures the proof's escrow value matches the on-chain totalEscrow. So totalEscrow_ == totalEscrow (the on-chain value). For verifyAndSettleBatched, _finalizeSettlement receives settledEscrowSum (line 444), and line 443 checks `settledEscrowSum != totalEscrow`. So again, the accumulated value matches on-chain totalEscrow. The LiabilityExceedsCoverage check is therefore using the on-chain totalEscrow indirectly. The totalLiability_ (publicSignals[4]) IS from the ZK proof and is trusted to be correct if the proof is valid. The invariant totalLiability <= totalEscrow + protocolLiabilityCap is enforced on-chain, providing an upper bound on payouts regardless of proof output. This is a sound defense-in-depth mechanism.",
+    "trigger_scenario": [
+      "Step 1: Market has totalEscrow = 9800 (on-chain), protocolLiabilityCap = 1000",
+      "Step 2: ZK proof outputs: totalEscrow_ = 9800 (must match on-chain), totalLiability_ = 10500",
+      "Step 3: _finalizeSettlement: required(10500) > totalEscrow_(9800) + cap(1000) = 10800? No. Check passes",
+      "Step 4: If ZK proof had totalLiability_ = 11000: required(11000) > 10800? Yes. Reverts LiabilityExceedsCoverage",
+      "Step 5: On-chain cap prevents unbounded liability even if ZK proof is somehow compromised"
+    ],
+    "preconditions": [
+      "Standard settlement flow"
+    ],
+    "impact": "protocol_insolvency",
+    "likelihood": "external_dependency",
+    "belief_score": 0.05
+  },
+  {
+    "id": "hyp-xstate-v2-027",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "MarketFactory.setMarketRake: Can change rake for a market with existing commitments, causing inconsistency between commitments made at old rake and settlement which uses new rake",
+    "locations": [
+      "MarketFactory.setMarketRake",
+      "MarketFactory.syncMarketRake",
+      "RevealMarket.setRakeBps"
+    ],
+    "root_cause": "RevealMarket.setRakeBps (lines 634-639) checks `phase != Phase.Commit` and `commitments.length != 0`. If commitments.length != 0, it reverts with RakeLocked. This means the rake CANNOT be changed once any commitment has been made. The factory's setMarketRake and syncMarketRake both call market.setRakeBps, which enforces this check. So the title's claim is incorrect: the code correctly prevents rake changes after commitments exist. The rake is locked at the rate applied to the first commitment.",
+    "trigger_scenario": [
+      "Step 1: Market created with rakeBps=200",
+      "Step 2: Factory owner calls setMarketRake(market, 500) before any commits. Succeeds. rakeBps=500",
+      "Step 3: First user commits. rakeBps=500 applied",
+      "Step 4: Factory owner tries setMarketRake(market, 100). RevealMarket.setRakeBps reverts RakeLocked",
+      "Step 5: No inconsistency possible"
+    ],
+    "preconditions": [
+      "Market has existing commitments"
+    ],
+    "impact": "unfair_treatment",
+    "likelihood": "common",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-xstate-v2-028",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "ProtocolPool: LP withdrawal during active market draws creates race where LP can withdraw idle liquidity that a settling market needs, causing settlement to fail at pool.draw",
+    "locations": [
+      "ProtocolPool.lpWithdraw",
+      "ProtocolPool.draw",
+      "ProtocolPool.reserveLiability"
+    ],
+    "root_cause": "LP withdrawal (lpWithdraw lines 257-260) checks idle = balance - reservedTotal and requires assets <= idle. Pool draws for settlement use draw() which checks balance >= reservedTotal (line 157). When a market has a reservation, the reserved amount cannot be withdrawn by LPs because it is included in reservedTotal. So LP withdrawal correctly excludes reserved funds. The draw() function for markets with reservations deducts from reservedLiability and reservedTotal atomically. However, for draws WITHOUT a reservation (reserved == 0), draw() checks balance - reservedTotal >= amount (line 167). LP withdrawal also uses balance - reservedTotal for idle. Both compete for the same idle pool. In theory, an LP could front-run a settlement draw by withdrawing idle liquidity. But draws without reservation can be paused (drawsPaused check applies when reserved == 0). And for normal settlement flow, markets always have reservations from lockBatches, so the reserved path is used and LP withdrawals cannot interfere. The risk only applies if a market somehow draws without prior reservation, which does not happen in the current design (lockBatches always calls reserveLiability before settlement).",
+    "trigger_scenario": [
+      "Step 1: Pool has 10000 balance. Market reserved 5000. reservedTotal=5000. LP has 5000 shares (unlocked)",
+      "Step 2: Idle = 10000 - 5000 = 5000. LP withdraws 5000. Pool balance = 5000. reservedTotal still 5000",
+      "Step 3: Market settles, draws 3000 from reservation. pool.draw: reserved[M]=5000, amount=3000 <= reserved. reserved[M]=2000, reservedTotal=2000. Transfer 3000. Pool balance = 2000",
+      "Step 4: balance(2000) >= reservedTotal(2000). Post-check passes. Settlement succeeds",
+      "Step 5: LP withdrawal and market draw coexist correctly because reservation protects market's allocation"
+    ],
+    "preconditions": [
+      "LP withdrawal concurrent with market settlement",
+      "Market has pool reservation"
+    ],
+    "impact": "protocol_insolvency",
+    "likelihood": "common",
+    "belief_score": 0.05
+  },
+  {
+    "id": "hyp-xstate-v2-029",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "RevealMarket.enableRefunds: Cancellation from Commit phase does not call _releaseLiabilityReservation for the zero-reservation case, but enableRefunds always calls it which harmlessly releases 0",
+    "locations": [
+      "RevealMarket.enableRefunds",
+      "ProtocolPool.releaseLiabilityReservation"
+    ],
+    "root_cause": "enableRefunds (lines 477-498) always calls _releaseLiabilityReservation (line 496) regardless of which phase the market was in before cancellation. If the market was in Commit phase (line 481-482), no lockBatches was called, so pool.reserveLiability was never invoked. reservedLiability[market] = 0 on the pool. When releaseLiabilityReservation is called, reserved = reservedLiability[market] = 0, so the function returns early (line 139-141: `if (reserved == 0) return`). This is harmless. No double-release or underflow. The code is defensive and correct.",
+    "trigger_scenario": [
+      "Step 1: Market in Commit phase. Commit deadline passes with no commits (or some commits but no lock)",
+      "Step 2: Factory enables refunds. enableRefunds: phase==Commit, block.timestamp >= commitDeadline. Phase -> Cancelled",
+      "Step 3: _releaseLiabilityReservation called. pool.releaseLiabilityReservation: reserved=0. Returns immediately",
+      "Step 4: No state changes on pool. Correct"
+    ],
+    "preconditions": [
+      "Market cancelled from Commit phase"
+    ],
+    "impact": "griefing",
+    "likelihood": "common",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-xstate-v2-030",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "RevealMarket.claimWithOracleAuthorization + claim: Both paths accumulate claimedLiability but use different validation (Merkle proof vs oracle signature), enabling double-claim if ticket validated through both paths",
+    "locations": [
+      "RevealMarket.claim",
+      "RevealMarket.claimWithOracleAuthorization"
+    ],
+    "root_cause": "Both claim (line 468) and claimWithOracleAuthorization (line 601) check `claimedTickets[ticketId]` and set it to true. This is the primary double-claim guard. Once a ticket is claimed via either path, the other path rejects it with TicketAlreadyClaimed. A ticket cannot be claimed twice across the two paths. claimedLiability accumulates correctly: claim adds the ZK-verified payout (line 469), claimWithOracleAuthorization adds the oracle-signed payout (line 602). Both check claimedLiability <= totalLiability. The concern would be if a ticket could be claimed with different payout amounts through the two paths, but since claimedTickets prevents re-entry, only one payout per ticket is recorded. No double-claim is possible.",
+    "trigger_scenario": [
+      "Step 1: Market settled. Ticket 5 is a winner with ZK-verified payout of 150",
+      "Step 2: User claims ticket 5 via claim() with merkle proof. payout=150. claimedTickets[5]=true. claimedLiability += 150",
+      "Step 3: Oracle signs claimWithOracleAuthorization for ticket 5 with payout=200",
+      "Step 4: Anyone calls claimWithOracleAuthorization(5, 200, ...). Reverts: TicketAlreadyClaimed (claimedTickets[5] is true)",
+      "Step 5: No double-claim. Guard works correctly"
+    ],
+    "preconditions": [
+      "Market settled",
+      "Both claim paths available for the same ticket"
+    ],
+    "impact": "fund_loss",
+    "likelihood": "common",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-xstate-v2-031",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "ProtocolPool.registerMarket: Factory can register a market on the pool without the market's protocolPool pointing to this pool, enabling draw() calls from untracked market contracts",
+    "locations": [
+      "ProtocolPool.registerMarket",
+      "ProtocolPool.draw",
+      "MarketFactory.createMarket"
+    ],
+    "root_cause": "ProtocolPool.registerMarket (lines 98-105) is called by the factory and sets allowedMarket[market]=true. The pool's draw() (line 155) checks `allowedMarket[msg.sender] && msg.sender == market`. This means only the registered market address can call draw on itself. The pool does not verify that the market's protocolPool points back to this pool. In the normal createMarket flow, the factory initializes the market with protocolPool=address(pool) and then calls pool.registerMarket. Both are consistent. However, if the factory's pool was changed between the market initialization and the registerMarket call, there could be a mismatch. But in createMarket (lines 461-486), everything happens in one transaction: initialize sets market.protocolPool, then pool.registerMarket is called. There is no window for the factory's pool to change mid-transaction. For updateMarketProtocolPool, the factory calls newPool.registerMarket(market, cap) and then market.setProtocolPool(newPool). Both happen in one transaction. The market then points to the new pool, and the new pool allows the market. Old pool still has allowedMarket[market]=true but the market's protocolPool now points to the new pool, so the market would call draw on the new pool, not the old one. The old pool's stale allowedMarket entry is cosmetic.",
+    "trigger_scenario": [
+      "Step 1: Market M registered on Pool A. Pool A: allowedMarket[M]=true. M.protocolPool = Pool A",
+      "Step 2: Factory rotates M to Pool B. Pool B: allowedMarket[M]=true. M.protocolPool = Pool B",
+      "Step 3: Pool A still has allowedMarket[M]=true. But M.protocolPool = Pool B",
+      "Step 4: M would never call Pool A.draw because M.protocolPool references Pool B. _finalizeSettlement calls IProtocolPool(protocolPool).draw() which is Pool B",
+      "Step 5: Pool A's stale allowedMarket[M] entry has no impact since M never calls Pool A directly"
+    ],
+    "preconditions": [
+      "Market rotated to a different pool"
+    ],
+    "impact": "griefing",
+    "likelihood": "internal_state",
+    "belief_score": 0.1
+  },
+  {
+    "id": "hyp-xstate-v2-032",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "RevealMarket.lockBatches: Settlement timeout (14 days) is measured from lockedAt, but if lockBatches is called right at commitDeadline, the full 14 days must pass before cancellation, during which pool funds are locked",
+    "locations": [
+      "RevealMarket.lockBatches",
+      "RevealMarket.enableRefunds",
+      "ProtocolPool.reserveLiability"
+    ],
+    "root_cause": "lockBatches (line 376) sets lockedAt = block.timestamp. enableRefunds from Locked phase (line 484) requires block.timestamp >= lockedAt + SETTLEMENT_TIMEOUT_SECONDS (14 days). During these 14 days, pool.reservedLiability[market] and reservedTotal hold the reserved amount, reducing pool idle liquidity. This is the designed settlement window. The concern is whether 14 days is appropriate for the pool's liquidity needs. With many concurrent markets, each locking liquidity for up to 14 days, the pool could be heavily reserved. This is an economic design parameter, not a code bug. The pool's capacity mechanism (capacityEnabled/capacityLimit) provides the owner with a knob to control total exposure. If capacity is set, reserveLiability checks capacity (line 127), preventing over-commitment.",
+    "trigger_scenario": [
+      "Step 1: Pool has 100000 balance. 10 markets each reserve 10000. reservedTotal = 100000. Idle = 0",
+      "Step 2: All 10 markets locked within a short window. Settlement timeout is 14 days each",
+      "Step 3: LPs cannot withdraw anything for up to 14 days (until at least one market settles or cancels)",
+      "Step 4: New markets cannot get pool reservations (no idle liquidity)"
+    ],
+    "preconditions": [
+      "Many markets locked concurrently",
+      "Pool capacity fully reserved"
+    ],
+    "impact": "dos",
+    "likelihood": "internal_state",
+    "belief_score": 0.3
+  },
+  {
+    "id": "hyp-xstate-v2-033",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "MarketFactory.setVerifierApproval: pinnedVerifierCodehash is set on first approval and never changes unless clearVerifierPin is called, but verifier contract can be selfdestructed and redeployed with different bytecode at same address via CREATE2",
+    "locations": [
+      "MarketFactory.setVerifierApproval",
+      "MarketFactory._validateVerifier",
+      "MarketFactory.isVerifierCurrentlyApproved"
+    ],
+    "root_cause": "setVerifierApproval (lines 186-190) pins the verifier's codehash on first approval. _validateVerifier (line 542) and isVerifierCurrentlyApproved (line 228) check verifier.codehash against the pinned value. If the verifier were selfdestructed (possible pre-Cancun EVM) and redeployed at the same address with different bytecode, the codehash would change, and the drift check would catch it. Post-Cancun (Dencun), SELFDESTRUCT no longer destroys contract code in the same transaction, making this attack vector largely mitigated. The Verifier contract inherits Ownable2Step and does not have a SELFDESTRUCT opcode. The codehash pin provides defense against contract mutation at the same address. The system requires Cancun EVM (foundry.toml would confirm), and the codehash check is redundant-but-safe post-Cancun. Additionally, the verifyingKeyHash check provides a second layer: even if code were somehow changed, the key hash must match.",
+    "trigger_scenario": [
+      "Step 1: Verifier V deployed at address X via CREATE2. codehash = H1. setVerifierApproval(X, true). pinnedVerifierCodehash[X] = H1",
+      "Step 2: (Pre-Cancun) Attacker selfdestructs V and redeploys different contract at X with codehash H2",
+      "Step 3: _validateVerifier: X.codehash (H2) != pinnedVerifierCodehash[X] (H1). Reverts VerifierDrift",
+      "Step 4: Attack blocked by codehash check",
+      "Step 5: (Post-Cancun) SELFDESTRUCT does not clear code. codehash cannot change. Attack impossible"
+    ],
+    "preconditions": [
+      "Pre-Cancun EVM (not applicable to this deployment which uses Cancun)",
+      "Verifier contract must be selfdestructable"
+    ],
+    "impact": "fund_loss",
+    "likelihood": "external_dependency",
+    "belief_score": 0.05
+  },
+  {
+    "id": "hyp-xstate-v2-034",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "RevealMarket._finalizeSettlement: poolTotalYes + poolTotalNo == totalLiability invariant checked but these values have no further on-chain use, making the check informational only",
+    "locations": [
+      "RevealMarket._finalizeSettlement"
+    ],
+    "root_cause": "_finalizeSettlement (line 741) checks `poolYes_ + poolNo_ != totalLiability_` and reverts with SettlementInvariantMismatch. poolTotalYes and poolTotalNo are stored (lines 743-744) but never read again in any on-chain function. They are purely informational state for off-chain auditing/indexing. The invariant check provides confidence that the ZK proof's decomposition of liability into yes/no pools is consistent. While these values are not used on-chain, the check still serves as a proof validation gate: if the circuit incorrectly decomposed liability, this check would catch it. This is defense-in-depth, not a vulnerability.",
+    "trigger_scenario": [
+      "Step 1: ZK proof outputs: totalLiability=1000, poolYes=600, poolNo=400",
+      "Step 2: _finalizeSettlement: 600 + 400 = 1000 == totalLiability. Check passes",
+      "Step 3: poolTotalYes=600, poolTotalNo=400 stored. Never read on-chain again",
+      "Step 4: Off-chain systems can query these for display/auditing purposes"
+    ],
+    "preconditions": [
+      "Standard settlement"
+    ],
+    "impact": "griefing",
+    "likelihood": "common",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-xstate-v2-035",
+    "job_id": "audit-zen-v2",
+    "agent": "cross-state-agent",
+    "title": "ProtocolPool.draw + _finalizeSettlement: If pool draw transfers exact amount but market's _safeTransferExact for surplus sends back to pool, the pool's balance increases without any accounting update, creating untracked surplus",
+    "locations": [
+      "RevealMarket._finalizeSettlement",
+      "ProtocolPool.draw"
+    ],
+    "root_cause": "In _finalizeSettlement: (1) If deficit exists, pool.draw(deficit) transfers tokens to market. consumedLiability[market] += deficit. (2) After draw, market calculates surplus = balance - totalLiability. (3) Surplus sent to protocolPool via _safeTransferExact. The pool receives these tokens but has no accounting hook for incoming transfers (no receive/deposit function triggered). The pool's token balance increases, which increases totalAssets(). This surplus is accessible to: (a) LP withdrawals via _lpShareValue (proportional to totalAssets/totalShares, capped at 1:1), (b) Owner withdrawals via withdraw(), (c) Future market reservations/draws. The surplus is implicitly tracked by the token balance exceeding totalShares. protocolSurplus() (line 298-299) returns balance - totalShares when balance > totalShares. This is the correct accounting: surplus accrues to the protocol, not to LPs (by the 1:1 cap). The untracked surplus is intentionally untracked at the pool level because it is the protocol's revenue. The pool owner can extract it via withdraw(). No accounting bug here.",
+    "trigger_scenario": [
+      "Step 1: Pool has 10000 balance, totalShares=8000 (8000 from LPs, 2000 owner). Market draws 1000. Pool balance=9000",
+      "Step 2: Market settles. surplus = 500 (rake + excess). Sends 500 to pool. Pool balance = 9500",
+      "Step 3: Pool's protocolSurplus = 9500 - 8000 = 1500. Owner can withdraw up to 1500 without affecting LPs",
+      "Step 4: LP share value = min(8000, mulDiv(8000, 9500, 8000)) = min(8000, 9500) = 8000. LPs get 1:1. Correct",
+      "Step 5: consumedLiability[market] = 1000 (not reduced by surplus sent back). This is correct: consumed tracks the draw, not the net"
+    ],
+    "preconditions": [
+      "Market settles with surplus returned to pool",
+      "Pool has LP deposits"
+    ],
+    "impact": "protocol_insolvency",
+    "likelihood": "common",
+    "belief_score": 0.03
+  }
+]

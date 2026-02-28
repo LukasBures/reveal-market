@@ -1,0 +1,769 @@
+[
+  {
+    "id": "hyp-claim-001",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket.setClaimsPaused: Repeated pause/unpause cycles extend effective claim deadline indefinitely, bypassing MAX_CLAIM_DEADLINE_EXTENSION",
+    "locations": ["RevealMarket.setClaimsPaused", "RevealMarket._effectiveClaimDeadline"],
+    "root_cause": "Each pause/unpause cycle in setClaimsPaused accumulates duration to claimPauseTotalDuration (line 705: claimPauseTotalDuration += block.timestamp - claimPauseStartedAt). The _effectiveClaimDeadline function (line 907) adds claimPauseTotalDuration to the base claimDeadline. While extendClaimDeadline has a one-time limit (claimDeadlineExtended flag) and MAX_CLAIM_DEADLINE_EXTENSION cap, the pause duration accumulation has no cap whatsoever. The factory owner can call setClaimsPaused(true) then setClaimsPaused(false) repeatedly to extend the effective claim deadline by arbitrary amounts, far beyond MAX_CLAIM_DEADLINE_EXTENSION.",
+    "trigger_scenario": [
+      "Step 1: Market settles normally, claimDeadline is set to block.timestamp + 180 days.",
+      "Step 2: Factory owner calls setMarketClaimsPaused(market, true), recording claimPauseStartedAt = T1.",
+      "Step 3: After 365 days, factory owner calls setMarketClaimsPaused(market, false). claimPauseTotalDuration += 365 days.",
+      "Step 4: Factory owner immediately calls setMarketClaimsPaused(market, true) again.",
+      "Step 5: Repeat steps 3-4 indefinitely. Each cycle adds more time to claimPauseTotalDuration.",
+      "Step 6: The effective claim deadline is now years in the future, far exceeding MAX_CLAIM_DEADLINE_EXTENSION of 365 days."
+    ],
+    "preconditions": [
+      "Market is in Settled phase.",
+      "Factory owner is malicious or compromised."
+    ],
+    "impact": "griefing",
+    "likelihood": "malicious_action",
+    "belief_score": 0.85
+  },
+  {
+    "id": "hyp-claim-002",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket.sweepUnclaimed: Transfers entire token balance including unclaimed payouts, permanently locking user funds",
+    "locations": ["RevealMarket.sweepUnclaimed"],
+    "root_cause": "sweepUnclaimed (line 791-804) transfers the entire IERC20 balance to protocolPool after the effective claim deadline. If any winning ticket holders have not claimed by that time, their payouts are irrevocably lost. The function does not check (totalLiability - claimedLiability) or set aside unclaimed amounts. However, this is mitigated by the 180-day CLAIM_WINDOW_SECONDS plus pause extension, making it a known design choice. The concern is the interaction with pause duration: if setClaimsPaused is true when sweepUnclaimed is called, the effective deadline computation adds (block.timestamp - claimPauseStartedAt) which means sweepUnclaimed can still execute while claims are paused if enough wall time has passed since the pause started, as long as block.timestamp > _effectiveClaimDeadline().",
+    "trigger_scenario": [
+      "Step 1: Market settles with totalLiability = 10 ETH. Multiple users have winning tickets.",
+      "Step 2: Some users claim their payouts. claimedLiability = 5 ETH. 5 ETH remains in contract.",
+      "Step 3: Factory owner pauses claims via setClaimsPaused(true).",
+      "Step 4: Time passes beyond the effective claim deadline (claimDeadline + claimPauseTotalDuration + (block.timestamp - claimPauseStartedAt)).",
+      "Step 5: Factory owner calls sweepUnclaimed, which checks block.timestamp > _effectiveClaimDeadline() and proceeds.",
+      "Step 6: But claims are still paused! Users who haven't claimed cannot claim, and the sweep removes all remaining funds."
+    ],
+    "preconditions": [
+      "Market is in Settled phase.",
+      "Some winning users have not yet claimed.",
+      "Factory owner pauses claims and waits long enough for the effective deadline to expire."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.55
+  },
+  {
+    "id": "hyp-claim-003",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket.claimWithOracleAuthorization: Oracle can authorize arbitrary payout amounts up to totalLiability, bypassing ZK proof verification",
+    "locations": ["RevealMarket.claimWithOracleAuthorization"],
+    "root_cause": "claimWithOracleAuthorization (line 561-599) does not verify the payout against the Merkle tree or ZK proof. The oracle signs a payout amount, and the only constraint is claimedLiability + payout <= totalLiability. A compromised oracle can sign payouts for the full totalLiability for a single ticket, draining all funds meant for other winners. The oracle is a trusted party, but this represents a single point of failure that could drain the entire market payout pool.",
+    "trigger_scenario": [
+      "Step 1: Market settles with totalLiability = 100 ETH spread across many winning tickets.",
+      "Step 2: Compromised oracle signs a claimWithOracleAuthorization for ticketId=0 with payout = 100 ETH.",
+      "Step 3: Attacker calls claimWithOracleAuthorization(0, 100 ETH, expiry, oracleSig).",
+      "Step 4: claimedLiability += 100 ETH, which equals totalLiability, so the check passes.",
+      "Step 5: All 100 ETH is transferred to the owner of ticket 0. Other winning ticket holders cannot claim (OverClaimed)."
+    ],
+    "preconditions": [
+      "Oracle private key is compromised.",
+      "Market is in Settled phase with unclaimed liability."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.7
+  },
+  {
+    "id": "hyp-claim-004",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket._computeLeaf: salt parameter as bytes32 can exceed SNARK_SCALAR_FIELD, causing FieldElementOutOfRange revert and blocking legitimate claims",
+    "locations": ["RevealMarket._computeLeaf"],
+    "root_cause": "_computeLeaf checks uint256(salt) >= SNARK_SCALAR_FIELD at line 864. The salt is a bytes32 which when cast to uint256 can be any 256-bit value. If a user's commitment was generated with a salt whose uint256 representation >= SNARK_SCALAR_FIELD (the BN254 scalar field is ~254 bits, so ~1/4 of all possible bytes32 values exceed it), the claim will revert with FieldElementOutOfRange. However, PoseidonT3.poseidon reduces inputs via modular arithmetic (state[1] = inputs[0] % PRIME at line 13), meaning the commitment was stored using the reduced value. The on-chain claim tries to compute the leaf with the unreduced value but hits the range check first. The user would need to provide salt % SNARK_SCALAR_FIELD to claim, but the original salt was used for the commitment during commit phase. Actually, examining commitWithAuthorization, the commitment is opaque bytes32 passed in auth.commitment — it is pre-computed off-chain. So the off-chain system must ensure salt < SNARK_SCALAR_FIELD. If the off-chain system uses unreduced salts, commitments may be stored that can never be claimed.",
+    "trigger_scenario": [
+      "Step 1: Off-chain system generates a random bytes32 salt where uint256(salt) >= SNARK_SCALAR_FIELD.",
+      "Step 2: Off-chain system computes the Poseidon leaf using Poseidon library that automatically reduces mod PRIME.",
+      "Step 3: Commitment is stored on-chain via commitWithAuthorization (no validation of salt value).",
+      "Step 4: Market settles. User tries to claim with the original salt.",
+      "Step 5: _computeLeaf reverts with FieldElementOutOfRange because uint256(salt) >= SNARK_SCALAR_FIELD.",
+      "Step 6: User cannot claim. Even if they try salt % SNARK_SCALAR_FIELD, the resulting leaf will differ from what's stored (since the Poseidon lib already reduced in the off-chain computation but the nesting order may differ)."
+    ],
+    "preconditions": [
+      "Off-chain commitment generation uses salt values that are not checked against SNARK_SCALAR_FIELD.",
+      "Salt is randomly generated as full 256-bit value."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "external_dependency",
+    "belief_score": 0.45
+  },
+  {
+    "id": "hyp-claim-005",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket.claim: claimedLiability accumulation allows legitimate claims to fail with OverClaimed if ZK circuit computes totalLiability incorrectly",
+    "locations": ["RevealMarket.claim", "RevealMarket._finalizeSettlement"],
+    "root_cause": "In _finalizeSettlement (line 717), totalLiability is set from the ZK proof's public signals (publicSignals[4]). If the ZK circuit computes a totalLiability that is less than the sum of all individual winning ticket payouts, then after some claims succeed, subsequent legitimate claims will revert with OverClaimed (line 466: if (claimedLiability > totalLiability) revert OverClaimed()). The contract trusts the ZK proof output for totalLiability, and the invariant poolYes + poolNo == totalLiability is checked (line 716), but there is no separate check that totalLiability >= sum of all individual payouts. This is a circuit-level trust assumption.",
+    "trigger_scenario": [
+      "Step 1: Market has 10 winning tickets, each with payout of 1 ETH, total should be 10 ETH.",
+      "Step 2: ZK circuit computes totalLiability = 9 ETH due to a bug (e.g., off-by-one in padding).",
+      "Step 3: Settlement succeeds because the circuit proof verifies and poolYes + poolNo == 9 ETH.",
+      "Step 4: First 9 claims succeed (claimedLiability = 9 ETH).",
+      "Step 5: 10th claim reverts with OverClaimed because claimedLiability + 1 > 9."
+    ],
+    "preconditions": [
+      "ZK circuit has a bug that computes totalLiability less than the actual sum of winning payouts.",
+      "Verifier accepts the proof (depends on circuit correctness)."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "external_dependency",
+    "belief_score": 0.3
+  },
+  {
+    "id": "hyp-claim-006",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket._finalizeSettlement: Surplus forwarding after settlement may leave insufficient balance for all claims when protocolPool.draw is used",
+    "locations": ["RevealMarket._finalizeSettlement"],
+    "root_cause": "In _finalizeSettlement (lines 735-739), after ensuring the contract has at least totalLiability_ tokens, any surplus (balance - totalLiability_) is immediately transferred to protocolPool. The contract is left with exactly totalLiability_ tokens. Then claims transfer tokens out as payout. The invariant claimedLiability <= totalLiability ensures the contract always has enough for remaining claims. However, if an ERC20 transfer to protocolPool fails silently (not possible with SafeERC20) or if the balance math is incorrect, claims could fail. Reviewing the code, the math is correct: required = totalLiability_, contract keeps exactly totalLiability_, and each claim deducts payout from balance while adding to claimedLiability. Since claimedLiability <= totalLiability and the contract started with totalLiability tokens, this is sound. This hypothesis is likely FALSE.",
+    "trigger_scenario": [
+      "Step 1: Market settles with totalLiability = 10 ETH, contract has 15 ETH (5 ETH surplus from rake + escrow).",
+      "Step 2: _finalizeSettlement transfers 5 ETH surplus to protocolPool, leaving exactly 10 ETH.",
+      "Step 3: All 10 ETH of claims are processed correctly.",
+      "Step 4: No issue — the math holds."
+    ],
+    "preconditions": [
+      "Standard ERC20 token without fee-on-transfer."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "external_dependency",
+    "belief_score": 0.05
+  },
+  {
+    "id": "hyp-claim-007",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket.refundTicket: Permissionless refund path allows griefing by force-refunding tickets before the user wants",
+    "locations": ["RevealMarket.refundTicket"],
+    "root_cause": "refundTicket (line 545-557) is fully permissionless — anyone can call it with any valid ticketId when the market is Cancelled. The refund goes to commitmentUsers[ticketId], so the funds arrive at the correct destination. However, there could be scenarios where a user does not want the refund at that time (e.g., if they are using the commitment as collateral for something else off-chain, or if they prefer to leave funds in the contract temporarily). Since the refund marks claimedTickets[ticketId] = true, this is a one-shot operation. In practice, the only real griefing vector is gas cost to the caller, and the user receives their funds, so this is a low-severity issue.",
+    "trigger_scenario": [
+      "Step 1: Market is cancelled and enters refund phase.",
+      "Step 2: Griefer calls refundTicket(ticketId) for every ticket in the market.",
+      "Step 3: All ticket owners receive their refunds immediately, whether they wanted them or not.",
+      "Step 4: The griefer spends gas but each refund goes to the correct commitmentUsers[ticketId]."
+    ],
+    "preconditions": [
+      "Market is in Cancelled phase.",
+      "Griefer has ETH for gas costs."
+    ],
+    "impact": "griefing",
+    "likelihood": "common",
+    "belief_score": 0.75
+  },
+  {
+    "id": "hyp-claim-008",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket.enableRefunds: Contract balance is sufficient for all refunds because rake stays in contract during Cancelled phase",
+    "locations": ["RevealMarket.enableRefunds", "RevealMarket.refundTicket", "RevealMarket.commitWithAuthorization"],
+    "root_cause": "Each commit transfers ticketSize tokens to the market contract. The contract splits this into net = ticketSize - rake (tracked in totalEscrow) and rake (tracked in rakeCollected). But importantly, BOTH portions remain in the contract's token balance — rakeCollected is just an accounting variable, not a transfer. So after N commits, the contract holds N * ticketSize tokens. When the market is cancelled, each refundTicket refunds exactly ticketSize. Since N * ticketSize is available and there are exactly N tickets, the balance is sufficient. No tokens leave the contract between commit and cancel: _finalizeSettlement only runs in Settled phase, and sweepUnclaimed only works in Settled phase. The surplus forwarding in _finalizeSettlement also only runs during settlement. Verifying this is correct and no tokens leak.",
+    "trigger_scenario": [
+      "Step 1: 10 users commit, each paying ticketSize = 1 ETH. Contract holds 10 ETH.",
+      "Step 2: rake = 2% = 0.02 ETH per ticket. totalEscrow = 9.8 ETH, rakeCollected = 0.2 ETH. But actual balance = 10 ETH.",
+      "Step 3: Market is cancelled. enableRefunds is called.",
+      "Step 4: All 10 tickets are refunded at ticketSize = 1 ETH each. Total refunds = 10 ETH.",
+      "Step 5: Contract balance was 10 ETH, refunds total 10 ETH. Balance goes to 0. Sufficient."
+    ],
+    "preconditions": [
+      "Standard ERC20 without fee-on-transfer.",
+      "No tokens transferred out of the contract between commits and cancellation."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "common",
+    "belief_score": 0.05
+  },
+  {
+    "id": "hyp-claim-009",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket.enableRefunds: Locked phase cancellation after protocolPool.draw could leave contract with extra tokens from settlement attempt",
+    "locations": ["RevealMarket.enableRefunds", "RevealMarket._finalizeSettlement"],
+    "root_cause": "When a market is Locked and the oracle has posted a result and partially settled (via verifyAndSettleBatched with partial batch proofs), tokens may have been drawn from protocolPool. But examining the code, verifyAndSettleBatched only calls _finalizeSettlement once ALL batches are verified (line 438: if settledBatchCount == batchCount). So partial settlement does not draw from protocolPool. If enableRefunds is called before full settlement, no draw has occurred. The only tokens in the contract are those from commits (N * ticketSize). However, protocolPool.reserveLiability was called during lockBatches, and enableRefunds calls _releaseLiabilityReservation. This is correct behavior. No extra tokens are drawn.",
+    "trigger_scenario": [
+      "Step 1: Market locks with N tickets. protocolPool.reserveLiability is called.",
+      "Step 2: Oracle posts result and submits some (not all) batch proofs via verifyAndSettleBatched.",
+      "Step 3: Settlement timeout expires (14 days from lockedAt).",
+      "Step 4: Factory owner calls enableRefunds. Phase -> Cancelled.",
+      "Step 5: Contract still holds exactly N * ticketSize from commits. No draw occurred.",
+      "Step 6: All N refunds of ticketSize each succeed."
+    ],
+    "preconditions": [
+      "Market is in Locked phase with partial batch settlement.",
+      "Settlement timeout has expired."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "internal_state",
+    "belief_score": 0.05
+  },
+  {
+    "id": "hyp-claim-010",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket._verifyLeaf: Merkle proof verification correctly uses batch-relative index but ticketId-to-batch mapping could overflow for large ticket counts",
+    "locations": ["RevealMarket._verifyLeaf"],
+    "root_cause": "In _verifyLeaf (line 881), batchIndex = ticketId / BATCH_SIZE, and indexInBatch = ticketId % BATCH_SIZE. With MAX_COMMITMENTS_LIMIT = 64 * 256 = 16384, the maximum ticketId is 16383. batchIndex would be 63, indexInBatch would be 255. All within uint256 range. The proof.length check against MERKLE_DEPTH=8 ensures the proof has exactly 8 elements. The batch root lookup at batchRoots[batchIndex] is bounds-checked on line 882. The Poseidon Merkle tree verification iterates MERKLE_DEPTH times, using the index bits to determine left/right ordering. This appears correct for a depth-8 tree with 256 leaves per batch.",
+    "trigger_scenario": [
+      "Step 1: Market has ticketId = 16383 (last possible ticket, batch 63, index 255).",
+      "Step 2: User provides correct Merkle proof of depth 8.",
+      "Step 3: _verifyLeaf computes: batchIndex = 63, indexInBatch = 255.",
+      "Step 4: Proof verification walks the tree from leaf at index 255 to batch root 63.",
+      "Step 5: Verification succeeds if proof is correct."
+    ],
+    "preconditions": [
+      "Market has maximum commitments."
+    ],
+    "impact": "loss_of_function",
+    "likelihood": "common",
+    "belief_score": 0.05
+  },
+  {
+    "id": "hyp-claim-011",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket.claim: Double-claim prevention via claimedTickets mapping prevents both double-claiming and concurrent claim+refund on same ticket",
+    "locations": ["RevealMarket.claim", "RevealMarket.refundTicket", "RevealMarket.claimWithOracleAuthorization"],
+    "root_cause": "Both claim (line 464) and all refund paths (lines 515, 538, 553) set claimedTickets[ticketId] = true, and all check for it before proceeding. Since claim only works in Settled phase and refund only in Cancelled phase, and phase transitions are irreversible (Commit->Locked->Settled or Commit/Locked->Cancelled), there is no scenario where both claim and refund are available for the same ticket. The claimedTickets mapping provides double-claim protection within each path. This is correctly implemented.",
+    "trigger_scenario": [
+      "Step 1: Market settles. User claims ticket 0. claimedTickets[0] = true.",
+      "Step 2: User tries to claim ticket 0 again. Reverts with TicketAlreadyClaimed.",
+      "Step 3: Phase cannot transition to Cancelled from Settled, so refund is impossible.",
+      "Step 4: No double-claim possible."
+    ],
+    "preconditions": [
+      "Market has been settled or cancelled."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "common",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-claim-012",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket._verifyRefundLeaf: Skipping Merkle proof verification is safe because commitment match proves preimage knowledge",
+    "locations": ["RevealMarket._verifyRefundLeaf", "RevealMarket.refund", "RevealMarket.refundSelf"],
+    "root_cause": "_verifyRefundLeaf (lines 900-904) ignores the Merkle proof and only checks commitments[ticketId] == leaf. For refund() and refundSelf(), the caller must provide the preimage (ticketId, outcomeId, amount, payout, salt, user) that hashes to the stored commitment. This proves the caller knows the preimage. For refundTicket(), _verifyRefundLeaf is not called at all — it just looks up commitmentUsers[ticketId] directly. The question is whether an attacker could find a second preimage for the Poseidon hash. Given Poseidon's collision resistance on BN254, this is computationally infeasible. The design is intentionally simpler for the cancelled market case since no payout computation is needed — every ticket gets back ticketSize regardless.",
+    "trigger_scenario": [
+      "Step 1: Market is cancelled.",
+      "Step 2: Attacker tries to construct a different preimage (ticketId', outcomeId', amount', payout', salt', user') that hashes to the same commitment.",
+      "Step 3: Finding such a second preimage requires breaking Poseidon's preimage resistance, which is computationally infeasible.",
+      "Step 4: Even if found, the refund amount is always ticketSize (not the payout field), so there is no financial benefit to finding a collision."
+    ],
+    "preconditions": [
+      "Attacker has computational resources to attempt preimage attacks on Poseidon."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-claim-013",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket.claimWithOracleAuthorization: Missing nonce allows oracle signature replay across different expiry windows if ticket is not yet claimed",
+    "locations": ["RevealMarket.claimWithOracleAuthorization"],
+    "root_cause": "The oracle signature in claimWithOracleAuthorization does not include a nonce. The signature covers (address(this), marketId, ticketId, user, winningOutcomeId, payout, expiry, chainid, 'CLAIM_ORACLE_V1'). Since ticketId is included and claimedTickets[ticketId] is set to true after successful claim, the signature can only be used once per ticket. The lack of a nonce is therefore NOT a vulnerability because the ticket itself serves as a natural nonce. However, if the oracle signs multiple authorizations with different expiry values for the same ticket and payout, only one can ever execute (the first one). The other signatures become useless. This is benign.",
+    "trigger_scenario": [
+      "Step 1: Oracle signs authorization for ticket 0 with expiry = T1 and payout = 1 ETH.",
+      "Step 2: Oracle also signs authorization for ticket 0 with expiry = T2 and payout = 1 ETH.",
+      "Step 3: Anyone executes the first signature. claimedTickets[0] = true.",
+      "Step 4: Second signature for ticket 0 reverts with TicketAlreadyClaimed.",
+      "Step 5: No double-claim possible."
+    ],
+    "preconditions": [
+      "Oracle issues multiple signatures for the same ticket."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "common",
+    "belief_score": 0.05
+  },
+  {
+    "id": "hyp-claim-014",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket.claimWithOracleAuthorization: Oracle can sign different payout amounts for the same ticket, and the first executed determines the payout",
+    "locations": ["RevealMarket.claimWithOracleAuthorization"],
+    "root_cause": "The oracle could sign two valid authorizations for the same ticketId with different payout values (e.g., payout=1 ETH and payout=2 ETH). Whichever is executed first determines the actual payout. Since there is no canonical expected payout enforced on-chain (unlike claim() which verifies via Merkle proof), the oracle has discretion over payout amounts. If the oracle signs a lower payout than the user deserves, the user receives less. If the oracle signs a higher payout, it may cause OverClaimed for later claimants. The only guard is claimedLiability <= totalLiability. This is a trust assumption on the oracle for the fallback path.",
+    "trigger_scenario": [
+      "Step 1: User's winning ticket should pay 1 ETH based on the Merkle tree.",
+      "Step 2: Oracle signs two authorizations: one for 0.5 ETH and one for 1.5 ETH.",
+      "Step 3: If 0.5 ETH authorization is executed first, user loses 0.5 ETH they deserved.",
+      "Step 4: If 1.5 ETH authorization is executed first, 0.5 ETH extra is taken from the pool, potentially causing OverClaimed for another winner."
+    ],
+    "preconditions": [
+      "Oracle acts maliciously or makes an error in payout computation.",
+      "User relies on claimWithOracleAuthorization instead of standard claim."
+    ],
+    "impact": "unfair_treatment",
+    "likelihood": "malicious_action",
+    "belief_score": 0.6
+  },
+  {
+    "id": "hyp-claim-015",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket.enableRefunds: Phase transition from Settled to Cancelled is correctly blocked, preventing double-payout via claim then refund",
+    "locations": ["RevealMarket.enableRefunds"],
+    "root_cause": "enableRefunds (line 475) checks if (phase == Phase.Settled) revert InvalidPhase(). This means once a market is settled, it cannot be cancelled. This correctly prevents a scenario where users claim their winning payouts and then also get refunds. The phase transitions are: Commit -> Locked -> Settled (terminal) or Commit/Locked -> Cancelled (terminal). Both are terminal states. This is correctly implemented.",
+    "trigger_scenario": [
+      "Step 1: Market settles. Winners claim payouts.",
+      "Step 2: Factory owner tries to call enableRefunds on the settled market.",
+      "Step 3: Reverts with InvalidPhase because phase == Settled.",
+      "Step 4: No refunds possible in Settled phase."
+    ],
+    "preconditions": [
+      "Market is in Settled phase."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "common",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-claim-016",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket.enableRefunds: Idempotent call in Cancelled phase returns silently, preventing reverts on repeated calls",
+    "locations": ["RevealMarket.enableRefunds"],
+    "root_cause": "enableRefunds (line 476) checks if (phase == Phase.Cancelled) return, making the function idempotent. This means calling enableRefunds when already cancelled is a no-op. This is safe behavior. However, this also means the refundDeadline is NOT re-extended on subsequent calls. The refundDeadline is set once during the first successful enableRefunds call and cannot be shortened by repeated calls (the if condition at line 488 ensures it only extends). This is correct.",
+    "trigger_scenario": [
+      "Step 1: Market is cancelled via enableRefunds. refundDeadline is set.",
+      "Step 2: Factory owner calls enableRefunds again.",
+      "Step 3: Function returns silently without modifying state.",
+      "Step 4: No issue."
+    ],
+    "preconditions": [
+      "Market is already in Cancelled phase."
+    ],
+    "impact": "griefing",
+    "likelihood": "common",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-claim-017",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket.sweepCancelledRefunds: After refund deadline, unclaimed refund tokens are swept to protocolPool, permanently losing funds for users who didn't refund",
+    "locations": ["RevealMarket.sweepCancelledRefunds"],
+    "root_cause": "sweepCancelledRefunds (line 807-819) transfers the entire remaining token balance to protocolPool after the refund deadline (180 days). Any ticket holders who did not call refund/refundSelf/refundTicket before the deadline lose their funds. This is by design (similar to sweepUnclaimed for Settled markets), but the 180-day window should be sufficient for users to claim. The permissionless refundTicket path mitigates this since anyone can trigger refunds for any ticket. However, if refundTicket is not called by anyone (e.g., nobody monitors the cancelled market), the funds are lost after sweep.",
+    "trigger_scenario": [
+      "Step 1: Market is cancelled with 10 tickets. 7 are refunded via refundTicket.",
+      "Step 2: 3 tickets remain unclaimed after refundDeadline.",
+      "Step 3: Factory owner calls sweepCancelledRefunds, transferring remaining 3 * ticketSize to protocolPool.",
+      "Step 4: Owners of the 3 tickets lose their refunds permanently."
+    ],
+    "preconditions": [
+      "Market is in Cancelled phase.",
+      "Refund deadline has passed.",
+      "Some tickets were not refunded."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "internal_state",
+    "belief_score": 0.5
+  },
+  {
+    "id": "hyp-claim-018",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket.claim: Winning outcome check ensures only correct outcome tickets are claimable but does not verify ticket amount matches expected payout",
+    "locations": ["RevealMarket.claim"],
+    "root_cause": "claim() at line 458 checks outcomeId != winningOutcomeId and reverts with WrongOutcome. This prevents losing tickets from claiming. The payout amount is embedded in the Merkle tree leaf and verified via _verifyLeaf (Poseidon Merkle proof against the batch root). The ZK circuit is responsible for ensuring the payout values in the Merkle tree are correct. If the ZK circuit accepted invalid payout values, they would be baked into the Merkle root, and claims would succeed with those incorrect payouts. The on-chain contract trusts the ZK proof and Merkle root. This is the intended trust model.",
+    "trigger_scenario": [
+      "Step 1: ZK circuit computes payouts incorrectly (e.g., payout for a winning ticket is 2x the correct amount).",
+      "Step 2: Merkle root embeds these incorrect payouts.",
+      "Step 3: Market settles with the incorrect Merkle root.",
+      "Step 4: User claims with the inflated payout. Merkle proof verifies against the (incorrect) root.",
+      "Step 5: claimedLiability increases by the inflated amount. Other winners may hit OverClaimed."
+    ],
+    "preconditions": [
+      "ZK circuit has a payout computation bug.",
+      "Verifier accepts the proof."
+    ],
+    "impact": "unfair_treatment",
+    "likelihood": "external_dependency",
+    "belief_score": 0.25
+  },
+  {
+    "id": "hyp-claim-019",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket._effectiveClaimDeadline: Integer overflow in pause duration calculation if claimPauseStartedAt is 0 while claimsPaused is true",
+    "locations": ["RevealMarket._effectiveClaimDeadline", "RevealMarket.setClaimsPaused"],
+    "root_cause": "In _effectiveClaimDeadline (lines 906-912), if claimsPaused is true and claimPauseStartedAt != 0, it adds (block.timestamp - claimPauseStartedAt). The condition claimPauseStartedAt != 0 guards against the subtraction underflow when claimPauseStartedAt is unset. In _finalizeSettlement (line 747), if claimsPaused is true at settlement time, claimPauseStartedAt is set to block.timestamp. In setClaimsPaused (lines 699-711), claimPauseStartedAt is set to block.timestamp when pausing (line 703) and reset to 0 when unpausing (line 706). The condition on line 701 restricts this to Settled phase. If setClaimsPaused(true) is called BEFORE settlement (e.g., during Commit or Locked phase), claimPauseStartedAt remains 0 (line 702-707 only execute if phase == Settled). Then _finalizeSettlement sets claimPauseStartedAt = block.timestamp (line 747). So claimPauseStartedAt is always properly set when claims are paused in Settled phase. No overflow issue.",
+    "trigger_scenario": [
+      "Step 1: Factory owner calls setClaimsPaused(true) during Commit phase. claimsPaused = true but claimPauseStartedAt remains 0.",
+      "Step 2: Market locks and settles. _finalizeSettlement line 747: claimPauseStartedAt = claimsPaused ? block.timestamp : 0 = block.timestamp.",
+      "Step 3: _effectiveClaimDeadline: claimsPaused=true, claimPauseStartedAt=T_settle. effective = claimDeadline + 0 + (now - T_settle). Correct.",
+      "Step 4: No overflow."
+    ],
+    "preconditions": [
+      "setClaimsPaused called before settlement."
+    ],
+    "impact": "dos",
+    "likelihood": "internal_state",
+    "belief_score": 0.05
+  },
+  {
+    "id": "hyp-claim-020",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket.refund/refundSelf: _verifyRefundLeaf only checks commitment match, meaning preimage knowledge is required but Merkle position is not verified",
+    "locations": ["RevealMarket._verifyRefundLeaf", "RevealMarket.refund", "RevealMarket.refundSelf"],
+    "root_cause": "_verifyRefundLeaf (lines 900-904) checks commitments[ticketId] == leaf but does NOT verify the Merkle proof (line 901: proof; is a no-op to suppress the unused parameter warning). For refund and refundSelf paths, the caller provides (ticketId, outcomeId, amount, payout, salt) which are hashed into a leaf via _computeLeaf and then compared against the stored commitment. This means the caller must know the exact preimage used during commitment. Since the commitment is a Poseidon hash, knowledge of the preimage is sufficient proof. The Merkle proof is unnecessary here because the commitment was already stored at commitments[ticketId] during the commit phase — no need to verify it against a Merkle root. The refundTicket path bypasses this entirely and just uses the stored commitmentUsers[ticketId]. This is a valid design choice for cancelled markets.",
+    "trigger_scenario": [
+      "Step 1: Market is cancelled after being Locked (Merkle roots exist but may be invalid).",
+      "Step 2: User calls refundSelf with correct preimage. _computeLeaf produces the leaf.",
+      "Step 3: _verifyRefundLeaf checks commitments[ticketId] == leaf. Match succeeds.",
+      "Step 4: Refund proceeds regardless of whether the Merkle tree was corrupted.",
+      "Step 5: This is correct behavior — the stored commitment is the source of truth for refunds."
+    ],
+    "preconditions": [
+      "Market is in Cancelled phase."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "common",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-claim-021",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket._computeLeaf: Poseidon hash nesting order (h1=[ticketId,outcomeId], h2=[amount,payout], h3=[h2,userSalt], leaf=[h1,h3]) must match off-chain exactly or claims fail",
+    "locations": ["RevealMarket._computeLeaf"],
+    "root_cause": "_computeLeaf uses a specific 4-level Poseidon nesting: userSalt=Poseidon(uint160(user), salt), h1=Poseidon(ticketId, outcomeId), h2=Poseidon(amount, payout), h3=Poseidon(h2, userSalt), leaf=Poseidon(h1, h3). If the off-chain prover or commitment generator uses a different nesting order (e.g., swapping left/right inputs in any Poseidon call), the resulting leaf will be different, and on-chain claims will fail with InvalidMerkleProof. This is a correctness concern for the off-chain integration, not a smart contract vulnerability per se. The PoseidonTestUtils in the test suite mirrors this exact ordering (line 24-29 of PoseidonTestUtils.sol), confirming the canonical order. Any off-chain implementation must follow this exact ordering.",
+    "trigger_scenario": [
+      "Step 1: Off-chain system computes leaf using Poseidon(outcomeId, ticketId) instead of Poseidon(ticketId, outcomeId).",
+      "Step 2: Commitment is stored on-chain.",
+      "Step 3: Market settles. User tries to claim.",
+      "Step 4: On-chain _computeLeaf produces different hash than stored commitment.",
+      "Step 5: commitments[ticketId] != leaf, _verifyLeaf returns false.",
+      "Step 6: Claim reverts with InvalidMerkleProof. User must use claimWithOracleAuthorization as fallback."
+    ],
+    "preconditions": [
+      "Off-chain Poseidon implementation uses different argument ordering.",
+      "Commitment was stored with the mismatched hash."
+    ],
+    "impact": "loss_of_function",
+    "likelihood": "external_dependency",
+    "belief_score": 0.3
+  },
+  {
+    "id": "hyp-claim-022",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket.enableRefunds: Settlement timeout of 14 days may be too short if oracle is temporarily unavailable, leading to premature cancellation",
+    "locations": ["RevealMarket.enableRefunds"],
+    "root_cause": "SETTLEMENT_TIMEOUT_SECONDS = 14 days (line 38). After lockBatches, if 14 days pass without full settlement, any caller of enableRefunds (via factory) can cancel the market. This is a safety mechanism to prevent indefinite lockup. However, 14 days may be insufficient if: (a) the oracle is temporarily offline, (b) the ZK prover is backlogged, or (c) network congestion delays settlement transactions. Once cancelled, the market cannot be settled — all users get refunds instead of payouts. Winners lose their expected profits. The factory owner controls enableRefunds, so premature cancellation requires factory owner action.",
+    "trigger_scenario": [
+      "Step 1: Market locks at time T.",
+      "Step 2: Oracle service goes down for 15 days.",
+      "Step 3: Factory owner calls enableRefunds at T + 15 days. lockedAt + 14 days < block.timestamp.",
+      "Step 4: Market is cancelled. Winners who would have received payouts now only get ticketSize refund.",
+      "Step 5: If the oracle comes back at T + 16 days, settlement is no longer possible."
+    ],
+    "preconditions": [
+      "Market is in Locked phase.",
+      "14 days have elapsed since locking.",
+      "Factory owner decides to cancel."
+    ],
+    "impact": "unfair_treatment",
+    "likelihood": "external_dependency",
+    "belief_score": 0.35
+  },
+  {
+    "id": "hyp-claim-023",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket.claim: _ticketOwner check requires user parameter to match commitmentUsers[ticketId], preventing claims on behalf of wrong users",
+    "locations": ["RevealMarket.claim"],
+    "root_cause": "claim() at line 460 checks _ticketOwner(ticketId) != user and reverts with CommitmentUserMismatch. _ticketOwner returns commitmentUsers[ticketId] which was set during commitWithAuthorization (line 311). The claim function does NOT restrict msg.sender — anyone can call claim for any user, as long as they provide the correct preimage and Merkle proof. The payout goes to the user address (line 468: _safeTransferExact(user, payout)), not to msg.sender. This is a permissionless claim execution model — the user parameter determines who receives funds, and the Merkle proof proves they deserve it. This is safe because: (1) the user address is embedded in the Poseidon leaf via userSalt, (2) the commitment was set by the legitimate user during commit, (3) funds go to the recorded user, not the caller.",
+    "trigger_scenario": [
+      "Step 1: Ticket 0 was committed by Alice.",
+      "Step 2: Bob calls claim(alice, 0, outcomeId, amount, payout, salt, proof) with correct preimage.",
+      "Step 3: _ticketOwner(0) == alice, user == alice. Check passes.",
+      "Step 4: Payout transferred to Alice, not Bob. Bob paid gas but Alice gets funds.",
+      "Step 5: This is safe. Bob cannot redirect funds to himself."
+    ],
+    "preconditions": [
+      "Market is in Settled phase.",
+      "Caller knows the preimage and Merkle proof for the ticket."
+    ],
+    "impact": "griefing",
+    "likelihood": "common",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-claim-024",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket._finalizeSettlement: poolYes + poolNo == totalLiability invariant ensures correct liability accounting but doesn't prevent individual payout inflation",
+    "locations": ["RevealMarket._finalizeSettlement"],
+    "root_cause": "_finalizeSettlement checks poolYes_ + poolNo_ != totalLiability_ at line 716 and reverts with SettlementInvariantMismatch. This ensures the total yes and no side payouts sum to totalLiability. However, this is an aggregate check — it does not verify individual ticket payouts. If the ZK circuit assigns incorrect payouts to individual tickets (e.g., one ticket gets more and another less), the aggregate check would still pass. Individual payout correctness relies entirely on the ZK circuit and Merkle tree structure. The on-chain contract only enforces the aggregate invariant.",
+    "trigger_scenario": [
+      "Step 1: Market has 2 winning yes tickets. Correct payouts: ticket0 = 5 ETH, ticket1 = 5 ETH. totalLiability = 10 ETH.",
+      "Step 2: ZK circuit assigns: ticket0 = 8 ETH, ticket1 = 2 ETH. poolYes = 10 ETH, poolNo = 0. totalLiability = 10 ETH.",
+      "Step 3: Aggregate check passes: poolYes + poolNo = 10 = totalLiability.",
+      "Step 4: Ticket0 holder claims 8 ETH (3 ETH more than deserved). Ticket1 holder claims 2 ETH (3 ETH less).",
+      "Step 5: Total is still 10 ETH, but distribution is unfair."
+    ],
+    "preconditions": [
+      "ZK circuit has a bug in individual payout calculation.",
+      "Aggregate totals still satisfy the invariant."
+    ],
+    "impact": "unfair_treatment",
+    "likelihood": "external_dependency",
+    "belief_score": 0.2
+  },
+  {
+    "id": "hyp-claim-025",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket.setClaimsPaused: Pausing claims during Settled phase correctly tracks pause duration but allows the factory owner to indefinitely block claims",
+    "locations": ["RevealMarket.setClaimsPaused"],
+    "root_cause": "setClaimsPaused(true) blocks all claims (line 455: if (claimsPaused) revert ClaimsPaused()). While the pause extends the effective deadline (so users don't lose their claim window), the factory owner can keep claims paused indefinitely. There is no maximum pause duration or governance timelock. This is a centralization risk: a malicious or compromised factory owner can prevent all users from claiming their legitimate winnings, and then sweep the funds after the effective deadline eventually passes (though the deadline extends while paused, so sweep also cannot execute during pause). The factory owner would need to unpause, let the deadline pass quickly if enough pause duration was accumulated, then sweep. Actually, since _effectiveClaimDeadline adds pause duration, and sweepUnclaimed checks block.timestamp > _effectiveClaimDeadline(), the effective deadline is extended by all pause time. So the factory owner would need to let the remaining claim window elapse after unpausing.",
+    "trigger_scenario": [
+      "Step 1: Market settles. Claims begin.",
+      "Step 2: Factory owner calls setClaimsPaused(true). Claims blocked.",
+      "Step 3: 365 days pass while paused. claimPauseTotalDuration accumulates.",
+      "Step 4: Factory owner calls setClaimsPaused(false). Claims resume.",
+      "Step 5: The effective claim deadline is now 180 days (original) + 365 days (pause) = 545 days from settlement.",
+      "Step 6: Users must still claim within 180 days of unpausing (the remaining window). If they missed the announcement, funds could be swept."
+    ],
+    "preconditions": [
+      "Factory owner pauses claims for extended period.",
+      "Users are not monitoring for unpause events."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.4
+  },
+  {
+    "id": "hyp-claim-026",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket.enableRefunds: Locked market cancellation releases protocolPool reservation via _releaseLiabilityReservation, freeing reserved capacity",
+    "locations": ["RevealMarket.enableRefunds", "RevealMarket._releaseLiabilityReservation"],
+    "root_cause": "enableRefunds (line 492) calls _releaseLiabilityReservation(), which calls protocolPool.releaseLiabilityReservation(address(this)) (line 851). This releases the reserved liability that was set during lockBatches (line 373). In ProtocolPool.releaseLiabilityReservation (lines 133-148), the reservedLiability for the market is zeroed and reservedTotal is decremented. This is correct behavior — when a market is cancelled, the reserved capacity should be freed for other markets. If this were not called, the reserved amount would remain locked in the pool indefinitely. The only concern is if releaseLiabilityReservation is called when no reservation exists (reservedLiability == 0), but the function handles this gracefully by returning early (line 136-138).",
+    "trigger_scenario": [
+      "Step 1: Market locks. protocolPool.reserveLiability is called with protocolLiabilityCap.",
+      "Step 2: Market is cancelled via enableRefunds.",
+      "Step 3: _releaseLiabilityReservation releases the reservation.",
+      "Step 4: Pool capacity is freed for other markets."
+    ],
+    "preconditions": [
+      "Market was in Locked phase before cancellation."
+    ],
+    "impact": "loss_of_function",
+    "likelihood": "common",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-claim-027",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket.enableRefunds: Commit phase cancellation when no tickets exist wastes gas but causes no harm",
+    "locations": ["RevealMarket.enableRefunds"],
+    "root_cause": "enableRefunds can be called in Commit phase after commitDeadline (line 478). If commitments.length == 0 (no tickets), the market transitions to Cancelled with nothing to refund. The contract holds 0 tokens (or any directly-sent tokens that shouldn't be there). sweepCancelledRefunds would sweep 0 tokens. This is harmless. However, lockBatches requires commitments.length != 0 (line 331: NothingToLock), so a market with 0 commitments can never be locked. enableRefunds in this case simply prevents anyone from trying to lock an empty market and wastes gas on the transition. The _releaseLiabilityReservation call (line 492) would try to release a reservation that was never made (since lockBatches wasn't called), but protocolPool.releaseLiabilityReservation handles zero reservation gracefully.",
+    "trigger_scenario": [
+      "Step 1: Market is created but no users commit tickets.",
+      "Step 2: commitDeadline passes.",
+      "Step 3: Factory owner calls enableRefunds.",
+      "Step 4: Market transitions to Cancelled. No refunds needed. No tokens to sweep."
+    ],
+    "preconditions": [
+      "Market has zero commitments.",
+      "Commit deadline has passed."
+    ],
+    "impact": "griefing",
+    "likelihood": "common",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-claim-028",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket.PoseidonT3: Input reduction via modular arithmetic (inputs[0] % PRIME) means two different inputs can produce the same hash output",
+    "locations": ["PoseidonT3.poseidon"],
+    "root_cause": "PoseidonT3.poseidon (line 13-14) reduces inputs modulo PRIME: state[1] = inputs[0] % PRIME, state[2] = inputs[1] % PRIME. This means values x and x + PRIME produce the same hash. In _computeLeaf, the field element range check (line 862-867) prevents all inputs from being >= SNARK_SCALAR_FIELD (which equals PRIME). However, in _verifyLeaf's Merkle proof verification loop (lines 888-896), sibling values from the proof are NOT range-checked — they are used directly as uint256(proof[i]). PoseidonT3 will reduce them mod PRIME internally. This means a proof with sibling value X or X + PRIME would produce the same result. This is actually fine because the Merkle root is canonical (stored during lockBatches), and the proof either leads to the correct root or not. The reduction is consistent.",
+    "trigger_scenario": [
+      "Step 1: Attacker provides Merkle proof with sibling = X + PRIME for some node.",
+      "Step 2: PoseidonT3 reduces it to X % PRIME = X (since X < PRIME).",
+      "Step 3: Same hash computation occurs as with the canonical sibling value X.",
+      "Step 4: Proof verification produces the same root. Claim succeeds.",
+      "Step 5: This is NOT a vulnerability — the attacker cannot change the outcome, only the proof encoding."
+    ],
+    "preconditions": [
+      "Attacker manipulates Merkle proof values."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-claim-029",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket.claim: claim does not check that the ticket is in a verified batch, allowing claims against unverified batch roots if verifyAndSettleBatched is used",
+    "locations": ["RevealMarket.claim", "RevealMarket._verifyLeaf", "RevealMarket.verifyAndSettleBatched"],
+    "root_cause": "In verifyAndSettleBatched, individual batch proofs are verified via _verifyBatchProof. Once ALL batches are verified and settledBatchCount == batchCount (line 438), _finalizeSettlement is called and phase transitions to Settled. Only then can claims begin. So by the time claim() can execute (phase == Settled), ALL batch roots have been verified by the ZK circuit. There is no scenario where a claim can reference an unverified batch root, because the entire market must be fully settled before any claims. This is safe.",
+    "trigger_scenario": [
+      "Step 1: Market with 3 batches. verifyAndSettleBatched called with batches 0 and 1.",
+      "Step 2: settledBatchCount = 2, but batchCount = 3. _finalizeSettlement NOT called. Phase remains Locked.",
+      "Step 3: No claims possible because phase != Settled.",
+      "Step 4: verifyAndSettleBatched called again with batch 2. settledBatchCount = 3 = batchCount.",
+      "Step 5: _finalizeSettlement called. Phase -> Settled. Now all batches are verified and claims can begin."
+    ],
+    "preconditions": [
+      "Multi-batch market."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "common",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-claim-030",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket.sweepCancelledRefunds: refundDeadline does not account for pause duration unlike claimDeadline, so the refund window is fixed",
+    "locations": ["RevealMarket.sweepCancelledRefunds", "RevealMarket.enableRefunds"],
+    "root_cause": "The refundDeadline (set in enableRefunds at line 489) does not have a pause duration mechanism like claimDeadline does (no refundPauseTotalDuration or similar). Once set, the refund window is a fixed 180 days (CLAIM_WINDOW_SECONDS). The only extension mechanism is extendRefundDeadline, which is one-time and capped at MAX_CLAIM_DEADLINE_EXTENSION (365 days). This means the factory owner cannot extend the refund window through repeated pausing — there is no pause mechanism for refunds at all. sweepCancelledRefunds (line 809) simply checks block.timestamp <= refundDeadline. This is actually a positive finding: the refund deadline cannot be manipulated via pause/unpause cycles (unlike the claim deadline).",
+    "trigger_scenario": [
+      "Step 1: Market is cancelled. refundDeadline = now + 180 days.",
+      "Step 2: 181 days pass. Refund window closes.",
+      "Step 3: Factory owner calls sweepCancelledRefunds. Remaining tokens go to protocolPool.",
+      "Step 4: No pause manipulation possible for refund deadline."
+    ],
+    "preconditions": [
+      "Market is in Cancelled phase."
+    ],
+    "impact": "griefing",
+    "likelihood": "common",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-claim-031",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket.claimWithOracleAuthorization: Oracle signature does not bind to the committed leaf, allowing the oracle to authorize payouts for tickets that don't match the Merkle tree",
+    "locations": ["RevealMarket.claimWithOracleAuthorization"],
+    "root_cause": "claimWithOracleAuthorization (lines 576-591) constructs a signature digest that includes address(this), marketId, ticketId, user, winningOutcomeId, payout, expiry, chainid, and 'CLAIM_ORACLE_V1'. Notably, it does NOT include the commitment hash or verify it against the Merkle tree. This means the oracle can authorize a payout that differs from what the Merkle tree would specify. The oracle is fully trusted to determine the correct payout. This is by design as a fallback for when users cannot reconstruct their preimage, but it means the oracle has unilateral authority over payout amounts (bounded only by totalLiability). Combined with hyp-claim-014, this is a significant trust assumption.",
+    "trigger_scenario": [
+      "Step 1: Ticket 0 committed with payout field = 1 ETH in the Merkle tree.",
+      "Step 2: Oracle signs claimWithOracleAuthorization for ticket 0 with payout = 2 ETH.",
+      "Step 3: claimedLiability += 2 ETH (if within totalLiability bound).",
+      "Step 4: Ticket owner receives 2 ETH instead of the 1 ETH they should get per the Merkle tree.",
+      "Step 5: Other winners may be short-changed if total claims approach totalLiability."
+    ],
+    "preconditions": [
+      "Oracle is malicious or makes computational errors.",
+      "totalLiability has enough room for the inflated payout."
+    ],
+    "impact": "theft_of_yield",
+    "likelihood": "malicious_action",
+    "belief_score": 0.55
+  },
+  {
+    "id": "hyp-claim-032",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket._verifyLeaf: Commitment match check at line 878 ensures leaf matches stored commitment before Merkle proof traversal, preventing arbitrary leaf injection",
+    "locations": ["RevealMarket._verifyLeaf"],
+    "root_cause": "_verifyLeaf (line 878) checks commitments[ticketId] != leaf and returns false if they don't match. This is checked BEFORE the Merkle proof traversal (lines 886-897). This double-lock ensures: (1) the leaf matches the commitment stored during commit phase, AND (2) the leaf is in the correct position in the Merkle tree. Both checks must pass. An attacker cannot inject an arbitrary leaf because they would need to find a Poseidon preimage collision to make it match the stored commitment AND provide a valid Merkle proof. This is sound.",
+    "trigger_scenario": [
+      "Step 1: Attacker creates a forged leaf with inflated payout.",
+      "Step 2: Forged leaf does not match commitments[ticketId]. _verifyLeaf returns false.",
+      "Step 3: Claim reverts with InvalidMerkleProof. Attack fails."
+    ],
+    "preconditions": [
+      "Attacker has a valid ticketId but tries to claim with different parameters."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-claim-033",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket.enableRefunds: refundDeadlineExtended reset to false on cancellation allows one additional extension after re-entering Cancelled state (but re-entry is impossible)",
+    "locations": ["RevealMarket.enableRefunds"],
+    "root_cause": "enableRefunds (line 491) sets refundDeadlineExtended = false, which would allow one call to extendRefundDeadline. Since enableRefunds is idempotent for Cancelled phase (line 476: return early), the flag cannot be reset by calling enableRefunds again. And phase transitions are one-way (Cancelled is terminal), so there is no way to re-enter Cancelled from another phase. This means extendRefundDeadline can be called exactly once per market cancellation. This is correct.",
+    "trigger_scenario": [
+      "Step 1: Market is cancelled. refundDeadlineExtended = false.",
+      "Step 2: Factory owner extends refund deadline. refundDeadlineExtended = true.",
+      "Step 3: Factory owner calls enableRefunds again. Returns early because phase is already Cancelled.",
+      "Step 4: refundDeadlineExtended remains true. No second extension possible."
+    ],
+    "preconditions": [
+      "Market is in Cancelled phase."
+    ],
+    "impact": "griefing",
+    "likelihood": "common",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-claim-034",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket.refund: refund requires onlyRelayerOrFactoryOwner but transfers funds to the specified user, not msg.sender",
+    "locations": ["RevealMarket.refund"],
+    "root_cause": "refund() is restricted to relayer/relayerOwner/factoryOwner (onlyRelayerOrFactoryOwner modifier). It requires the full preimage (outcomeId, amount, payout, salt) and verifies _ticketOwner(ticketId) == user. The refund is transferred to user (line 517: _safeTransferExact(user, refundAmount)), not to msg.sender. So a malicious relayer cannot redirect refund funds. The relayer restriction provides an additional layer of control — only authorized parties can process refunds via this path. Users can use refundSelf or refundTicket (permissionless) if the relayer is uncooperative.",
+    "trigger_scenario": [
+      "Step 1: Relayer calls refund(user=alice, ticketId=0, ...) with correct preimage.",
+      "Step 2: Funds are sent to alice, not to the relayer.",
+      "Step 3: Relayer cannot steal funds via the refund path."
+    ],
+    "preconditions": [
+      "Market is in Cancelled phase.",
+      "Relayer or factory owner initiates the refund."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "malicious_action",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-claim-035",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket: claimedLiability is not updated during refund paths, breaking the invariant that claimedLiability tracks total outflows",
+    "locations": ["RevealMarket.refund", "RevealMarket.refundSelf", "RevealMarket.refundTicket"],
+    "root_cause": "In the claim path (lines 465-466), claimedLiability is incremented by payout and checked against totalLiability. In the refund paths (lines 516-517, 539-540, 554-555), claimedLiability is NOT updated. This is correct because: (1) In Cancelled phase, totalLiability was never set (it remains 0 since _finalizeSettlement was never called), so checking claimedLiability <= totalLiability would be wrong. (2) The refund amount is fixed at ticketSize regardless of payout, so the totalLiability metric doesn't apply. (3) The contract's balance serves as the natural cap — when all tickets are refunded, balance goes to 0. There is no need for explicit outflow tracking in the refund path because each ticket can only be refunded once (claimedTickets check) and the total refunds = N * ticketSize = total balance.",
+    "trigger_scenario": [
+      "Step 1: Market cancelled with 5 tickets, each ticketSize = 1 ETH. Contract holds 5 ETH.",
+      "Step 2: refundTicket(0). claimedLiability remains 0. Balance = 4 ETH.",
+      "Step 3: refundTicket(1). claimedLiability still 0. Balance = 3 ETH.",
+      "Step 4: All 5 tickets refunded. claimedLiability = 0, Balance = 0.",
+      "Step 5: This is correct — claimedLiability is not relevant in Cancelled phase."
+    ],
+    "preconditions": [
+      "Market is in Cancelled phase."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "common",
+    "belief_score": 0.02
+  },
+  {
+    "id": "hyp-claim-036",
+    "job_id": "audit-revealmarket",
+    "agent": "ClaimsRefundsAuditor",
+    "title": "RevealMarket.sweepUnclaimed: claimsSwept flag prevents double-sweep but also permanently blocks all future claims even if claims are unpaused",
+    "locations": ["RevealMarket.sweepUnclaimed"],
+    "root_cause": "sweepUnclaimed (lines 797-798) sets claimsPaused = true and claimsSwept = true. After this, claim() and claimWithOracleAuthorization both check claimsSwept (lines 456/569: if (claimsSwept) revert ClaimsAlreadySwept()). Even if setClaimsPaused(false) is called afterward, claimsSwept remains true and blocks all claims. The only way to execute sweepUnclaimed is after the effective claim deadline has passed and phase is Settled. This is by design — after the sweep, no tokens remain in the contract, so claims should be blocked. However, setClaimsPaused checks claimsSwept (line 700) and reverts, preventing the factory owner from trying to re-open claims after a sweep. This is correct.",
+    "trigger_scenario": [
+      "Step 1: Claim deadline passes. Factory calls sweepUnclaimed.",
+      "Step 2: All remaining tokens sent to protocolPool. claimsSwept = true.",
+      "Step 3: Any subsequent claim reverts with ClaimsAlreadySwept.",
+      "Step 4: This is correct — no tokens to claim."
+    ],
+    "preconditions": [
+      "Effective claim deadline has passed.",
+      "sweepUnclaimed has been called."
+    ],
+    "impact": "fund_loss",
+    "likelihood": "common",
+    "belief_score": 0.02
+  }
+]
