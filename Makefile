@@ -5,7 +5,7 @@ COMPOSE_ENV_FILE := $(if $(wildcard $(ENV_FILE)),--env-file $(ENV_FILE),)
 INFRA_SERVICES ?= postgres redis
 ALL_SERVICES := postgres redis api worker hedger frontend prover streamer
 
-.PHONY: api worker hedger frontend caddy prover streamer all stack down test format fmt local prod help
+.PHONY: api worker hedger frontend caddy prover streamer all stack down test format fmt local smoke-local monitor-local prod help
 .PHONY: test-backend test-api test-worker test-frontend test-hedger test-streamer test-relayer test-contracts test-contracts-polygon test-contracts-zen test-prover
 
 api:
@@ -83,13 +83,20 @@ help:
 	"Targets:" \
 	"  api, worker, hedger, frontend, streamer, prover, all, stack, down" \
 	"  test, test-backend, test-frontend, test-contracts, test-prover" \
-	"  format (pre-commit), local, prod"
+	"  format (pre-commit), local, smoke-local, monitor-local, prod"
 
 gen-address:
 	python scripts/gen_address.py --mode random --count 1
 
 local:
 	./run_local.sh
+	$(MAKE) --no-print-directory smoke-local
+
+smoke-local:
+	./scripts/smoke_local.sh
+
+monitor-local:
+	./scripts/monitor_local.sh
 
 prod:
 	./run_prod.sh
