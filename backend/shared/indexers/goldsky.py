@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime
 from typing import Any
@@ -15,6 +16,40 @@ try:
     import orjson  # type: ignore[import-not-found]
 except ImportError:  # pragma: no cover - optional dependency
     orjson = None  # type: ignore[assignment]
+
+try:
+    from prometheus_client import REGISTRY, CollectorRegistry, Counter, Gauge
+except ImportError:  # pragma: no cover - optional dependency
+
+    class _CounterStub:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def labels(self, **kwargs):
+            return self
+
+        @staticmethod
+        def inc(amount: float = 1.0) -> None:
+            return None
+
+    class _GaugeStub:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def labels(self, **kwargs):
+            return self
+
+        @staticmethod
+        def set(value: float) -> None:
+            return None
+
+    class _CollectorRegistryStub:
+        pass
+
+    Counter = _CounterStub  # type: ignore[misc,assignment]
+    Gauge = _GaugeStub  # type: ignore[misc,assignment]
+    CollectorRegistry = _CollectorRegistryStub  # type: ignore[misc,assignment]
+    REGISTRY = None  # type: ignore[assignment]
 
 
 class GoldskyError(RuntimeError):
@@ -49,6 +84,47 @@ query Condition($conditionId: Bytes!) {
   }
 }
 """
+
+
+def _safe_counter(name: str, documentation: str, labelnames: list[str]) -> Counter:
+    registry = REGISTRY
+    try:
+        return Counter(name, documentation, labelnames, registry=registry)
+    except ValueError:
+        existing = getattr(registry, "_names_to_collectors", {}).get(name) if registry else None
+        if isinstance(existing, Counter):
+            return existing
+        return Counter(name, documentation, labelnames, registry=CollectorRegistry())
+
+
+def _safe_gauge(name: str, documentation: str, labelnames: list[str]) -> Gauge:
+    registry = REGISTRY
+    try:
+        return Gauge(name, documentation, labelnames, registry=registry)
+    except ValueError:
+        existing = getattr(registry, "_names_to_collectors", {}).get(name) if registry else None
+        if isinstance(existing, Gauge):
+            return existing
+        return Gauge(name, documentation, labelnames, registry=CollectorRegistry())
+
+
+GOLDSKY_REQUEST_COUNTER = _safe_counter(
+    "goldsky_requests_total",
+    "Outcome of Goldsky requests",
+    ["phase", "result"],
+)
+
+GOLDSKY_FAILURE_SUPPRESSED_COUNTER = _safe_counter(
+    "goldsky_failure_logs_suppressed_total",
+    "Suppressed Goldsky failure logs due to cooldown",
+    ["event"],
+)
+
+GOLDSKY_DEGRADED_GAUGE = _safe_gauge(
+    "goldsky_degraded",
+    "1 when Goldsky lookups are degraded (latest request path failed), 0 when healthy",
+    [],
+)
 
 
 def _normalize_hex(value: str | None) -> str | None:
@@ -114,6 +190,10 @@ class AsyncGoldskyClient:
         self._logger = logging.getLogger(logger_name)
         self._supports_condition_resolutions: bool | None = None
         self._logged_condition_resolution_schema_warning = False
+        self._degraded = False
+        self._failure_log_cooldown_seconds = 60.0
+        self._failure_log_state: dict[str, tuple[float, int]] = {}
+        GOLDSKY_DEGRADED_GAUGE.set(0)
         wait_strategy = wait_random_exponential(multiplier=backoff_seconds, max=backoff_max_seconds)
 
         async def _before_sleep(retry_state):
@@ -158,6 +238,54 @@ class AsyncGoldskyClient:
             with attempt:
                 return await action()
         raise GoldskyError("goldsky request failed unexpectedly")
+
+    def _mark_success(self, *, phase: str) -> None:
+        GOLDSKY_REQUEST_COUNTER.labels(phase=phase, result="success").inc()
+        if self._degraded:
+            self._degraded = False
+            GOLDSKY_DEGRADED_GAUGE.set(0)
+            suppressed_total = sum(suppressed for _last, suppressed in self._failure_log_state.values())
+            if suppressed_total > 0:
+                log_event(
+                    self._logger,
+                    logging.INFO,
+                    event="goldsky.recovered",
+                    message="goldsky request path recovered",
+                    suppressed_failures=suppressed_total,
+                )
+            self._failure_log_state.clear()
+
+    def _log_failure_with_cooldown(
+        self,
+        *,
+        phase: str,
+        event: str,
+        message: str,
+        error: str,
+        level: int = logging.WARNING,
+    ) -> None:
+        GOLDSKY_REQUEST_COUNTER.labels(phase=phase, result="failure").inc()
+        self._degraded = True
+        GOLDSKY_DEGRADED_GAUGE.set(1)
+
+        now = time.monotonic()
+        last_emit, suppressed = self._failure_log_state.get(event, (0.0, 0))
+        if now - last_emit < self._failure_log_cooldown_seconds:
+            self._failure_log_state[event] = (last_emit, suppressed + 1)
+            GOLDSKY_FAILURE_SUPPRESSED_COUNTER.labels(event=event).inc()
+            return
+
+        self._failure_log_state[event] = (now, 0)
+        extra_fields: dict[str, Any] = {"error": error}
+        if suppressed > 0:
+            extra_fields["suppressed_since_last"] = suppressed
+        log_event(
+            self._logger,
+            level,
+            event=event,
+            message=message,
+            **extra_fields,
+        )
 
     def _log_condition_resolution_schema_warning_once(self, *, error: str) -> None:
         if self._logged_condition_resolution_schema_warning:
@@ -233,17 +361,18 @@ class AsyncGoldskyClient:
                 data = await self._run_with_retry(lambda: self._post(payload))
                 self._supports_condition_resolutions = True
                 resolutions = data.get("conditionResolutions") or []
+                self._mark_success(phase="resolution_summary_condition_resolutions")
             except (GoldskyError, httpx.HTTPError, httpx.RequestError, RetryError) as exc:
                 if _is_missing_condition_resolutions_error(exc):
                     self._supports_condition_resolutions = False
                     self._log_condition_resolution_schema_warning_once(error=str(exc))
                 else:
-                    log_event(
-                        self._logger,
-                        logging.WARNING,
+                    self._log_failure_with_cooldown(
+                        phase="resolution_summary_condition_resolutions",
                         event="goldsky.resolution.failed",
                         message="failed to fetch condition resolutions",
                         error=str(exc),
+                        level=logging.WARNING,
                     )
                 resolutions = []
 
@@ -252,13 +381,14 @@ class AsyncGoldskyClient:
             payload["query"] = CONDITION_QUERY
             try:
                 data = await self._run_with_retry(lambda: self._post(payload))
+                self._mark_success(phase="resolution_summary_condition")
             except (GoldskyError, httpx.HTTPError, httpx.RequestError, RetryError) as exc:
-                log_event(
-                    self._logger,
-                    logging.ERROR,
+                self._log_failure_with_cooldown(
+                    phase="resolution_summary_condition",
                     event="goldsky.request.failed",
                     message="failed to query goldsky condition",
                     error=str(exc),
+                    level=logging.ERROR,
                 )
                 raise
             condition = data.get("condition") or {}
@@ -327,6 +457,12 @@ class AsyncGoldskyClient:
                 data = await self._run_with_retry(_do_post)
                 if include_resolutions:
                     self._supports_condition_resolutions = True
+                phase = (
+                    "resolution_summary_batch_resolutions"
+                    if include_resolutions
+                    else "resolution_summary_batch_condition"
+                )
+                self._mark_success(phase=phase)
             except (GoldskyError, httpx.HTTPError, httpx.RequestError, RetryError) as exc:
                 if include_resolutions and _is_missing_condition_resolutions_error(exc):
                     self._supports_condition_resolutions = False
@@ -339,11 +475,31 @@ class AsyncGoldskyClient:
                             return await self._post(body)
 
                         data = await self._run_with_retry(_do_post_fallback)
-                    except (GoldskyError, httpx.HTTPError, httpx.RequestError, RetryError):
+                        self._mark_success(phase="resolution_summary_batch_condition")
+                    except (GoldskyError, httpx.HTTPError, httpx.RequestError, RetryError) as fallback_exc:
+                        self._log_failure_with_cooldown(
+                            phase="resolution_summary_batch_condition",
+                            event="goldsky.batch.request.failed",
+                            message="failed to query goldsky batch fallback condition payload",
+                            error=str(fallback_exc),
+                            level=logging.ERROR,
+                        )
                         for condition_id, _alias_res, _alias_cond in aliases:
                             results.setdefault(condition_id, None)
                         continue
                 else:
+                    phase = (
+                        "resolution_summary_batch_resolutions"
+                        if include_resolutions
+                        else "resolution_summary_batch_condition"
+                    )
+                    self._log_failure_with_cooldown(
+                        phase=phase,
+                        event="goldsky.batch.request.failed",
+                        message="failed to query goldsky batch payload",
+                        error=str(exc),
+                        level=logging.ERROR,
+                    )
                     # Mark all in this chunk as None on failure to avoid partial poisoning.
                     for condition_id, _alias_res, _alias_cond in aliases:
                         results.setdefault(condition_id, None)
