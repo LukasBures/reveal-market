@@ -76,9 +76,11 @@ class HedgerService:
             retry_backoff_seconds=settings.polymarket_retry_backoff_seconds,
         )
         if not self.settings.hedger_private_key:
+            environment = str(self.settings.environment).strip().lower()
+            missing_wallet_level = logging.WARNING if environment in {"dev", "local"} else logging.ERROR
             log_event(
                 logger,
-                logging.ERROR,
+                missing_wallet_level,
                 event="hedger.config.missing_wallet",
                 message="hedger private key missing; running in read-only mode",
             )
