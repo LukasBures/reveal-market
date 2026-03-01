@@ -186,6 +186,59 @@ def test_heartbeat_dashboard_handles_missing_payload(client, monkeypatch):
     assert payload["api"] is None
 
 
+def test_heartbeat_summary_is_public(client):
+    cache = client.app.cache_client
+    now_iso = datetime.now(tz=UTC).isoformat()
+    asyncio.run(
+        cache.set(
+            "reveal_market_worker:heartbeat",
+            json.dumps(
+                {
+                    "service": "Reveal Market Worker",
+                    "component": "worker",
+                    "timestamp": now_iso,
+                    "markets_processed": 11,
+                }
+            ),
+        )
+    )
+    asyncio.run(
+        cache.set(
+            "reveal_market_api:heartbeat",
+            json.dumps(
+                {
+                    "service": "Reveal Market API",
+                    "component": "api",
+                    "timestamp": now_iso,
+                    "metrics": {"total_requests": 21, "avg_latency_ms": 18.2},
+                }
+            ),
+        )
+    )
+
+    response = client.get("/healthz/heartbeats/summary")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["worker"]["status"] == "ok"
+    assert payload["api"]["status"] == "ok"
+    assert payload["worker"]["age_seconds"] is not None
+    assert payload["api"]["age_seconds"] is not None
+
+
+def test_heartbeat_summary_degrades_when_payload_missing(client):
+    cache = client.app.cache_client
+    asyncio.run(cache.delete("reveal_market_worker:heartbeat"))
+    asyncio.run(cache.delete("reveal_market_api:heartbeat"))
+
+    response = client.get("/healthz/heartbeats/summary")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["worker"]["status"] == "degraded"
+    assert payload["worker"]["detail"] == "heartbeat_missing"
+    assert payload["api"]["status"] == "degraded"
+    assert payload["api"]["detail"] == "heartbeat_missing"
+
+
 def test_heartbeat_dashboard_marks_worker_stale(client, monkeypatch):
     monkeypatch.setattr("app.server.settings.worker_heartbeat_stale_seconds", 1, raising=False)
     cache = client.app.cache_client

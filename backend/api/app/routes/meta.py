@@ -29,6 +29,24 @@ def _verify_internal_secret(secret_header: str | None) -> None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_internal_secret")
 
 
+def _build_public_heartbeat_component(
+    *,
+    now: datetime,
+    component: schemas.HeartbeatMetrics | None,
+) -> schemas.HeartbeatSummaryComponent:
+    if component is None:
+        return schemas.HeartbeatSummaryComponent(status="degraded", detail="heartbeat_missing")
+    age_seconds: float | None = None
+    if component.last_heartbeat is not None:
+        age_seconds = max((now - component.last_heartbeat).total_seconds(), 0.0)
+    return schemas.HeartbeatSummaryComponent(
+        status=component.status,
+        last_heartbeat=component.last_heartbeat,
+        age_seconds=age_seconds,
+        detail=component.detail,
+    )
+
+
 @router.get("/", tags=["meta"])
 async def read_root() -> dict[str, str]:
     """Basic service metadata for quick smoke tests."""
@@ -86,4 +104,18 @@ async def heartbeat_dashboard(
         generated_at=now,
         worker=worker_status,
         api=api_status,
+    )
+
+
+@router.get("/healthz/heartbeats/summary", response_model=schemas.HeartbeatSummary, tags=["health"])
+async def heartbeat_summary() -> schemas.HeartbeatSummary:
+    """Public, redacted heartbeat summary suitable for local smoke/ops checks."""
+
+    now = datetime.now(tz=UTC)
+    worker_status = await build_worker_dashboard(now)
+    api_status = await build_api_dashboard(now)
+    return schemas.HeartbeatSummary(
+        generated_at=now,
+        worker=_build_public_heartbeat_component(now=now, component=worker_status),
+        api=_build_public_heartbeat_component(now=now, component=api_status),
     )

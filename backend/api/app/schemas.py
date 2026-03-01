@@ -55,6 +55,19 @@ class HeartbeatDashboard(BaseModel):
     api: HeartbeatMetrics | None = None
 
 
+class HeartbeatSummaryComponent(BaseModel):
+    status: HealthState
+    last_heartbeat: datetime | None = None
+    age_seconds: float | None = Field(default=None, ge=0)
+    detail: str | None = None
+
+
+class HeartbeatSummary(BaseModel):
+    generated_at: datetime
+    worker: HeartbeatSummaryComponent
+    api: HeartbeatSummaryComponent
+
+
 class MarketBase(BaseModel):
     event_id: str
     title: str
