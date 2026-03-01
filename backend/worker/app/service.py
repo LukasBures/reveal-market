@@ -146,11 +146,21 @@ async def _persist_market_stats(redis_client: Redis | None, markets: list[Market
 
 def _log_db_metrics(context: str) -> None:
     from shared.db_metrics import snapshot as snapshot_db_metrics
+    from shared.db_metrics import snapshot_hotspots as snapshot_db_hotspots
 
     metrics = snapshot_db_metrics()
     threshold = runtime.settings.db_query_warn_threshold
     max_ms = runtime.settings.db_query_time_warn_ms
     if metrics.query_count >= threshold or metrics.total_time_ms >= max_ms:
+        hotspot_limit = max(runtime.settings.db_query_hotspot_limit, 0)
+        hotspots = (
+            snapshot_db_hotspots(
+                limit=hotspot_limit,
+                min_total_time_ms=runtime.settings.db_query_hotspot_min_total_ms,
+            )
+            if hotspot_limit > 0
+            else []
+        )
         log_event(
             logger,
             logging.WARNING,
@@ -159,7 +169,27 @@ def _log_db_metrics(context: str) -> None:
             context=context,
             query_count=metrics.query_count,
             db_time_ms=round(metrics.total_time_ms, 2),
+            max_query_ms=round(metrics.max_time_ms, 2),
+            hotspot_count=len(hotspots),
         )
+        if hotspots:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="worker.db.query_hotspots",
+                message="top database query hotspots for sync tick",
+                context=context,
+                hotspots=[
+                    {
+                        "query": hotspot.query,
+                        "query_count": hotspot.query_count,
+                        "total_time_ms": round(hotspot.total_time_ms, 2),
+                        "max_time_ms": round(hotspot.max_time_ms, 2),
+                        "avg_time_ms": round(hotspot.avg_time_ms, 2),
+                    }
+                    for hotspot in hotspots
+                ],
+            )
 
 
 def _calculate_sleep(start_time: float) -> float:

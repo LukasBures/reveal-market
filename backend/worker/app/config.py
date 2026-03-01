@@ -140,6 +140,16 @@ class Settings(BaseSettings):
     )
     db_query_warn_threshold: int = Field(default=200, ge=1)
     db_query_time_warn_ms: float = Field(default=500.0, ge=0)
+    db_query_hotspot_limit: int = Field(
+        default=5,
+        ge=0,
+        description="Top SQL query fingerprints to include when DB query budget warnings trigger (0 disables).",
+    )
+    db_query_hotspot_min_total_ms: float = Field(
+        default=25.0,
+        ge=0,
+        description="Only include query hotspots with at least this cumulative time in a sync tick.",
+    )
     polymarket_order: str = Field(default="id")
     polymarket_sort_ascending: bool = Field(default=False)
     polymarket_only_open_markets: bool | None = Field(default=None)
