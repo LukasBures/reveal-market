@@ -1,7 +1,6 @@
 # syntax=docker/dockerfile:1.4
 # docker/frontend/Dockerfile
 
-ARG BUILDKIT_INLINE_CACHE=1
 ARG APK_REPO_URL=https://dl-cdn.alpinelinux.org/alpine
 # Pinned 2026-02-27
 ARG NODE_IMAGE=node:20-alpine@sha256:09e2b3d9726018aecf269bd35325f46bf75046a643a66d28360ec71132750ec8
@@ -31,7 +30,7 @@ RUN --mount=type=cache,target=/var/cache/apk set -eux; \
     apk add --no-cache bash
 WORKDIR /app/frontend
 
-COPY --from=deps /app/frontend/node_modules ./node_modules
+COPY --from=deps --link /app/frontend/node_modules ./node_modules
 COPY frontend ./
 
 # Build-time envs (these are what Next.js actually embeds)
@@ -76,18 +75,21 @@ ENV HOSTNAME=0.0.0.0
 ENV LOG_LEVEL=INFO
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Copy only what the standalone server needs: server bundle, static assets, public assets.
-COPY --from=builder /app/frontend/.next/standalone ./
-COPY --from=builder /app/frontend/.next/static ./.next/static
-COPY --from=builder /app/frontend/public ./public
-
 # Drop privileges to a dedicated runtime user.
 ARG APP_USER=nextjs
 ARG APP_GROUP=nextjs
 RUN id -u "${APP_USER}" >/dev/null 2>&1 || (addgroup -S "${APP_GROUP}" && adduser -S -G "${APP_GROUP}" "${APP_USER}")
-RUN chown -R "${APP_USER}:${APP_GROUP}" /app
+
+# Copy only what the standalone server needs: server bundle, static assets, public assets.
+COPY --from=builder --link --chown=${APP_USER}:${APP_GROUP} /app/frontend/.next/standalone ./
+COPY --from=builder --link --chown=${APP_USER}:${APP_GROUP} /app/frontend/.next/static ./.next/static
+COPY --from=builder --link --chown=${APP_USER}:${APP_GROUP} /app/frontend/public ./public
+
 USER ${APP_USER}
 
 EXPOSE 3000
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:3000/healthz').then(r=>{if(!r.ok) process.exit(1)}).catch(()=>process.exit(1))"
 
 CMD ["node", "server.js"]

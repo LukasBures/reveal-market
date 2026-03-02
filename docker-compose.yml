@@ -138,10 +138,9 @@ services:
     build:
       context: .
       dockerfile: docker/api/Dockerfile
-      args:
-        BUILDKIT_INLINE_CACHE: 1
     container_name: reveal-market-api
     restart: unless-stopped
+    init: true
     mem_swappiness: 0
     env_file:
       - ${ENV_FILE:-.env.local}
@@ -168,10 +167,10 @@ services:
       - "prometheus.path=/metrics"
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS -H \"Host: ${RM_HEALTHCHECK_HOST:-localhost}\" http://127.0.0.1:8000/live || exit 1"]
-      interval: 30s
-      timeout: 10s
+      interval: 15s
+      timeout: 5s
       retries: 3
-      start_period: 20s
+      start_period: 25s
     deploy:
       replicas: 1
       resources:
@@ -186,8 +185,6 @@ services:
     build:
       context: .
       dockerfile: docker/worker/Dockerfile
-      args:
-        BUILDKIT_INLINE_CACHE: 1
     container_name: reveal-market-worker
     restart: unless-stopped
     init: true
@@ -221,8 +218,8 @@ services:
         max-file: "3"
     healthcheck:
       test: ["CMD", "python", "-m", "app.healthcheck"]
-      interval: 45s
-      timeout: 10s
+      interval: 20s
+      timeout: 5s
       retries: 3
       start_period: 30s
     deploy:
@@ -239,8 +236,6 @@ services:
     build:
       context: .
       dockerfile: docker/hedger/Dockerfile
-      args:
-        BUILDKIT_INLINE_CACHE: 1
     container_name: reveal-market-hedger
     restart: unless-stopped
     init: true
@@ -271,6 +266,8 @@ services:
       HEDGER_VAULT_CHAIN_ID: ${HEDGER_VAULT_CHAIN_ID}
       HEDGER_VAULT_GAS_PRICE_GWEI: ${HEDGER_VAULT_GAS_PRICE_GWEI}
     depends_on:
+      api:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       redis:
@@ -285,8 +282,8 @@ services:
     healthcheck:
       # Keep liveness checks lightweight; deep DB checks are exposed via /healthz/deep.
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8090/healthz >/dev/null || exit 1"]
-      interval: 30s
-      timeout: 10s
+      interval: 20s
+      timeout: 5s
       retries: 3
       start_period: 45s
     deploy:
@@ -303,8 +300,6 @@ services:
     build:
       context: .
       dockerfile: docker/relayer/Dockerfile
-      args:
-        BUILDKIT_INLINE_CACHE: 1
     container_name: reveal-market-relayer
     restart: unless-stopped
     init: true
@@ -324,9 +319,8 @@ services:
         max-size: "10m"
         max-file: "3"
     healthcheck:
-      test:
-        ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:${RELAYER_PORT:-8088}/healthz')"]
-      interval: 20s
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${RELAYER_PORT:-8088}/healthz || exit 1"]
+      interval: 15s
       timeout: 5s
       retries: 3
       start_period: 10s
@@ -345,7 +339,6 @@ services:
       context: .
       dockerfile: docker/frontend/Dockerfile
       args:
-        BUILDKIT_INLINE_CACHE: 1
         NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
         NEXT_PUBLIC_PRICE_STREAMER_URL: ${NEXT_PUBLIC_PRICE_STREAMER_URL:-http://localhost:8100}
         NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-http://localhost:3000}
@@ -375,10 +368,10 @@ services:
     healthcheck:
       # Prefer IPv4 loopback to avoid IPv6-only DNS resolutions inside Alpine.
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/healthz').then(r=>{if(!r.ok) process.exit(1)}).catch(()=>process.exit(1))\""]
-      interval: 30s
+      interval: 15s
       timeout: 5s
       retries: 3
-      start_period: 15s
+      start_period: 10s
     deploy:
       replicas: 1
       resources:
@@ -393,8 +386,6 @@ services:
     build:
       context: .
       dockerfile: docker/prover/Dockerfile
-      args:
-        BUILDKIT_INLINE_CACHE: 1
     container_name: reveal-market-prover
     restart: unless-stopped
     mem_swappiness: 0
@@ -422,7 +413,7 @@ services:
           memory: 1G
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8085/healthz || exit 1"]
-      interval: 30s
+      interval: 20s
       timeout: 5s
       retries: 3
       start_period: 15s
@@ -431,8 +422,6 @@ services:
     build:
       context: .
       dockerfile: docker/streamer/Dockerfile
-      args:
-        BUILDKIT_INLINE_CACHE: 1
     container_name: reveal-market-streamer
     restart: unless-stopped
     init: true

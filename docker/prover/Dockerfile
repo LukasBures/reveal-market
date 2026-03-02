@@ -1,6 +1,5 @@
 # syntax=docker/dockerfile:1.4
 
-ARG BUILDKIT_INLINE_CACHE=1
 ARG APK_REPO_URL=https://dl-cdn.alpinelinux.org/alpine
 # Pinned 2026-02-27
 ARG GOLANG_IMAGE=golang:1.24-alpine@sha256:8bee1901f1e530bfb4a7850aa7a479d17ae3a18beb6e09064ed54cfd245b7191
@@ -56,8 +55,8 @@ WORKDIR /app
 
 COPY prover/circuits /app/circuits
 RUN mkdir -p /app/circuits/build
-COPY --from=builder /usr/bin/prover /usr/local/bin/prover
-COPY --from=rapidsnark /opt/rapidsnark /opt/rapidsnark
+COPY --from=builder --link /usr/bin/prover /usr/local/bin/prover
+COPY --from=rapidsnark --link /opt/rapidsnark /opt/rapidsnark
 RUN ln -sf /opt/rapidsnark/bin/prover /usr/local/bin/rapidsnark && \
     chown -R prover:prover /app /opt/rapidsnark
 
@@ -72,7 +71,7 @@ ENV PROVER_LISTEN_ADDR=0.0.0.0:8085 \
     PROVER_LOG_LEVEL=INFO \
     LD_LIBRARY_PATH=/opt/rapidsnark/lib:${LD_LIBRARY_PATH:-}
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=20s --timeout=5s --start-period=15s --retries=3 \
     CMD wget -q --spider http://localhost:8085/healthz || exit 1
 
 EXPOSE 8085
