@@ -10,7 +10,12 @@ export const getRedisClient = (): RedisClient | null => {
     return null;
   }
   if (!globalForRedis.__rmRedis) {
-    globalForRedis.__rmRedis = new Redis(url, { maxRetriesPerRequest: 1, enableReadyCheck: false });
+    globalForRedis.__rmRedis = new Redis(url, {
+      maxRetriesPerRequest: 1,
+      enableReadyCheck: false,
+      connectTimeout: 3000,
+      commandTimeout: 5000,
+    });
   }
   return globalForRedis.__rmRedis ?? null;
 };

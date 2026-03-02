@@ -23,7 +23,15 @@ def get_redis_client() -> Redis | None:
     with _redis_client_lock:
         if _redis_client is None:
             settings = get_settings()
-            _redis_client = Redis.from_url(settings.redis_url, decode_responses=True)
+            _redis_client = Redis.from_url(
+                settings.redis_url,
+                decode_responses=True,
+                max_connections=5,
+                socket_timeout=5.0,
+                socket_connect_timeout=3.0,
+                retry_on_timeout=True,
+                health_check_interval=30,
+            )
         return _redis_client
 
 

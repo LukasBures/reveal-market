@@ -94,13 +94,7 @@ async def get_cache_client() -> Redis | None:
     """Return the shared Redis client, populating it on first call."""
 
     if runtime.cache_client is not None:
-        try:
-            await runtime.cache_client.ping()
-        except RedisError:
-            await _close_cache_client_instance(runtime.cache_client)
-            runtime.cache_client = None
-        else:
-            return runtime.cache_client
+        return runtime.cache_client
     async with runtime.cache_lock:
         if runtime.cache_client is None:
             runtime.cache_client = await _connect_cache_with_retry()

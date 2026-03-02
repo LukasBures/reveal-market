@@ -122,7 +122,13 @@ class StreamState:
     async def startup(self) -> None:
         try:
             self.redis = Redis.from_url(
-                self.settings.redis_url, decode_responses=True, socket_timeout=5, socket_connect_timeout=5
+                self.settings.redis_url,
+                decode_responses=True,
+                max_connections=30,
+                socket_timeout=5.0,
+                socket_connect_timeout=3.0,
+                retry_on_timeout=True,
+                health_check_interval=30,
             )
             await self.redis.ping()
             self.redis_error = None
@@ -367,9 +373,11 @@ class StreamState:
         if self.settings.signing_secret:
             mapping["sig"] = self._sign_payload(mapping)
         try:
-            await self.redis.hset(key, mapping=mapping)  # type: ignore[misc]
+            pipe = self.redis.pipeline(transaction=False)
+            pipe.hset(key, mapping=mapping)  # type: ignore[misc]
             if self.settings.cache_ttl_seconds > 0:
-                await self.redis.expire(key, self.settings.cache_ttl_seconds)  # type: ignore[misc]
+                pipe.expire(key, self.settings.cache_ttl_seconds)  # type: ignore[misc]
+            await pipe.execute()
             await self.redis.publish(channel, json.dumps(mapping))  # type: ignore[misc]
         except Exception as exc:
             logger.warning(
@@ -409,10 +417,12 @@ class StreamState:
                 return
         try:
             serialized = json.dumps(payload, default=str)
-            await self.redis.lpush(history_key, serialized)  # type: ignore[misc]
-            await self.redis.ltrim(history_key, 0, max(self.settings.history_limit - 1, 0))  # type: ignore[misc]
+            pipe = self.redis.pipeline(transaction=False)
+            pipe.lpush(history_key, serialized)  # type: ignore[misc]
+            pipe.ltrim(history_key, 0, max(self.settings.history_limit - 1, 0))  # type: ignore[misc]
             if self.settings.history_ttl_seconds > 0:
-                await self.redis.expire(history_key, self.settings.history_ttl_seconds)
+                pipe.expire(history_key, self.settings.history_ttl_seconds)
+            await pipe.execute()
             self._history_last_ts[history_key] = now
         except Exception as exc:
             logger.debug(

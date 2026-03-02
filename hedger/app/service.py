@@ -147,7 +147,15 @@ class HedgerService:
         if self.settings.run_migrations_on_startup:
             await self.repository.create_schema()
         try:
-            self.redis = Redis.from_url(self.settings.redis_url, decode_responses=True)
+            self.redis = Redis.from_url(
+                self.settings.redis_url,
+                decode_responses=True,
+                max_connections=10,
+                socket_timeout=5.0,
+                socket_connect_timeout=3.0,
+                retry_on_timeout=True,
+                health_check_interval=30,
+            )
             self.lock_manager = RedisLockManager(
                 self.redis, self.settings.redis_lock_ttl_seconds, self.settings.redis_idempotency_ttl_seconds
             )
