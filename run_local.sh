@@ -307,6 +307,7 @@ export APK_FALLBACK_URL
 
 BUILD_FLAG=""
 RUN_BUILD="true"
+USE_BAKE="true"
 RUN_PRUNE="${RUN_PRUNE:-false}"
 DETACH_MODE="false"
 UP_ARGS=()
@@ -318,6 +319,8 @@ Usage: ./run_local.sh [--cache|--no-cache] [--skip-build] [compose up args...]
   --cache          Reuse existing build layers (default).
   --no-cache       Force a clean rebuild.
   --skip-build     Skip the docker compose build step entirely.
+  --bake           Use 'docker buildx bake' for parallel builds with shared base layers (default).
+  --no-bake        Fall back to 'docker compose build' instead of bake.
   --build-services Comma-separated list of services to rebuild (e.g., api,worker,frontend).
   --env-file PATH  Use a specific env file (defaults to ${DEFAULT_ENV_FILE} or \$ENV_FILE).
   --prune          Run 'docker system prune -af' before building (disabled by default; clears caches).
@@ -352,6 +355,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-build)
       RUN_BUILD="false"
+      shift
+      ;;
+    --bake)
+      USE_BAKE="true"
+      shift
+      ;;
+    --no-bake)
+      USE_BAKE="false"
       shift
       ;;
     --env-file)
@@ -446,6 +457,21 @@ if [[ "${RUN_BUILD}" == "true" ]]; then
   BUILD_SERVICES=("${UP_ARGS[@]}")
 fi
 
+if [[ "${USE_BAKE}" == "true" ]]; then
+  log_step "Building images with docker buildx bake (parallel, shared bases)"
+  BAKE_CMD=("docker" "buildx" "bake")
+  if [[ -n "${BUILD_FLAG}" ]]; then
+    BAKE_CMD+=("${BUILD_FLAG}")
+  fi
+  if [[ ${#BUILD_SERVICES[@]} -gt 0 ]]; then
+    BAKE_CMD+=("${BUILD_SERVICES[@]}")
+  fi
+  log_info "Running: ${BAKE_CMD[*]}"
+  if ! "${BAKE_CMD[@]}"; then
+    log_warn "docker buildx bake failed."
+    exit 1
+  fi
+else
 BUILD_DESC="${BUILD_FLAG:-cached layers}"
 log_step "Building images (${BUILD_DESC}, parallel=${COMPOSE_PARALLEL_LIMIT})"
 run_compose_build() {
@@ -477,6 +503,7 @@ if ! run_compose_build true "${COMPOSE_PARALLEL_LIMIT}"; then
     exit 1
   fi
 fi
+fi # end USE_BAKE else branch
 else
   log_warn "Skipping docker compose build step (per --skip-build)."
 fi

@@ -82,8 +82,9 @@ help:
 	@printf "%s\n" \
 	"Targets:" \
 	"  api, worker, hedger, frontend, streamer, prover, all, stack, down" \
+	"  local (bake + up + smoke), smoke-local, monitor-local, prod" \
 	"  test, test-backend, test-frontend, test-contracts, test-prover" \
-	"  format (pre-commit), local, smoke-local, monitor-local, prod"
+	"  format (pre-commit)"
 
 gen-address:
 	python scripts/gen_address.py --mode random --count 1
