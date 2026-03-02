@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from shared.db_metrics import DbMetricsSnapshot, DbQueryHotspot
-
 from app import service as worker_service
+from shared.db_metrics import DbMetricsSnapshot, DbQueryHotspot
 
 
 def test_log_db_metrics_emits_hotspots(monkeypatch):

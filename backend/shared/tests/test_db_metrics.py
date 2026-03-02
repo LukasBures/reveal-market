@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from sqlalchemy import create_engine, text
-
 from shared.db_metrics import attach_db_metrics, reset_metrics, snapshot, snapshot_hotspots
+from sqlalchemy import create_engine, text
 
 
 def test_snapshot_hotspots_tracks_query_fingerprints():
