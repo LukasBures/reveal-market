@@ -11,6 +11,7 @@ from app.polymarket import MarketPayload
 from shared.models import Base, Market, Resolution
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.orm import selectinload
 
 pytestmark = pytest.mark.asyncio
 
@@ -54,7 +55,11 @@ async def test_sync_market_inserts_and_updates():
             await session.commit()
 
         async with session_factory() as session:
-            stored = (await session.execute(select(Market).where(Market.event_id == "evt-1"))).scalar_one()
+            stored = (
+                await session.execute(
+                    select(Market).options(selectinload(Market.outcomes_rel)).where(Market.event_id == "evt-1")
+                )
+            ).scalar_one()
             assert stored.title == "First Market"
             assert stored.status == "commit"
             labels = [row.label for row in stored.outcomes_rel]

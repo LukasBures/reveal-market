@@ -11,7 +11,7 @@ from shared import models as shared_models
 from shared.cache_async import get_json_many
 from shared.cache_keys import proof_receipt_cache_key
 from shared.logging import log_event
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
@@ -141,7 +141,7 @@ async def list_proof_receipts(
     if event_filter:
         filters.append(shared_models.Market.event_id == event_filter)
     if condition_filter:
-        filters.append(func.lower(shared_models.Market.condition_id) == condition_filter)
+        filters.append(shared_models.Market.condition_id == condition_filter)
     if filters:
         stmt = stmt.where(*filters)
     rows = (await session.execute(stmt)).all()

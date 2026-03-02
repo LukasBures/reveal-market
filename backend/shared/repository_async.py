@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, TypeVar
 
-from sqlalchemy import and_, delete, func, insert, or_, select
+from sqlalchemy import and_, delete, func, insert, or_, select, update
 from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -95,15 +95,17 @@ async def upsert_market(
         "grouping_resolution_source",
     ):
         payload.pop(legacy, None)
-    market = existing or await get_market_by_event_id(session, payload["event_id"])
+    market: models.Market | None = existing
     if market is None:
+        conditions: list[ColumnElement[bool]] = [models.Market.event_id == payload["event_id"]]
         onchain_market_id = payload.get("onchain_market_id")
         if onchain_market_id is not None:
-            market = await get_market_by_onchain_market_id(session, int(onchain_market_id))
-    if market is None:
+            conditions.append(models.Market.onchain_market_id == int(onchain_market_id))
         market_address = payload.get("market_address")
         if market_address:
-            market = await get_market_by_market_address(session, str(market_address))
+            conditions.append(models.Market.market_address == str(market_address).lower())
+        result = await session.execute(select(models.Market).where(or_(*conditions)).limit(1))
+        market = result.scalar_one_or_none()
     if market is None:
         market = models.Market(**payload)
         session.add(market)
@@ -198,17 +200,17 @@ async def expire_stale_quotes(session: AsyncSession, *, now: datetime | None = N
     """Mark any expired quotes as stale so cap calculations stay accurate."""
 
     reference = now or datetime.now(UTC)
-    stmt = select(models.Quote).where(
-        models.Quote.status == models.QuoteStatusEnum.ISSUED.value,
-        models.Quote.expires_at < reference,
+    stmt = (
+        update(models.Quote)
+        .where(
+            models.Quote.status == models.QuoteStatusEnum.ISSUED.value,
+            models.Quote.expires_at < reference,
+        )
+        .values(status=models.QuoteStatusEnum.EXPIRED.value)
+        .execution_options(synchronize_session=False)
     )
-    count = 0
-    result = await session.scalars(stmt)
-    for quote in result:
-        quote.status = models.QuoteStatusEnum.EXPIRED.value
-        session.add(quote)
-        count += 1
-    return count
+    result = await session.execute(stmt)
+    return result.rowcount  # type: ignore[attr-defined]
 
 
 async def sum_quote_stakes(
@@ -310,11 +312,15 @@ async def record_commitments(
             await session.execute(select(models.Commitment.ticket_hash).where(models.Commitment.market_id == market_id))
         ).all()
     }
-    count = 0
+
+    # Phase 1: Parse all tickets up front, deduplicating against existing hashes.
+    commitment_rows: list[dict[str, Any]] = []
+    ticket_siblings: dict[str, list] = {}
     for ticket in tickets:
         ticket_hash = str(ticket.get("ticketHash") or ticket.get("ticket_hash") or "").lower()
         if not ticket_hash or ticket_hash in existing_hashes:
             continue
+        existing_hashes.add(ticket_hash)
         raw_index = ticket.get("merkleIndex")
         if raw_index is None:
             raw_index = ticket.get("leaf_index")
@@ -324,54 +330,77 @@ async def record_commitments(
                 leaf_index = int(raw_index)
             except (TypeError, ValueError):
                 leaf_index = None
-        commitment_values = {
-            "market_id": market_id,
-            "user_address": str(ticket.get("user") or ticket.get("user_address") or "").lower(),
-            "outcome_id": int(ticket.get("outcomeId") or ticket.get("outcome_id") or 0),
-            "amount_wei": int(ticket.get("amount") or ticket.get("amount_wei") or 0),
-            "payout_wei": int(ticket.get("payout") or ticket.get("payout_wei") or 0),
-            "salt": str(ticket.get("salt") or "0x0"),
-            "ticket_hash": ticket_hash,
-            "leaf": str(ticket.get("leaf") or ""),
-            "leaf_index": leaf_index,
-            "tx_hash": str(ticket.get("txHash") or ticket.get("tx_hash") or tx_hash or "") or None,
-        }
-        if dialect_name == "postgresql":
-            from sqlalchemy.dialects.postgresql import insert as pg_insert
+        commitment_rows.append(
+            {
+                "market_id": market_id,
+                "user_address": str(ticket.get("user") or ticket.get("user_address") or "").lower(),
+                "outcome_id": int(ticket.get("outcomeId") or ticket.get("outcome_id") or 0),
+                "amount_wei": int(ticket.get("amount") or ticket.get("amount_wei") or 0),
+                "payout_wei": int(ticket.get("payout") or ticket.get("payout_wei") or 0),
+                "salt": str(ticket.get("salt") or "0x0"),
+                "ticket_hash": ticket_hash,
+                "leaf": str(ticket.get("leaf") or ""),
+                "leaf_index": leaf_index,
+                "tx_hash": str(ticket.get("txHash") or ticket.get("tx_hash") or tx_hash or "") or None,
+            }
+        )
+        ticket_siblings[ticket_hash] = ticket.get("merklePath") or ticket.get("merkle_path") or []
 
-            stmt = (
-                pg_insert(models.Commitment)
-                .values(**commitment_values)
-                .on_conflict_do_nothing(index_elements=["market_id", "ticket_hash"])
-                .returning(models.Commitment.id)
-            )
-        elif dialect_name == "sqlite":
-            from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+    if not commitment_rows:
+        return 0
 
-            stmt = (
-                sqlite_insert(models.Commitment)
-                .values(**commitment_values)
-                .prefix_with("OR IGNORE")
-                .returning(models.Commitment.id)
-            )
-        else:
-            stmt = insert(models.Commitment).values(**commitment_values).returning(models.Commitment.id)
-        result = await session.execute(stmt)
-        commitment_id = result.scalar_one_or_none()
-        if not commitment_id:
-            continue
-        existing_hashes.add(ticket_hash)
-        siblings = ticket.get("merklePath") or ticket.get("merkle_path") or []
-        for level, sibling in enumerate(siblings):
-            session.add(
-                models.CommitmentMerklePath(
-                    commitment_id=commitment_id,
-                    level=level,
-                    sibling_hash=str(sibling),
+    # Phase 2: Batch INSERT commitments (single round-trip on PostgreSQL).
+    inserted: list[tuple[int, str]] = []
+    if dialect_name == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        stmt = (
+            pg_insert(models.Commitment)
+            .values(commitment_rows)
+            .on_conflict_do_nothing(index_elements=["market_id", "ticket_hash"])
+            .returning(models.Commitment.id, models.Commitment.ticket_hash)
+        )
+        inserted = list((await session.execute(stmt)).all())  # type: ignore[arg-type]
+    else:
+        # SQLite / generic: insert one at a time (preserve existing behaviour).
+        for values in commitment_rows:
+            if dialect_name == "sqlite":
+                from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+                single_stmt = (
+                    sqlite_insert(models.Commitment)
+                    .values(**values)
+                    .prefix_with("OR IGNORE")
+                    .returning(models.Commitment.id, models.Commitment.ticket_hash)
                 )
+            else:
+                single_stmt = (
+                    insert(models.Commitment)
+                    .values(**values)
+                    .returning(models.Commitment.id, models.Commitment.ticket_hash)
+                )
+            row = (await session.execute(single_stmt)).first()
+            if row:
+                inserted.append(row)  # type: ignore[arg-type]
+
+    if not inserted:
+        return 0
+
+    # Phase 3: Batch INSERT all merkle path rows (single round-trip).
+    merkle_rows: list[dict[str, Any]] = []
+    for commitment_id, t_hash in inserted:
+        for level, sibling in enumerate(ticket_siblings.get(t_hash, [])):
+            merkle_rows.append(
+                {
+                    "commitment_id": commitment_id,
+                    "level": level,
+                    "sibling_hash": str(sibling),
+                }
             )
-        count += 1
-    return count
+    if merkle_rows:
+        await session.execute(insert(models.CommitmentMerklePath), merkle_rows)
+
+    return len(inserted)
 
 
 async def replace_merkle_path(session: AsyncSession, commitment_id: int, siblings: list[str]) -> None:
@@ -403,6 +432,7 @@ async def list_commitments_for_wallet(
     stmt = (
         select(models.Commitment, models.Market)
         .join(models.Market, models.Market.id == models.Commitment.market_id)
+        .options(selectinload(models.Market.outcomes_rel))
         .where(models.Commitment.user_address == wallet_address.lower())
         .order_by(models.Commitment.created_at.desc())
         .limit(limit)
@@ -450,9 +480,8 @@ async def list_commitments_with_settlement(
         market_filter_lower = market_filter.lower()
         stmt = stmt.where(
             or_(
-                models.Market.event_id == market_filter,
-                func.lower(models.Market.event_id) == market_filter_lower,
-                func.lower(models.Market.market_address) == market_filter_lower,
+                models.Market.event_id == market_filter_lower,
+                models.Market.market_address == market_filter_lower,
             )
         )
 
@@ -479,16 +508,14 @@ async def list_commitments_by_market(
 async def update_commitment_tx_hash(session: AsyncSession, old_hash: str, new_hash: str) -> int:
     """Replace a stored tx hash/job id with the finalized transaction hash."""
 
-    stmt = select(models.Commitment).where(models.Commitment.tx_hash == old_hash).with_for_update()
-    rows = (await session.scalars(stmt)).all()
-    updated = 0
-    for row in rows:
-        row.tx_hash = new_hash
-        session.add(row)
-        updated += 1
-    if updated:
-        await session.flush()
-    return updated
+    stmt = (
+        update(models.Commitment)
+        .where(models.Commitment.tx_hash == old_hash)
+        .values(tx_hash=new_hash)
+        .execution_options(synchronize_session=False)
+    )
+    result = await session.execute(stmt)
+    return result.rowcount  # type: ignore[attr-defined]
 
 
 async def list_markets_missing_address(session: AsyncSession, *, limit: int | None = None) -> list[models.Market]:

@@ -114,6 +114,7 @@ class Settings(BaseSettings):
     database_echo: bool = Field(default=False)
     database_pool_size: int = Field(default=5, ge=1)
     database_max_overflow: int = Field(default=10, ge=0)
+    database_pool_timeout: float = Field(default=10.0, gt=0)
     redis_url: str = Field(default="redis://redis:6379/0")
     schema_version_key: str = Field(default="reveal_market:schema_version")
     factory_address: str | None = Field(default=None)
@@ -440,8 +441,6 @@ class Settings(BaseSettings):
         url = make_url(self.database_url)
         if url.drivername.startswith("postgresql"):
             url = url.set(drivername="postgresql+asyncpg")
-        elif url.drivername.startswith("sqlite") and "+aiosqlite" not in url.drivername:
-            url = url.set(drivername="sqlite+aiosqlite")
         return url.render_as_string(hide_password=False)
 
 

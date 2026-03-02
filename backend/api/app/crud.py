@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from shared import repository_async as shared_repository
-from sqlalchemy import func, literal, or_, over, select
+from sqlalchemy import and_, case, func, literal_column, or_, over, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -44,6 +44,7 @@ async def get_markets(
         selectinload(models.Market.outcomes_rel),
         selectinload(models.Market.tags_rel),
         selectinload(models.Market.clob_tokens_rel),
+        selectinload(models.Market.gamma_metadata_rel),
     )
     stmt = _apply_common_filters(stmt, status=status, category=category, oracle=oracle, featured=featured)
     stmt = _apply_text_search(session, stmt, search, apply_default_order=order_by is None)
@@ -75,20 +76,26 @@ async def get_markets(
 
 async def get_market_stats(session: AsyncSession) -> list[schemas.MarketStatusBreakdown]:
     now = datetime.now(UTC)
-    live_stmt = select(func.count(models.Market.id)).where(
-        models.Market.status == models.MarketStatusEnum.COMMIT.value,
-        or_(models.Market.closes_at.is_(None), models.Market.closes_at > now),
-        or_(models.Market.commits_blocked_at.is_(None), models.Market.commits_blocked_at > now),
+    live_case = case(
+        (
+            and_(
+                models.Market.status == models.MarketStatusEnum.COMMIT.value,
+                or_(models.Market.closes_at.is_(None), models.Market.closes_at > now),
+                or_(models.Market.commits_blocked_at.is_(None), models.Market.commits_blocked_at > now),
+            ),
+            1,
+        ),
     )
-    live = int((await session.execute(live_stmt)).scalar_one() or 0)
-
-    finalized_stmt = select(func.count(models.Market.id)).where(
-        models.Market.resolution_status == models.ResolutionStatusEnum.FINAL.value
+    finalized_case = case(
+        (models.Market.resolution_status == models.ResolutionStatusEnum.FINAL.value, 1),
     )
-    finalized = int((await session.execute(finalized_stmt)).scalar_one() or 0)
-
-    total_stmt = select(func.count(models.Market.id))
-    total = int((await session.execute(total_stmt)).scalar_one() or 0)
+    stmt = select(
+        func.count(models.Market.id).label("total"),
+        func.count(live_case).label("live"),
+        func.count(finalized_case).label("finalized"),
+    )
+    row = (await session.execute(stmt)).one()
+    total, live, finalized = int(row.total), int(row.live), int(row.finalized)
     ended = max(total - live, 0)
 
     return [
@@ -118,12 +125,30 @@ async def count_events(
 
 
 async def get_market_by_event_id(session: AsyncSession, event_id: str) -> models.Market | None:
-    stmt = select(models.Market).where(models.Market.event_id == event_id)
+    stmt = (
+        select(models.Market)
+        .options(
+            selectinload(models.Market.outcomes_rel),
+            selectinload(models.Market.tags_rel),
+            selectinload(models.Market.clob_tokens_rel),
+            selectinload(models.Market.gamma_metadata_rel),
+        )
+        .where(models.Market.event_id == event_id)
+    )
     return (await session.scalars(stmt)).first()
 
 
 async def get_market_by_condition_id(session: AsyncSession, condition_id: str) -> models.Market | None:
-    stmt = select(models.Market).where(models.Market.condition_id == condition_id)
+    stmt = (
+        select(models.Market)
+        .options(
+            selectinload(models.Market.outcomes_rel),
+            selectinload(models.Market.tags_rel),
+            selectinload(models.Market.clob_tokens_rel),
+            selectinload(models.Market.gamma_metadata_rel),
+        )
+        .where(models.Market.condition_id == condition_id)
+    )
     return (await session.scalars(stmt)).first()
 
 
@@ -137,12 +162,13 @@ async def get_markets_by_group_slug(session: AsyncSession, group_slug: str) -> l
             selectinload(models.Market.outcomes_rel),
             selectinload(models.Market.tags_rel),
             selectinload(models.Market.clob_tokens_rel),
+            selectinload(models.Market.gamma_metadata_rel),
         )
         .outerjoin(models.MarketGammaMetadata, models.MarketGammaMetadata.market_id == models.Market.id)
         .where(
             or_(
-                func.lower(models.Market.group_slug) == literal(normalized_slug),
-                func.lower(models.MarketGammaMetadata.group_slug) == literal(normalized_slug),
+                models.Market.group_slug == normalized_slug,
+                models.MarketGammaMetadata.group_slug == normalized_slug,
             )
         )
         .order_by(models.Market.created_at.desc())
@@ -162,8 +188,9 @@ async def get_markets_by_event_key(session: AsyncSession, event_key: str) -> lis
             selectinload(models.Market.outcomes_rel),
             selectinload(models.Market.tags_rel),
             selectinload(models.Market.clob_tokens_rel),
+            selectinload(models.Market.gamma_metadata_rel),
         )
-        .where(func.lower(models.Market.event_key) == literal(normalized_key))
+        .where(models.Market.event_key == normalized_key)
         .order_by(models.Market.created_at.desc())
     )
     result = await session.execute(stmt)
@@ -217,7 +244,7 @@ def _apply_common_filters(stmt, *, status: str | None, category: str | None, ora
         stmt = stmt.where(models.Market.status == status)
     if category:
         normalized_category = category.lower()
-        stmt = stmt.where(func.lower(models.Market.category) == literal(normalized_category))
+        stmt = stmt.where(models.Market.category == normalized_category)
     if oracle:
         stmt = stmt.where(models.Market.oracle == oracle)
     if featured:
@@ -256,7 +283,9 @@ async def _get_markets_by_total_volume(
 ) -> list[models.Market]:
     group_expr = _volume_group_expression()
     volume_expr = _volume_value_expression()
-    aggregate_stmt = (
+
+    # CTE: compute group-level totals with filters applied once.
+    group_stmt = (
         select(
             group_expr.label("volume_group"),
             func.coalesce(func.sum(volume_expr), 0).label("total_volume"),
@@ -266,12 +295,10 @@ async def _get_markets_by_total_volume(
         .select_from(models.Market)
         .outerjoin(models.MarketGammaMetadata, models.MarketGammaMetadata.market_id == models.Market.id)
     )
-    aggregate_stmt = _apply_common_filters(
-        aggregate_stmt, status=status, category=category, oracle=oracle, featured=featured
-    )
-    aggregate_stmt = _apply_text_search(session, aggregate_stmt, search, apply_default_order=False)
-    aggregate_stmt = (
-        aggregate_stmt.group_by(group_expr)
+    group_stmt = _apply_common_filters(group_stmt, status=status, category=category, oracle=oracle, featured=featured)
+    group_stmt = _apply_text_search(session, group_stmt, search, apply_default_order=False)
+    group_cte = (
+        group_stmt.group_by(group_expr)
         .order_by(
             func.coalesce(func.sum(volume_expr), 0).desc(),
             func.max(models.Market.updated_at).desc(),
@@ -279,60 +306,45 @@ async def _get_markets_by_total_volume(
         )
         .offset(offset)
         .limit(limit)
+    ).cte("group_volumes")
+
+    # Fetch market IDs ordered by group volume via CTE join.
+    id_stmt = (
+        select(models.Market.id)
+        .outerjoin(models.MarketGammaMetadata, models.MarketGammaMetadata.market_id == models.Market.id)
+        .join(group_cte, group_expr == group_cte.c.volume_group)
     )
-    aggregate_rows = await session.execute(aggregate_stmt)
-    group_order = [row[0] for row in aggregate_rows if row[0] is not None]
-    if not group_order:
+    id_stmt = _apply_common_filters(id_stmt, status=status, category=category, oracle=oracle, featured=featured)
+    id_stmt = _apply_text_search(session, id_stmt, search, apply_default_order=False)
+    id_stmt = id_stmt.order_by(
+        group_cte.c.total_volume.desc(),
+        group_cte.c.last_updated_at.desc(),
+        group_cte.c.last_created_at.desc(),
+        _volume_value_expression().desc(),
+        models.Market.updated_at.desc(),
+    )
+    id_rows = await session.execute(id_stmt)
+    market_ids = [row[0] for row in id_rows]
+    if not market_ids:
         return []
 
-    markets_stmt = (
+    # Fetch full objects with relationships only for matching IDs.
+    stmt = (
         select(models.Market)
         .options(
             selectinload(models.Market.outcomes_rel),
             selectinload(models.Market.tags_rel),
             selectinload(models.Market.clob_tokens_rel),
+            selectinload(models.Market.gamma_metadata_rel),
         )
-        .outerjoin(models.MarketGammaMetadata, models.MarketGammaMetadata.market_id == models.Market.id)
-        .where(group_expr.in_(group_order))
+        .where(models.Market.id.in_(market_ids))
     )
-    markets_stmt = _apply_common_filters(
-        markets_stmt, status=status, category=category, oracle=oracle, featured=featured
-    )
-    markets_stmt = _apply_text_search(session, markets_stmt, search, apply_default_order=False)
-    result = await session.execute(markets_stmt)
+    result = await session.execute(stmt)
     rows: list[models.Market] = list(result.unique().scalars().all())
 
-    def _group_key(market: models.Market) -> str | None:
-        return (
-            getattr(market, "group_slug", None)
-            or getattr(market, "event_key", None)
-            or getattr(market, "event_id", None)
-        )
-
-    def _volume_value(market: models.Market) -> float:
-        raw = getattr(market, "orderbook_volume_usd", None)
-        try:
-            return float(raw) if raw is not None else 0.0
-        except (TypeError, ValueError):
-            return 0.0
-
-    def _updated_timestamp(market: models.Market) -> float:
-        timestamp = getattr(market, "updated_at", None) or getattr(market, "created_at", None)
-        if isinstance(timestamp, datetime):
-            try:
-                return float(timestamp.timestamp())
-            except (OverflowError, OSError, ValueError):
-                return 0.0
-        return 0.0
-
-    order_lookup = {value: index for index, value in enumerate(group_order)}
-    rows.sort(
-        key=lambda market: (
-            order_lookup.get(_group_key(market), len(order_lookup)),
-            -_volume_value(market),
-            -_updated_timestamp(market),
-        )
-    )
+    # Preserve the CTE-driven order.
+    id_order = {mid: idx for idx, mid in enumerate(market_ids)}
+    rows.sort(key=lambda m: id_order.get(m.id, len(id_order)))
     return rows
 
 
@@ -404,6 +416,7 @@ async def get_grouped_events(
             selectinload(models.Market.outcomes_rel),
             selectinload(models.Market.tags_rel),
             selectinload(models.Market.clob_tokens_rel),
+            selectinload(models.Market.gamma_metadata_rel),
         )
         .where(models.Market.id.in_(winner_ids))
     )
@@ -417,7 +430,12 @@ async def get_grouped_events(
 
 
 async def search_markets(session: AsyncSession, query: str, limit: int) -> list[models.Market]:
-    stmt = select(models.Market)
+    stmt = select(models.Market).options(
+        selectinload(models.Market.outcomes_rel),
+        selectinload(models.Market.tags_rel),
+        selectinload(models.Market.clob_tokens_rel),
+        selectinload(models.Market.gamma_metadata_rel),
+    )
     stmt = _apply_text_search(session, stmt, query or "")
     stmt = stmt.limit(limit)
     result = await session.scalars(stmt)
@@ -438,16 +456,7 @@ def _apply_text_search(session: AsyncSession, stmt, search: str | None, apply_de
     )
 
     if _supports_full_text(session):
-        vector = func.to_tsvector(
-            "english",
-            func.concat_ws(
-                " ",
-                func.coalesce(models.Market.title, ""),
-                func.coalesce(models.Market.slug, ""),
-                func.coalesce(models.Market.category, ""),
-                func.coalesce(models.Market.oracle, ""),
-            ),
-        )
+        vector: Any = literal_column("markets.search_vector")
         query = func.websearch_to_tsquery("english", search_value)
         stmt = stmt.where(or_(vector.op("@@")(query), fallback_clause))
         if apply_default_order:

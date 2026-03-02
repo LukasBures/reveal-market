@@ -1,21 +1,23 @@
-"""baseline schema
+"""baseline schema v1 — optimized
 
 Revision ID: 0001_baseline
 Revises:
-Create Date: 2026-02-07 00:00:00.000000
+Create Date: 2026-03-02 00:00:00.000000
 
 FK Strategy Notes:
-    This schema uses a mixed primary key / foreign key strategy:
+    - ``markets.id`` (Integer, auto-increment): Internal numeric PK used by child tables
+      for efficient joins and indexing.
+    - ``markets.event_id`` (String): External Polymarket identifier used as a stable
+      cross-service reference. Some tables reference ``event_id`` because data originates
+      from external sources where only the string ID is known at ingest time.
 
-    - ``markets.id`` (Integer, auto-increment): Internal numeric PK used by most child tables
-      (commitments, settlements, quotes, etc.) for efficient joins and indexing.
-    - ``markets.event_id`` (String): External Polymarket identifier used as a stable cross-service
-      reference. Some tables (e.g. resolutions, quotes) reference ``event_id`` because data
-      originates from external sources where only the string ID is known at ingest time.
-
-    This dual-key pattern is intentional: numeric PKs for performance, string event_ids for
-    external system interop. Child tables should prefer ``markets.id`` FKs when the market row
-    is always available at write time.
+Key optimizations baked into this schema:
+    - All string-identity columns (event_id, condition_id, market_address, group_slug,
+      category, event_key) are normalized to lowercase on write via @validates, so no
+      functional lower() indexes are needed — standard B-tree indexes are used instead.
+    - Float columns replaced with Numeric(32,8) for financial precision.
+    - Stored tsvector column + GIN index for full-text search.
+    - Composite, partial, and BRIN indexes for hot query patterns.
 """
 
 import sqlalchemy as sa
@@ -29,6 +31,9 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # ────────────────────────────────────────
+    # markets
+    # ────────────────────────────────────────
     op.create_table(
         "markets",
         sa.Column("id", sa.Integer(), primary_key=True, nullable=False),
@@ -60,8 +65,8 @@ def upgrade() -> None:
         sa.Column("orders_opened_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("resolution_source", sa.String(length=512), nullable=True),
         sa.Column("market_maker", sa.String(length=64), nullable=True),
-        sa.Column("order_min_size", sa.Float(), nullable=True),
-        sa.Column("price_tick_size", sa.Float(), nullable=True),
+        sa.Column("order_min_size", sa.Numeric(precision=32, scale=8), nullable=True),
+        sa.Column("price_tick_size", sa.Numeric(precision=32, scale=8), nullable=True),
         sa.Column("enable_order_book", sa.Boolean(), nullable=True),
         sa.Column("image_variants", sa.JSON(), nullable=True),
         sa.Column("featured", sa.Boolean(), nullable=False, server_default=sa.text("false")),
@@ -77,9 +82,6 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "resolution_status IN ('pending_resolution','disputed','final')", name="ck_markets_resolution_status"
         ),
-        # NOTE: PostgreSQL unique constraints on nullable columns allow multiple NULL values
-        # (SQL standard behavior). This is intentional — not all markets have onchain_market_id
-        # or market_address populated at creation time.
         sa.UniqueConstraint("event_id", name="uq_markets_event_id"),
         sa.UniqueConstraint("onchain_market_id", name="uq_markets_onchain_market_id"),
         sa.UniqueConstraint("market_address", name="uq_markets_market_address"),
@@ -92,10 +94,31 @@ def upgrade() -> None:
     op.create_index("ix_markets_event_key", "markets", ["event_key"])
     op.create_index("ix_markets_group_slug", "markets", ["group_slug"])
     op.create_index("ix_markets_closes_at", "markets", ["closes_at"])
+    op.create_index("ix_markets_category", "markets", ["category"])
 
+    # Stored tsvector column + GIN index for full-text search
+    op.execute(
+        sa.text(
+            "ALTER TABLE markets ADD COLUMN search_vector tsvector"
+            " GENERATED ALWAYS AS ("
+            "   to_tsvector('english',"
+            "     coalesce(title, '') || ' ' || coalesce(slug, '') || ' ' ||"
+            "     coalesce(category, '') || ' ' || coalesce(oracle, '')"
+            "   )"
+            " ) STORED"
+        )
+    )
+    op.execute(sa.text("CREATE INDEX ix_markets_search_vector ON markets USING gin(search_vector)"))
+
+    # Partial index: featured markets (very selective)
+    op.execute(sa.text("CREATE INDEX ix_markets_featured ON markets (featured) WHERE featured = true"))
+
+    # ────────────────────────────────────────
+    # market_outcomes
+    # ────────────────────────────────────────
     op.create_table(
         "market_outcomes",
-        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
         sa.Column("market_id", sa.Integer(), nullable=False),
         sa.Column("outcome_id", sa.Integer(), nullable=False),
         sa.Column("label", sa.String(length=256), nullable=False),
@@ -106,9 +129,12 @@ def upgrade() -> None:
     )
     op.create_index("ix_market_outcomes_market_id", "market_outcomes", ["market_id"])
 
+    # ────────────────────────────────────────
+    # market_tags
+    # ────────────────────────────────────────
     op.create_table(
         "market_tags",
-        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
         sa.Column("market_id", sa.Integer(), nullable=False),
         sa.Column("tag", sa.String(length=128), nullable=False),
         sa.ForeignKeyConstraint(["market_id"], ["markets.id"], ondelete="CASCADE"),
@@ -116,9 +142,12 @@ def upgrade() -> None:
     )
     op.create_index("ix_market_tags_market_id", "market_tags", ["market_id"])
 
+    # ────────────────────────────────────────
+    # market_clob_tokens
+    # ────────────────────────────────────────
     op.create_table(
         "market_clob_tokens",
-        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
         sa.Column("market_id", sa.Integer(), nullable=False),
         sa.Column("token_id", sa.String(length=128), nullable=False),
         sa.Column("side", sa.String(length=8), nullable=True),
@@ -127,9 +156,12 @@ def upgrade() -> None:
     )
     op.create_index("ix_market_clob_tokens_market_id", "market_clob_tokens", ["market_id"])
 
+    # ────────────────────────────────────────
+    # market_gamma_metadata
+    # ────────────────────────────────────────
     op.create_table(
         "market_gamma_metadata",
-        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
         sa.Column("market_id", sa.Integer(), nullable=False, unique=True),
         sa.Column("gamma_id", sa.String(length=64), nullable=True),
         sa.Column("question", sa.Text(), nullable=True),
@@ -148,8 +180,8 @@ def upgrade() -> None:
         sa.Column("group_item_threshold", sa.String(length=64), nullable=True),
         sa.Column("question_id", sa.String(length=128), nullable=True),
         sa.Column("enable_order_book", sa.Boolean(), nullable=True),
-        sa.Column("order_price_min_tick_size", sa.Float(), nullable=True),
-        sa.Column("order_min_size", sa.Float(), nullable=True),
+        sa.Column("order_price_min_tick_size", sa.Numeric(precision=32, scale=8), nullable=True),
+        sa.Column("order_min_size", sa.Numeric(precision=32, scale=8), nullable=True),
         sa.Column("volume", sa.Numeric(precision=32, scale=8), nullable=True),
         sa.Column("volume_num", sa.Numeric(precision=32, scale=8), nullable=True),
         sa.Column("volume1mo", sa.Numeric(precision=32, scale=8), nullable=True),
@@ -163,15 +195,18 @@ def upgrade() -> None:
         sa.Column("accepting_orders_timestamp", sa.DateTime(timezone=True), nullable=True),
         sa.Column("group_slug", sa.String(length=256), nullable=True),
         sa.Column("featured", sa.Boolean(), nullable=True),
-        sa.Column("best_bid", sa.Float(), nullable=True),
-        sa.Column("best_ask", sa.Float(), nullable=True),
-        sa.Column("spread", sa.Float(), nullable=True),
+        sa.Column("best_bid", sa.Numeric(precision=32, scale=8), nullable=True),
+        sa.Column("best_ask", sa.Numeric(precision=32, scale=8), nullable=True),
+        sa.Column("spread", sa.Numeric(precision=32, scale=8), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.ForeignKeyConstraint(["market_id"], ["markets.id"], ondelete="CASCADE"),
     )
     op.create_index("ix_market_gamma_metadata_group_slug", "market_gamma_metadata", ["group_slug"])
 
+    # ────────────────────────────────────────
+    # resolutions
+    # ────────────────────────────────────────
     op.create_table(
         "resolutions",
         sa.Column("condition_id", sa.String(length=66), primary_key=True, nullable=False),
@@ -194,14 +229,21 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.ForeignKeyConstraint(["market_id"], ["markets.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["event_id"], ["markets.event_id"], ondelete="SET NULL"),
+        sa.CheckConstraint(
+            "market_id IS NOT NULL OR event_id IS NOT NULL",
+            name="ck_resolutions_has_market_ref",
+        ),
     )
     op.create_index("ix_resolutions_block_number", "resolutions", ["block_number"])
     op.create_index("ix_resolutions_market_id", "resolutions", ["market_id"])
     op.create_index("ix_resolutions_event_id", "resolutions", ["event_id"])
 
+    # ────────────────────────────────────────
+    # commitments
+    # ────────────────────────────────────────
     op.create_table(
         "commitments",
-        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
         sa.Column("market_id", sa.Integer(), nullable=False),
         sa.Column("user_address", sa.String(length=64), nullable=False),
         sa.Column("outcome_id", sa.Integer(), nullable=False),
@@ -222,20 +264,32 @@ def upgrade() -> None:
     op.create_index("ix_commitments_user_address", "commitments", ["user_address"])
     op.create_index("ix_commitments_claim_tx_hash", "commitments", ["claim_tx_hash"])
     op.create_index("ix_commitments_market_leaf", "commitments", ["market_id", "leaf_index"])
+    # Composite: wallet commitment lookups
+    op.create_index("ix_commitments_user_market", "commitments", ["user_address", "market_id"])
+    # Settlement filtering by winning outcome
+    op.create_index("ix_commitments_outcome", "commitments", ["outcome_id"])
+    # BRIN: append-only timestamp for range scans
+    op.execute(sa.text("CREATE INDEX ix_commitments_created_brin ON commitments USING brin(created_at)"))
 
+    # ────────────────────────────────────────
+    # commitment_merkle_paths
+    # ────────────────────────────────────────
     op.create_table(
         "commitment_merkle_paths",
-        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
-        sa.Column("commitment_id", sa.BigInteger(), nullable=False),
+        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
+        sa.Column("commitment_id", sa.Integer(), nullable=False),
         sa.Column("level", sa.Integer(), nullable=False),
         sa.Column("sibling_hash", sa.String(length=66), nullable=False),
         sa.ForeignKeyConstraint(["commitment_id"], ["commitments.id"], ondelete="CASCADE"),
     )
     op.create_index("ix_commitment_merkle_paths_commitment", "commitment_merkle_paths", ["commitment_id"])
 
+    # ────────────────────────────────────────
+    # settlements
+    # ────────────────────────────────────────
     op.create_table(
         "settlements",
-        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
         sa.Column("market_id", sa.Integer(), nullable=False, unique=True),
         sa.Column("merkle_root", sa.String(length=66), nullable=True),
         sa.Column("commitments_count", sa.Integer(), nullable=True),
@@ -273,6 +327,9 @@ def upgrade() -> None:
     op.create_index("ix_settlements_proof_status", "settlements", ["proof_status"])
     op.create_index("ix_settlements_submission_status", "settlements", ["submission_status"])
 
+    # ────────────────────────────────────────
+    # schema_versions
+    # ────────────────────────────────────────
     op.create_table(
         "schema_versions",
         sa.Column("key", sa.String(length=64), primary_key=True, nullable=False),
@@ -280,9 +337,9 @@ def upgrade() -> None:
         sa.Column("applied_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
 
-    # NOTE: quotes.market_id stores the string event_id (not the numeric markets.id).
-    # This is intentional: quotes reference markets by their external Polymarket identifier
-    # for cross-service interop. See FK Strategy Notes in the module docstring.
+    # ────────────────────────────────────────
+    # quotes
+    # ────────────────────────────────────────
     op.create_table(
         "quotes",
         sa.Column("quote_id", sa.String(length=66), primary_key=True, nullable=False),
@@ -291,7 +348,7 @@ def upgrade() -> None:
         sa.Column("stake_zen", sa.Numeric(precision=32, scale=8), nullable=False),
         sa.Column("stake_wei", sa.Numeric(precision=78, scale=0), nullable=False),
         sa.Column("fx_scaled", sa.BigInteger(), nullable=False),
-        sa.Column("zen_usd", sa.Float(), nullable=False),
+        sa.Column("zen_usd", sa.Numeric(precision=32, scale=8), nullable=False),
         sa.Column("market_id", sa.String(length=128), nullable=True),
         sa.Column("market_address", sa.String(length=64), nullable=True),
         sa.Column("user_id", sa.String(length=128), nullable=True),
@@ -311,10 +368,15 @@ def upgrade() -> None:
     op.create_index(
         "ix_quotes_expires_at_issued", "quotes", ["expires_at"], postgresql_where=sa.text("status = 'issued'")
     )
+    op.create_index("ix_quotes_status", "quotes", ["status"])
+    op.create_index("ix_quotes_created_at", "quotes", ["created_at"])
 
+    # ────────────────────────────────────────
+    # quote_audits
+    # ────────────────────────────────────────
     op.create_table(
         "quote_audits",
-        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True, nullable=False),
+        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True, nullable=False),
         sa.Column("quote_id", sa.String(length=66), nullable=False),
         sa.Column("action", sa.String(length=32), nullable=False),
         sa.Column("user_id", sa.String(length=128), nullable=True),
@@ -326,7 +388,7 @@ def upgrade() -> None:
         sa.Column("stake_zen", sa.Numeric(precision=32, scale=8), nullable=True),
         sa.Column("stake_wei", sa.Numeric(precision=78, scale=0), nullable=True),
         sa.Column("fx_scaled", sa.BigInteger(), nullable=True),
-        sa.Column("zen_usd", sa.Float(), nullable=True),
+        sa.Column("zen_usd", sa.Numeric(precision=32, scale=8), nullable=True),
         sa.Column("status", sa.String(length=32), nullable=True),
         sa.Column("error", sa.Text(), nullable=True),
         sa.Column("context", sa.JSON(), nullable=True),
@@ -337,10 +399,15 @@ def upgrade() -> None:
     op.create_index("ix_quote_audits_user_id", "quote_audits", ["user_id"])
     op.create_index("ix_quote_audits_wallet_address", "quote_audits", ["wallet_address"])
     op.create_index("ix_quote_audits_market_id", "quote_audits", ["market_id"])
+    # BRIN: append-only timestamp for range scans
+    op.execute(sa.text("CREATE INDEX ix_quote_audits_created_brin ON quote_audits USING brin(created_at)"))
 
+    # ────────────────────────────────────────
+    # factory_events
+    # ────────────────────────────────────────
     op.create_table(
         "factory_events",
-        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
         sa.Column("factory_address", sa.String(length=64), nullable=False),
         sa.Column("market_address", sa.String(length=64), nullable=True),
         sa.Column("event", sa.String(length=64), nullable=False),
@@ -356,9 +423,12 @@ def upgrade() -> None:
     op.create_index("ix_factory_events_market", "factory_events", ["market_address"])
     op.create_index("ix_factory_events_tx_hash", "factory_events", ["tx_hash"])
 
+    # ────────────────────────────────────────
+    # settlement_receipts
+    # ────────────────────────────────────────
     op.create_table(
         "settlement_receipts",
-        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
         sa.Column("market_id", sa.Integer(), nullable=False),
         sa.Column("market_address", sa.String(length=64), nullable=True),
         sa.Column("request_id", sa.String(length=128), nullable=False),
@@ -379,9 +449,12 @@ def upgrade() -> None:
     op.create_index("ix_settlement_receipts_market_address", "settlement_receipts", ["market_address"])
     op.create_index("ix_settlement_receipts_request", "settlement_receipts", ["request_id"])
 
+    # ────────────────────────────────────────
+    # hedger_treasury_snapshots
+    # ────────────────────────────────────────
     op.create_table(
         "hedger_treasury_snapshots",
-        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
         sa.Column("market_id", sa.String(length=128), nullable=False),
         sa.Column("outcome", sa.String(), nullable=False),
         sa.Column("stake_zen", sa.Numeric(precision=32, scale=8), nullable=False),

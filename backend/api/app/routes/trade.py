@@ -2436,11 +2436,17 @@ async def sync_commitments(
                 continue
             direction = "yes" if int(outcome_id) == 0 else "no"
             token_id = None
-            gamma_meta = getattr(market, "gamma_metadata_rel", None)
+            try:
+                gamma_meta = market.gamma_metadata_rel
+            except Exception:
+                gamma_meta = None
             if gamma_meta is not None:
                 token_id = str(gamma_meta.clob_token_id_yes) if direction == "yes" else str(gamma_meta.clob_token_id_no)
             if not token_id:
-                token_rows = list(getattr(market, "clob_tokens_rel", []) or [])
+                try:
+                    token_rows = list(market.clob_tokens_rel or [])
+                except Exception:
+                    token_rows = []
                 side_match = next(
                     (row.token_id for row in token_rows if row.side == direction and row.token_id),
                     None,

@@ -11,7 +11,6 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
-    Float,
     ForeignKey,
     Index,
     Integer,
@@ -27,9 +26,6 @@ from sqlalchemy.sql import func
 
 class Base(DeclarativeBase):
     pass
-
-
-BigIntPk = BigInteger().with_variant(Integer, "sqlite")
 
 
 class MarketStatusEnum(StrEnum):
@@ -91,8 +87,8 @@ class Market(Base):
     orders_opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     resolution_source: Mapped[str | None] = mapped_column(String(512), nullable=True)
     market_maker: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    order_min_size: Mapped[float | None] = mapped_column(Float, nullable=True)
-    price_tick_size: Mapped[float | None] = mapped_column(Float, nullable=True)
+    order_min_size: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    price_tick_size: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
     enable_order_book: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     image_variants: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     featured: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
@@ -107,7 +103,7 @@ class Market(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
-    @validates("condition_id", "event_id")
+    @validates("condition_id", "event_id", "market_address", "group_slug", "category", "event_key")
     def _normalize_ids(self, _key: str, value: str | None) -> str | None:
         if value is None:
             return None
@@ -117,26 +113,26 @@ class Market(Base):
         "MarketOutcome",
         cascade="all, delete-orphan",
         passive_deletes=True,
-        lazy="selectin",
+        lazy="raise",
     )
     tags_rel: Mapped[list[MarketTag]] = relationship(
         "MarketTag",
         cascade="all, delete-orphan",
         passive_deletes=True,
-        lazy="selectin",
+        lazy="raise",
     )
     clob_tokens_rel: Mapped[list[MarketClobToken]] = relationship(
         "MarketClobToken",
         cascade="all, delete-orphan",
         passive_deletes=True,
-        lazy="selectin",
+        lazy="raise",
     )
     gamma_metadata_rel: Mapped[MarketGammaMetadata | None] = relationship(
         "MarketGammaMetadata",
         cascade="all, delete-orphan",
         passive_deletes=True,
         uselist=False,
-        lazy="selectin",
+        lazy="raise",
     )
 
 
@@ -144,7 +140,7 @@ class MarketOutcome(Base):
     __tablename__ = "market_outcomes"
     __table_args__ = (UniqueConstraint("market_id", "outcome_id", name="ux_market_outcomes_market_outcome"),)
 
-    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     market_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("markets.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -158,7 +154,7 @@ class MarketTag(Base):
     __tablename__ = "market_tags"
     __table_args__ = (UniqueConstraint("market_id", "tag", name="ux_market_tags_market_tag"),)
 
-    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     market_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("markets.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -169,7 +165,7 @@ class MarketClobToken(Base):
     __tablename__ = "market_clob_tokens"
     __table_args__ = (UniqueConstraint("market_id", "token_id", name="ux_market_clob_tokens_market_token"),)
 
-    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     market_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("markets.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -180,7 +176,7 @@ class MarketClobToken(Base):
 class MarketGammaMetadata(Base):
     __tablename__ = "market_gamma_metadata"
 
-    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     market_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("markets.id", ondelete="CASCADE"), nullable=False, unique=True
     )
@@ -201,8 +197,8 @@ class MarketGammaMetadata(Base):
     group_item_threshold: Mapped[str | None] = mapped_column(String(64), nullable=True)
     question_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     enable_order_book: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    order_price_min_tick_size: Mapped[float | None] = mapped_column(Float, nullable=True)
-    order_min_size: Mapped[float | None] = mapped_column(Float, nullable=True)
+    order_price_min_tick_size: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    order_min_size: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
     volume: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
     volume_num: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
     volume1mo: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
@@ -216,13 +212,19 @@ class MarketGammaMetadata(Base):
     accepting_orders_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     group_slug: Mapped[str | None] = mapped_column(String(256), nullable=True)
     featured: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    best_bid: Mapped[float | None] = mapped_column(Float, nullable=True)
-    best_ask: Mapped[float | None] = mapped_column(Float, nullable=True)
-    spread: Mapped[float | None] = mapped_column(Float, nullable=True)
+    best_bid: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    best_ask: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
+    spread: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
+
+    @validates("group_slug")
+    def _normalize_group_slug(self, _key: str, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.lower()
 
 
 class Resolution(Base):
@@ -267,7 +269,7 @@ class Commitment(Base):
     __tablename__ = "commitments"
     __table_args__ = (UniqueConstraint("market_id", "ticket_hash", name="ux_commitments_market_ticket_hash"),)
 
-    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, index=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
     market_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("markets.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -284,13 +286,19 @@ class Commitment(Base):
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
+    @validates("user_address", "salt", "leaf", "ticket_hash")
+    def _normalize_hex(self, _key: str, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.lower()
+
 
 class CommitmentMerklePath(Base):
     __tablename__ = "commitment_merkle_paths"
 
-    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, index=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
     commitment_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("commitments.id", ondelete="CASCADE"), nullable=False, index=True
+        Integer, ForeignKey("commitments.id", ondelete="CASCADE"), nullable=False, index=True
     )
     level: Mapped[int] = mapped_column(Integer, nullable=False)
     sibling_hash: Mapped[str] = mapped_column(String(66), nullable=False)
@@ -326,7 +334,7 @@ class Settlement(Base):
         ),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
     market_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("markets.id", ondelete="CASCADE"), nullable=False, unique=True, index=True
     )
@@ -368,7 +376,7 @@ class SchemaVersion(Base):
 class HedgerTreasurySnapshot(Base):
     __tablename__ = "hedger_treasury_snapshots"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     market_id: Mapped[str] = mapped_column(
         String(128), ForeignKey("markets.event_id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -407,7 +415,7 @@ class Quote(Base):
     stake_zen: Mapped[Decimal] = mapped_column(Numeric(precision=32, scale=8), nullable=False)
     stake_wei: Mapped[Decimal] = mapped_column(Numeric(precision=78, scale=0), nullable=False)
     fx_scaled: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    zen_usd: Mapped[float] = mapped_column(Float, nullable=False)
+    zen_usd: Mapped[Decimal] = mapped_column(Numeric(precision=32, scale=8), nullable=False)
     market_id: Mapped[str | None] = mapped_column(
         String(128), ForeignKey("markets.event_id", ondelete="SET NULL"), nullable=True, index=True
     )
@@ -427,7 +435,7 @@ class Quote(Base):
 class QuoteAudit(Base):
     __tablename__ = "quote_audits"
 
-    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     quote_id: Mapped[str] = mapped_column(
         String(66), ForeignKey("quotes.quote_id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -441,7 +449,7 @@ class QuoteAudit(Base):
     stake_zen: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
     stake_wei: Mapped[Decimal | None] = mapped_column(Numeric(precision=78, scale=0), nullable=True)
     fx_scaled: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    zen_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    zen_usd: Mapped[Decimal | None] = mapped_column(Numeric(precision=32, scale=8), nullable=True)
     status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     context: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
@@ -452,7 +460,7 @@ class FactoryEvent(Base):
     __tablename__ = "factory_events"
     __table_args__ = (UniqueConstraint("factory_address", "event", "tx_hash", name="ux_factory_events_dedupe"),)
 
-    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     factory_address: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     market_address: Mapped[str | None] = mapped_column(
         String(64), ForeignKey("markets.market_address", ondelete="SET NULL"), nullable=True, index=True
@@ -469,7 +477,7 @@ class SettlementReceipt(Base):
     __tablename__ = "settlement_receipts"
     __table_args__ = (UniqueConstraint("market_id", "request_id", name="ux_settlement_receipts_market_request"),)
 
-    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     market_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("markets.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -483,7 +491,7 @@ class SettlementReceipt(Base):
     prover_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     circuit_hash: Mapped[str | None] = mapped_column(String(66), nullable=True)
     generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    proof: Mapped[str | None] = mapped_column(Text, nullable=True)
+    proof: Mapped[str | None] = mapped_column(Text, nullable=True, deferred=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
@@ -511,3 +519,14 @@ Index("ix_settlements_submission_status", Settlement.submission_status)
 Index("ix_commitments_market_leaf", Commitment.market_id, Commitment.leaf_index)
 Index("ix_settlement_receipts_request", SettlementReceipt.request_id)
 Index("ix_treasury_market_id", HedgerTreasurySnapshot.market_id)
+
+# Phase 1C: Composite & partial indexes
+Index("ix_commitments_user_market", Commitment.user_address, Commitment.market_id)
+Index("ix_commitments_outcome", Commitment.outcome_id)
+Index("ix_quotes_status", Quote.status)
+Index("ix_quotes_created_at", Quote.created_at)
+Index("ix_markets_featured", Market.featured, postgresql_where=Market.featured.is_(True))
+
+# Phase 4: Normalized-column B-tree indexes & BRIN for append-only timestamps
+Index("ix_markets_category", Market.category)
+Index("ix_commitments_created_brin", Commitment.created_at, postgresql_using="brin")

@@ -633,12 +633,16 @@ async def collect_market_changes_with_summary(
 
 def market_record_to_payload(record: shared_models.Market) -> MarketPayload:
     """Convert an ORM Market row into a MarketPayload (used for backfills/tests)."""
-    outcomes = [row.label for row in record.outcomes_rel] if hasattr(record, "outcomes_rel") else None
+    try:
+        outcome_rows = list(record.outcomes_rel)
+    except Exception:
+        outcome_rows = None
+    outcomes = [row.label for row in outcome_rows] if outcome_rows is not None else None
     prices_raw: list[float | None] | None = None
-    if hasattr(record, "outcomes_rel"):
+    if outcome_rows is not None:
         prices_raw = []
         any_price = False
-        for row in record.outcomes_rel:
+        for row in outcome_rows:
             prices_raw.append(float(row.price) if row.price is not None else None)
             any_price = any_price or row.price is not None
         if not any_price:
@@ -646,9 +650,18 @@ def market_record_to_payload(record: shared_models.Market) -> MarketPayload:
     prices: list[float] | None = None
     if prices_raw is not None:
         prices = [price for price in prices_raw if price is not None]
-    tags = [row.tag for row in record.tags_rel] if hasattr(record, "tags_rel") else None
-    clob_ids = [row.token_id for row in record.clob_tokens_rel] if hasattr(record, "clob_tokens_rel") else None
-    gamma_meta = record.gamma_metadata_rel if hasattr(record, "gamma_metadata_rel") else None
+    try:
+        tags = [row.tag for row in record.tags_rel]
+    except Exception:
+        tags = None
+    try:
+        clob_ids = [row.token_id for row in record.clob_tokens_rel]
+    except Exception:
+        clob_ids = None
+    try:
+        gamma_meta = record.gamma_metadata_rel
+    except Exception:
+        gamma_meta = None
     group_slug = getattr(record, "group_slug", None) or (
         getattr(gamma_meta, "group_slug", None) if gamma_meta else None
     )
@@ -700,8 +713,8 @@ def market_record_to_payload(record: shared_models.Market) -> MarketPayload:
         resolution_reason=getattr(record, "resolution_reason", None),
         commits_blocked_at=getattr(record, "commits_blocked_at", None),
         market_maker=record.market_maker,
-        order_min_size=record.order_min_size,
-        price_tick_size=record.price_tick_size,
+        order_min_size=float(record.order_min_size) if record.order_min_size is not None else None,
+        price_tick_size=float(record.price_tick_size) if record.price_tick_size is not None else None,
         enable_order_book=record.enable_order_book,
         image_variants=image_variants,
         closes_at=record.closes_at,

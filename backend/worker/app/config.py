@@ -595,8 +595,6 @@ class Settings(BaseSettings):
         url = make_url(self.database_url)
         if url.drivername.startswith("postgresql"):
             url = url.set(drivername="postgresql+asyncpg")
-        elif url.drivername.startswith("sqlite") and "+aiosqlite" not in url.drivername:
-            url = url.set(drivername="sqlite+aiosqlite")
         return url.render_as_string(hide_password=False)
 
 
