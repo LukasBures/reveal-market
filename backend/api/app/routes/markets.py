@@ -14,7 +14,7 @@ import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.encoders import jsonable_encoder
 from py_clob_client.client import ClobClient
-from shared.cache_async import add_tag, add_tags, get_json, get_schema_tag, set_json
+from shared.cache_async import add_tag, add_tags, get_json, get_json_per, get_schema_tag, set_json
 from shared.cache_keys import (
     clob_prices_history_cache_key,
     events_count_cache_key,
@@ -150,9 +150,13 @@ async def list_markets(
         limit, offset, normalized_search, normalized_order_by
     )
     if cache_enabled:
-        cached_payload = await get_json(cache, cache_key)
+        per_result = await get_json_per(cache, cache_key)
+        cached_payload = per_result.data if per_result is not None else None
         hydrated = await market_svc.hydrate_cached_market_list(cache, cached_payload)
         if hydrated is not None:
+            # Trigger background refresh when PER signals near-expiry (stampede protection)
+            if per_result is not None and per_result.should_refresh:
+                asyncio.create_task(market_svc.hydrate_markets_cache(source="per_refresh"))
             hydrated = await market_svc.enrich_market_models(session, hydrated)
             update_cache_context(request, cache_key=cache_key, hit=True, source="markets:list")
             MARKETS_CACHE_COUNTER.labels(outcome="hit", status=status or "*", category=category or "*").inc()
@@ -404,9 +408,12 @@ async def list_markets_by_category(
     )
     cache_enabled = cache is not None and market_svc.should_cache_market_list(limit, offset, None, normalized_order_by)
     if cache_enabled:
-        cached_payload = await get_json(cache, cache_key)
+        per_result = await get_json_per(cache, cache_key)
+        cached_payload = per_result.data if per_result is not None else None
         hydrated = await market_svc.hydrate_cached_market_list(cache, cached_payload)
         if hydrated is not None:
+            if per_result is not None and per_result.should_refresh:
+                asyncio.create_task(market_svc.hydrate_markets_cache(source="per_refresh"))
             hydrated = await market_svc.enrich_market_models(session, hydrated)
             update_cache_context(request, cache_key=cache_key, hit=True, source="markets:category")
             models_from_cache = market_svc.filter_markets_for_visibility(hydrated, hide_settled=False)

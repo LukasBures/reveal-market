@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import Any
 
 import app.server as api_main
 from app import crud, models
 from app.services.markets import market_detail_cache_key
 from shared import models as shared_models
+from shared.cache_async import _json_loads_compressed
 from shared.cache_keys import markets_list_cache_key
 from sqlalchemy import select
 
@@ -61,11 +61,13 @@ def test_market_cache_stores_event_ids_and_records(client, db_session):
     cache_key = markets_list_cache_key(None, None, None, None, 5, 0)
     cache_store = getattr(api_main.cache_client, "store", {})
     assert cache_key in cache_store
-    cached_payload = json.loads(cache_store[cache_key])
+    cached_raw = _json_loads_compressed(cache_store[cache_key])
+    # Support PER-wrapped payloads (envelope has _v/_t/_ttl) or plain payloads
+    cached_payload = cached_raw.get("_v", cached_raw) if isinstance(cached_raw, dict) else cached_raw
     assert cached_payload["event_ids"] == ["evt-cache-trim"]
     record_key = "market:evt-cache-trim"
     assert record_key in cache_store
-    record = json.loads(cache_store[record_key])
+    record = _json_loads_compressed(cache_store[record_key])
     assert record["event_id"] == "evt-cache-trim"
     assert record["description"] == "Lightweight"
 
@@ -111,7 +113,8 @@ def test_hydrate_markets_cache_populates_from_db(client, db_session):
     cache_key = summary["cache_key"]
     cache_store = getattr(api_main.cache_client, "store", {})
     assert cache_key in cache_store
-    payload = json.loads(cache_store[cache_key])
+    raw_payload = _json_loads_compressed(cache_store[cache_key])
+    payload = raw_payload.get("_v", raw_payload) if isinstance(raw_payload, dict) else raw_payload
     assert set(payload["event_ids"]) == {"evt-hydrate-1", "evt-hydrate-2"}
     for event_id in payload["event_ids"]:
         assert f"market:{event_id}" in cache_store

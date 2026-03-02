@@ -209,11 +209,19 @@ class DummyRedis:
             await self.expire(dedupe_key, ttl_seconds)
             return 1
         if numkeys == 1:
-            lock_key = args[0]
+            key = args[0]
+            # Tag invalidation script: numkeys=1, no additional ARGV
+            if len(args) == 1:
+                members = list(self.store.get(key, set()) or set()) if isinstance(self.store.get(key), set) else []
+                for member in members:
+                    self.store.pop(member, None)
+                self.store.pop(key, None)
+                return len(members)
+            # Lock release script: numkeys=1, ARGV=[expected_value]
             expected_value = args[1]
-            current_value = await self.get(lock_key)
+            current_value = await self.get(key)
             if current_value == expected_value:
-                await self.delete(lock_key)
+                await self.delete(key)
                 return 1
             return 0
         raise RuntimeError("unsupported numkeys")
@@ -587,7 +595,7 @@ async def test_prime_markets_cache_stores_payload(monkeypatch):
     cache_key = markets_list_cache_key(None, None, None, None, 7, 0, order_by="volume")
     assert first_page["cache_key"] == cache_key
     assert cache_key in dummy.store
-    assert dummy._ttls[cache_key] == 45
+    assert 30 <= dummy._ttls[cache_key] <= 50
     cached = json.loads(dummy.store[cache_key])
     assert cached == payload
 
@@ -610,7 +618,7 @@ async def test_record_batch_stats_publishes_metrics(monkeypatch):
 
     assert dummy.last_set is not None
     assert dummy.last_set["key"] == "worker:batch_stats"
-    assert dummy.last_set["ttl"] == 300
+    assert 250 <= dummy.last_set["ttl"] <= 350
     payload = json.loads(dummy.last_set["value"])
     assert payload["markets_processed"] == 12
     assert payload["markets_changed"] == 4

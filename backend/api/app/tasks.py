@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import random
+import secrets
 import time
 from collections.abc import Awaitable
 from collections.abc import Awaitable as AwaitableABC
@@ -35,6 +36,14 @@ from app.services.markets import hydrate_markets_cache
 
 _RNG = random.SystemRandom()
 T = TypeVar("T")
+
+# Lua script for owner-safe lock release: only delete if value matches our token
+_LOCK_RELEASE_LUA = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    return redis.call('DEL', KEYS[1])
+end
+return 0
+"""
 settings: Any = runtime_settings
 
 
@@ -198,12 +207,13 @@ async def cache_refresh_loop() -> None:
     try:
         while True:
             acquired = True
+            lock_token = secrets.token_hex(16)
             if cache is not None:
                 try:
                     acquired = bool(
                         await cache.set(
                             lock_key,
-                            str(time.time()),
+                            lock_token,
                             nx=True,
                             ex=max(int(lock_ttl), 5),
                         )
@@ -247,6 +257,16 @@ async def cache_refresh_loop() -> None:
                     exc,
                     {"failures": failure_count, "interval_seconds": settings.cache_refresh_interval_seconds},
                 )
+            finally:
+                # Owner-safe release: only delete lock if we still own it
+                if cache is not None:
+                    try:
+                        if hasattr(cache, "eval"):
+                            await cache.eval(_LOCK_RELEASE_LUA, 1, lock_key, lock_token)  # type: ignore[misc]
+                        else:
+                            await cache.delete(lock_key)
+                    except (RedisError, Exception):  # noqa: S110 - lock release is best-effort
+                        pass
             jitter = min(interval * 0.2, 30)
             base_wait = interval + _RNG.uniform(-jitter, jitter)
             if failure_count > 0:

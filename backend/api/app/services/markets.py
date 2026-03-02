@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+import secrets
 import time
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
@@ -19,7 +20,17 @@ from urllib.parse import unquote_plus
 
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
-from shared.cache_async import add_tag, get_json, get_json_many, get_schema_tag, invalidate_tag, set_json
+from shared.cache_async import (
+    _json_dumps_compressed,
+    _tag_storage_key,
+    add_tag,
+    get_json,
+    get_json_many,
+    get_schema_tag,
+    invalidate_tag,
+    jittered_ttl,
+    set_json,
+)
 from shared.cache_keys import (
     group_cache_key,
     market_stats_cache_key,
@@ -45,6 +56,14 @@ from app.services import cache_client as cache_client_service
 
 MARKETS_STATS_KEY = "v1:markets:stats"
 MARKET_DETAIL_PREFIX = "v1:markets:detail"
+
+# Lua script for owner-safe lock release (compare-and-delete)
+_LOCK_RELEASE_LUA = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    return redis.call('DEL', KEYS[1])
+end
+return 0
+"""
 GENERIC_GROUP_SLUGS = {
     "ufc",
     "mma",
@@ -301,13 +320,22 @@ def sanitize_market_response(market: schemas.MarketResponse) -> dict[str, Any]:
 
 
 async def hydrate_cached_market_list(cache: Redis | None, cached_payload: Any) -> list[schemas.MarketResponse] | None:
-    """Rehydrate cached list payloads into MarketResponse models."""
+    """Rehydrate cached list payloads into MarketResponse models.
+
+    Supports both PER-wrapped payloads (``{"_v": ..., "_t": ..., "_ttl": ...}``)
+    and plain payloads for backward compatibility.
+    """
 
     if cached_payload is None:
         return None
     if isinstance(cached_payload, list):
         return [schemas.MarketResponse.model_validate(item) for item in cached_payload]
     if isinstance(cached_payload, dict):
+        # Unwrap PER envelope if present
+        if "_v" in cached_payload and "_t" in cached_payload and "_ttl" in cached_payload:
+            cached_payload = cached_payload["_v"]
+            if not isinstance(cached_payload, dict):
+                return None
         event_ids = cached_payload.get("event_ids")
         if not isinstance(event_ids, list):
             return None
@@ -324,10 +352,12 @@ async def hydrate_cached_market_list(cache: Redis | None, cached_payload: Any) -
 
 
 async def write_market_list_cache(cache: Redis | None, cache_key: str, markets: list[schemas.MarketResponse]) -> None:
-    """Write list payload and per-market detail caches with tagging."""
+    """Write list payload and per-market detail caches with tagging via a single pipeline."""
 
     if cache is None or not markets:
         return
+    use_pipeline = hasattr(cache, "pipeline")
+    pipe = cache.pipeline(transaction=False) if use_pipeline else None
     event_ids: list[str] = []
     for market in markets:
         sanitized = sanitize_market_response(market)
@@ -339,17 +369,45 @@ async def write_market_list_cache(cache: Redis | None, cache_key: str, markets: 
         record_key = market_record_cache_key(event_id)
         ttl_seconds = resolved_cache_ttl(sanitized.get("status"), sanitized.get("resolved_at"))
         if ttl_seconds > 0:
-            await set_json(cache, record_key, sanitized, ttl_seconds)
-            await add_tag(cache, f"market:{event_id}", record_key)
-            if isinstance(condition_id, str):
-                await add_tag(cache, f"resolution:{condition_id.lower()}", record_key)
+            payload_str = _json_dumps_compressed(sanitized)
+            ttl = jittered_ttl(ttl_seconds)
+            if pipe is not None:
+                pipe.set(record_key, payload_str, ex=ttl)
+                pipe.sadd(_tag_storage_key(f"market:{event_id}"), record_key)
+                if isinstance(condition_id, str):
+                    pipe.sadd(_tag_storage_key(f"resolution:{condition_id.lower()}"), record_key)
+            else:
+                await cache.set(record_key, payload_str, ex=ttl)  # type: ignore[misc]
+                await cache.sadd(_tag_storage_key(f"market:{event_id}"), record_key)  # type: ignore[misc]
+                if isinstance(condition_id, str):
+                    await cache.sadd(_tag_storage_key(f"resolution:{condition_id.lower()}"), record_key)  # type: ignore[misc]
     if not event_ids:
         return
-    payload = {
+    list_data = {
         "event_ids": event_ids,
         "generated_at": datetime.now(tz=UTC).isoformat(),
     }
-    await set_json(cache, cache_key, payload, settings.cache_ttl_seconds)
+    # Wrap with PER metadata for stampede-safe reads
+    base_ttl = settings.cache_ttl_seconds
+    per_envelope = {"_v": list_data, "_t": time.time(), "_ttl": base_ttl}
+    storage_ttl = int(base_ttl * 1.2)  # 20% buffer so key survives during refresh
+    list_payload = _json_dumps_compressed(per_envelope)
+    if pipe is not None:
+        pipe.set(cache_key, list_payload, ex=jittered_ttl(storage_ttl))
+        try:
+            await pipe.execute()
+        except RedisError as exc:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="cache.write_market_list.pipeline_failed",
+                message="pipelined market list cache write failed",
+                cache_key=cache_key,
+                market_count=len(event_ids),
+                error=str(exc),
+            )
+    else:
+        await cache.set(cache_key, list_payload, ex=jittered_ttl(storage_ttl))
 
 
 def decode_slug(value: str) -> str:
@@ -683,7 +741,7 @@ async def get_group_siblings(session: AsyncSession, group_slug: str) -> list[sch
     result = await session.execute(
         select(models.Market)
         .outerjoin(models.MarketGammaMetadata, models.MarketGammaMetadata.market_id == models.Market.id)
-        .where(func.lower(group_expr) == normalized)
+        .where(group_expr == normalized)
     )
     markets = result.unique().scalars().all()
     if not markets:
@@ -1381,10 +1439,11 @@ async def hydrate_markets_cache(
     start_time = time.perf_counter()
     lock_key = "lock:markets_cache:hydrate"
     lock_acquired = False
+    lock_token = secrets.token_hex(16)
     lock_ttl = max(30, settings.cache_ttl_seconds)
     if cache is not None:
         try:
-            lock_acquired = bool(await cache.set(lock_key, "1", ex=lock_ttl, nx=True))
+            lock_acquired = bool(await cache.set(lock_key, lock_token, ex=lock_ttl, nx=True))
         except RedisError:
             lock_acquired = False
     if cache is not None and not lock_acquired:
@@ -1431,8 +1490,6 @@ async def hydrate_markets_cache(
             coalesce_groups=coalesce_groups,
         )
         await write_market_list_cache(cache, cache_key, market_models)
-        await add_tag(cache, schema_tag, cache_key)
-        await add_tag(cache, "markets:list", cache_key)
 
         page_size = min(
             max(1, settings.cache_hydrate_page_size),
@@ -1455,9 +1512,29 @@ async def hydrate_markets_cache(
                 coalesce_groups=coalesce_groups,
             )
             await write_market_list_cache(cache, slice_key, slice_items)
-            await add_tag(cache, schema_tag, slice_key)
-            await add_tag(cache, "markets:list", slice_key)
             page_cache_keys.append(slice_key)
+
+        # Pipeline all tag registrations for main + page cache keys in a single flush.
+        all_keys_to_tag = [cache_key, *page_cache_keys]
+        if hasattr(cache, "pipeline"):
+            tag_pipe = cache.pipeline(transaction=False)
+            for key_to_tag in all_keys_to_tag:
+                tag_pipe.sadd(_tag_storage_key(schema_tag), key_to_tag)
+                tag_pipe.sadd(_tag_storage_key("markets:list"), key_to_tag)
+            try:
+                await tag_pipe.execute()
+            except RedisError as exc:
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    event="markets.cache.hydrate.tag_pipeline_failed",
+                    message="pipelined tag registration failed during hydration",
+                    error=str(exc),
+                )
+        else:
+            for key_to_tag in all_keys_to_tag:
+                await add_tag(cache, schema_tag, key_to_tag)
+                await add_tag(cache, "markets:list", key_to_tag)
 
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
         log_event(
@@ -1487,13 +1564,16 @@ async def hydrate_markets_cache(
     finally:
         if cache is not None and lock_acquired:
             try:
-                await cache.delete(lock_key)
-            except RedisError as exc:
+                if hasattr(cache, "eval"):
+                    await cache.eval(_LOCK_RELEASE_LUA, 1, lock_key, lock_token)  # type: ignore[misc]
+                else:
+                    await cache.delete(lock_key)
+            except (RedisError, Exception) as exc:
                 log_event(
                     logger,
                     logging.DEBUG,
                     event="markets.cache.lock_release_failed",
                     message="failed to release cache lock",
-                    cache_key=cache_key,
+                    lock_key=lock_key,
                     error=str(exc),
                 )

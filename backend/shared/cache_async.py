@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import base64
 import importlib
 import importlib.util as importlib_util
 import inspect
 import json
 import logging
+import math
+import random
+import time
+import zlib
 from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
 from typing import Any, Protocol, cast
 
@@ -16,6 +21,27 @@ import shared.logging as shared_logging
 from .cache_stats import CacheStats
 
 logger = logging.getLogger("reveal_market.cache_async")
+
+# Prometheus histogram for cache operation latency.
+# Defensive import: prometheus_client is optional in some service contexts.
+try:
+    from prometheus_client import Histogram as _Histogram
+
+    CACHE_OP_DURATION = _Histogram(
+        "cache_operation_duration_seconds",
+        "Redis cache operation latency",
+        ["operation"],
+        buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5),
+    )
+except Exception:  # pragma: no cover - optional dependency
+    CACHE_OP_DURATION = None  # type: ignore[assignment]
+
+
+def _observe_cache_op(operation: str, start: float) -> None:
+    """Record cache operation latency if Prometheus is available."""
+    if CACHE_OP_DURATION is not None:
+        CACHE_OP_DURATION.labels(operation=operation).observe(time.monotonic() - start)
+
 
 _TAG_PREFIX = "cache:tag:"
 _SCHEMA_UNKNOWN_TAG = "schema:unknown"
@@ -55,11 +81,59 @@ def _json_dumps(payload: Any) -> str:
     return json.dumps(payload)
 
 
+# ---------------------------------------------------------------------------
+# Transparent compression for large cache payloads
+# ---------------------------------------------------------------------------
+_COMPRESSION_THRESHOLD = 1024  # bytes — only compress payloads larger than 1KB
+_COMPRESSED_MARKER = "zl:"  # prefix to identify compressed entries
+
+
+def _json_dumps_compressed(payload: Any) -> str:
+    """Serialize to JSON, optionally compressing large payloads."""
+
+    raw = orjson.dumps(payload) if orjson is not None else json.dumps(payload).encode()
+    if len(raw) < _COMPRESSION_THRESHOLD:
+        return raw.decode() if isinstance(raw, bytes) else raw
+    compressed = zlib.compress(raw, level=1)
+    if len(compressed) >= len(raw) * 0.9:
+        # Compression didn't help enough — skip it
+        return raw.decode() if isinstance(raw, bytes) else raw
+    return _COMPRESSED_MARKER + base64.b64encode(compressed).decode()
+
+
+def _json_loads_compressed(payload: str | bytes) -> Any:
+    """Deserialize JSON, transparently decompressing if needed."""
+
+    if isinstance(payload, bytes):
+        payload = payload.decode()
+    if payload.startswith(_COMPRESSED_MARKER):
+        compressed = base64.b64decode(payload[len(_COMPRESSED_MARKER) :])
+        return _json_loads(zlib.decompress(compressed))
+    return _json_loads(payload)
+
+
+def jittered_ttl(base_ttl: int, jitter_pct: float = 0.1) -> int:
+    """Add +/- jitter to TTL to prevent synchronized expiry (thundering herd)."""
+
+    jitter = int(base_ttl * jitter_pct)
+    if jitter <= 0:
+        return max(1, base_ttl)
+    return max(1, base_ttl + random.randint(-jitter, jitter))  # noqa: S311 - not cryptographic
+
+
 def get_client(url: str) -> Redis | None:
     """Return an async Redis client connected to the provided URL."""
 
     try:
-        return Redis.from_url(url, decode_responses=True)
+        return Redis.from_url(
+            url,
+            decode_responses=True,
+            max_connections=20,
+            socket_timeout=5.0,
+            socket_connect_timeout=3.0,
+            retry_on_timeout=True,
+            health_check_interval=30,
+        )
     except RedisError as exc:  # pragma: no cover - defensive
         shared_logging.log_event(
             logger,
@@ -75,6 +149,7 @@ def get_client(url: str) -> Redis | None:
 async def get_json(client: Redis | None, key: str) -> Any:
     """Fetch and JSON-decode the given key from Redis."""
 
+    _t0 = time.monotonic()
     stats = get_stats_client()
     if client is None:
         stats.record_miss()
@@ -89,7 +164,9 @@ async def get_json(client: Redis | None, key: str) -> Any:
         return None
     try:
         payload_raw = await client.get(key)
+        _observe_cache_op("get", _t0)
     except RedisError as exc:  # pragma: no cover - defensive
+        _observe_cache_op("get", _t0)
         shared_logging.log_event(
             logger,
             logging.WARNING,
@@ -127,7 +204,7 @@ async def get_json(client: Redis | None, key: str) -> Any:
         stats.record_error()
         return None
     try:
-        data = _json_loads(payload)
+        data = _json_loads_compressed(payload)
         if logger.isEnabledFor(logging.DEBUG):
             shared_logging.log_event(
                 logger,
@@ -139,7 +216,7 @@ async def get_json(client: Redis | None, key: str) -> Any:
             )
         stats.record_hit()
         return data
-    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+    except (json.JSONDecodeError, TypeError, ValueError, zlib.error) as exc:
         shared_logging.log_event(
             logger,
             logging.WARNING,
@@ -214,10 +291,10 @@ async def get_json_many(client: Redis | None, keys: Sequence[str]) -> dict[str, 
             stats.record_error()
             continue
         try:
-            data = _json_loads(payload)
+            data = _json_loads_compressed(payload)
             results[key] = data
             stats.record_hit()
-        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        except (json.JSONDecodeError, TypeError, ValueError, zlib.error) as exc:
             shared_logging.log_event(
                 logger,
                 logging.WARNING,
@@ -231,7 +308,7 @@ async def get_json_many(client: Redis | None, keys: Sequence[str]) -> dict[str, 
 
 
 async def set_json(client: Redis | None, key: str, value: Any, ttl_seconds: int | None = None) -> None:
-    """Serialize value as JSON and store it."""
+    """Serialize value as JSON and store it, compressing large payloads."""
 
     if client is None:
         if logger.isEnabledFor(logging.DEBUG):
@@ -243,8 +320,9 @@ async def set_json(client: Redis | None, key: str, value: Any, ttl_seconds: int 
                 key=key,
             )
         return
+    _t0 = time.monotonic()
     try:
-        payload = _json_dumps(value)
+        payload = _json_dumps_compressed(value)
         if ttl_seconds is not None and ttl_seconds <= 0:
             if logger.isEnabledFor(logging.DEBUG):
                 shared_logging.log_event(
@@ -257,9 +335,10 @@ async def set_json(client: Redis | None, key: str, value: Any, ttl_seconds: int 
                 )
             return
         if ttl_seconds is not None:
-            await client.set(key, payload, ex=ttl_seconds)
+            await client.set(key, payload, ex=jittered_ttl(ttl_seconds))
         else:
             await client.set(key, payload)
+        _observe_cache_op("set", _t0)
         if logger.isEnabledFor(logging.DEBUG):
             shared_logging.log_event(
                 logger,
@@ -271,6 +350,7 @@ async def set_json(client: Redis | None, key: str, value: Any, ttl_seconds: int 
                 size=len(payload),
             )
     except (RedisError, TypeError) as exc:  # pragma: no cover - defensive
+        _observe_cache_op("set", _t0)
         get_stats_client().record_error()
         shared_logging.log_event(
             logger,
@@ -280,6 +360,65 @@ async def set_json(client: Redis | None, key: str, value: Any, ttl_seconds: int 
             key=key,
             error=str(exc),
         )
+
+
+# ---------------------------------------------------------------------------
+# Probabilistic Early Recomputation (PER) — cache stampede protection
+# ---------------------------------------------------------------------------
+_PER_TTL_BUFFER = 0.2  # Store with 20% extra TTL so key survives during refresh
+_PER_BETA = 1.0  # Controls how aggressively early refresh triggers
+
+
+class PERResult:
+    """Result of a PER-aware cache read."""
+
+    __slots__ = ("data", "should_refresh")
+
+    def __init__(self, data: Any, should_refresh: bool) -> None:
+        self.data = data
+        self.should_refresh = should_refresh
+
+
+async def set_json_per(client: Redis | None, key: str, value: Any, ttl_seconds: int) -> None:
+    """Store a value with PER metadata for stampede-safe reads."""
+
+    if client is None or ttl_seconds <= 0:
+        return
+    envelope = {
+        "_v": value,
+        "_t": time.time(),
+        "_ttl": ttl_seconds,
+    }
+    # Store with buffered TTL so the key persists during early-refresh window
+    storage_ttl = int(ttl_seconds * (1 + _PER_TTL_BUFFER))
+    await set_json(client, key, envelope, storage_ttl)
+
+
+async def get_json_per(client: Redis | None, key: str, beta: float = _PER_BETA) -> PERResult | None:
+    """Fetch a PER-wrapped value; return data + whether the caller should refresh.
+
+    Returns None on cache miss. On hit, ``should_refresh=True`` means this caller
+    should trigger an async background refresh while still returning stale data.
+    """
+
+    raw = await get_json(client, key)
+    if raw is None:
+        return None
+    # Support both PER-wrapped and plain values for backward compatibility
+    if not isinstance(raw, dict) or "_v" not in raw or "_t" not in raw or "_ttl" not in raw:
+        return PERResult(data=raw, should_refresh=False)
+    data = raw["_v"]
+    set_time = float(raw["_t"])
+    original_ttl = float(raw["_ttl"])
+    elapsed = time.time() - set_time
+    remaining = original_ttl - elapsed
+    # XFetch: remaining - beta * ln(random()) < 0 => should_refresh
+    try:
+        xfetch_delta = beta * math.log(random.random())  # noqa: S311 - not cryptographic
+    except ValueError:
+        xfetch_delta = 0.0
+    should_refresh = (remaining + xfetch_delta) < 0
+    return PERResult(data=data, should_refresh=should_refresh)
 
 
 async def set_json_many(client: Redis | None, items: Mapping[str, Any], ttl_seconds: int | None = None) -> int:
@@ -313,11 +452,11 @@ async def set_json_many(client: Redis | None, items: Mapping[str, Any], ttl_seco
             await set_json(client, key, value, ttl_seconds)
         return len(items)
     try:
-        pipe = client.pipeline()
+        pipe = client.pipeline(transaction=False)
         for key, value in items.items():
-            payload = _json_dumps(value)
+            payload = _json_dumps_compressed(value)
             if ttl_seconds is not None:
-                pipe.set(key, payload, ex=ttl_seconds)
+                pipe.set(key, payload, ex=jittered_ttl(ttl_seconds))
             else:
                 pipe.set(key, payload)
         await pipe.execute()
@@ -423,34 +562,86 @@ async def add_tag(client: Redis | None, tag: str, key: str) -> None:
 
 
 async def add_tags(client: Redis | None, tags: Sequence[str], key: str) -> None:
-    """Associate a cache key with multiple tags."""
+    """Associate a cache key with multiple tags via a single pipeline flush."""
 
-    for tag in tags:
-        await add_tag(client, tag, key)
+    if client is None or not tags:
+        return
+    if len(tags) == 1:
+        await add_tag(client, tags[0], key)
+        return
+    if not hasattr(client, "pipeline"):
+        for tag in tags:
+            await add_tag(client, tag, key)
+        return
+    try:
+        pipe = client.pipeline(transaction=False)
+        for tag in tags:
+            pipe.sadd(_tag_storage_key(tag), key)
+        await pipe.execute()
+    except RedisError as exc:
+        shared_logging.log_event(
+            logger,
+            logging.WARNING,
+            event="cache.tags.pipeline_failed",
+            message="pipelined tag attach failed",
+            tag_count=len(tags),
+            key=key,
+            error=str(exc),
+        )
+
+
+_INVALIDATE_TAG_LUA = """
+local tag_key = KEYS[1]
+local removed = 0
+local cursor = "0"
+repeat
+    local result = redis.call('SSCAN', tag_key, cursor, 'COUNT', 512)
+    cursor = result[1]
+    local members = result[2]
+    if #members > 0 then
+        redis.call('UNLINK', unpack(members))
+        removed = removed + #members
+    end
+until cursor == "0"
+redis.call('UNLINK', tag_key)
+return removed
+"""
 
 
 async def invalidate_tag(client: Redis | None, tag: str) -> int:
-    """Invalidate all cache keys associated with a tag and return the removal count."""
+    """Atomically invalidate all cache keys associated with a tag and return the removal count.
+
+    Uses a Lua script when available to ensure no keys are added between the
+    scan and the delete.  Falls back to SSCAN + DELETE for clients that do not
+    support ``EVAL`` (e.g. in-memory test doubles).
+    """
 
     if client is None:
         return 0
+    _t0 = time.monotonic()
     storage_key = _tag_storage_key(tag)
-    removed = 0
     try:
-        iterator = client.sscan_iter(storage_key, count=512)  # type: ignore[union-attr]
-        batch: list[str] = []
-        async for member in iterator:
-            if not member:
-                continue
-            batch.append(member)
-            if len(batch) >= 512:
+        if hasattr(client, "eval"):
+            removed = await client.eval(_INVALIDATE_TAG_LUA, 1, storage_key)  # type: ignore[union-attr,misc]
+            removed = int(removed) if removed else 0
+        else:
+            # Fallback: non-atomic SSCAN + DELETE for test doubles
+            removed = 0
+            iterator = client.sscan_iter(storage_key, count=512)  # type: ignore[union-attr]
+            batch: list[str] = []
+            async for member in iterator:
+                if not member:
+                    continue
+                batch.append(member)
+                if len(batch) >= 512:
+                    await _maybe_await(client.delete(*batch))
+                    removed += len(batch)
+                    batch.clear()
+            if batch:
                 await _maybe_await(client.delete(*batch))
                 removed += len(batch)
-                batch.clear()
-        if batch:
-            await _maybe_await(client.delete(*batch))
-            removed += len(batch)
-        await _maybe_await(client.delete(storage_key))
+            await _maybe_await(client.delete(storage_key))
+        _observe_cache_op("invalidate", _t0)
         if logger.isEnabledFor(logging.DEBUG):
             shared_logging.log_event(
                 logger,
@@ -462,6 +653,7 @@ async def invalidate_tag(client: Redis | None, tag: str) -> int:
             )
         return removed
     except RedisError as exc:  # pragma: no cover - defensive
+        _observe_cache_op("invalidate", _t0)
         shared_logging.log_event(
             logger,
             logging.WARNING,
