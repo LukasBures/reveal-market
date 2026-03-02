@@ -44,7 +44,6 @@ variable "NEXT_PUBLIC_CHAIN_NAME" { default = "Horizen Testnet" }
 variable "NEXT_PUBLIC_RPC_URL" { default = "https://horizen-testnet.rpc.caldera.xyz/http" }
 variable "NEXT_PUBLIC_BLOCK_EXPLORER_URL" { default = "https://horizen-testnet.explorer.caldera.xyz" }
 variable "NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID" { default = "" }
-variable "NEXT_PUBLIC_WALLET_CHAINS" { default = "" }
 variable "NEXT_PUBLIC_ZEN_TOKEN_ADDRESS" { default = "" }
 variable "NEXT_DISABLE_MINIFY" { default = "false" }
 
@@ -154,7 +153,6 @@ target "frontend" {
     NEXT_PUBLIC_RPC_URL                  = NEXT_PUBLIC_RPC_URL
     NEXT_PUBLIC_BLOCK_EXPLORER_URL       = NEXT_PUBLIC_BLOCK_EXPLORER_URL
     NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID = NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID
-    NEXT_PUBLIC_WALLET_CHAINS            = NEXT_PUBLIC_WALLET_CHAINS
     NEXT_PUBLIC_ZEN_TOKEN_ADDRESS        = NEXT_PUBLIC_ZEN_TOKEN_ADDRESS
     NEXT_DISABLE_MINIFY                  = NEXT_DISABLE_MINIFY
   }
