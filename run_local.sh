@@ -458,6 +458,25 @@ if [[ "${RUN_BUILD}" == "true" ]]; then
 fi
 
 if [[ "${USE_BAKE}" == "true" ]]; then
+  # docker buildx bake has no --env-file flag; export env vars into the shell
+  # so bake can interpolate ${VAR} references in docker-compose.yml.
+  if [[ -f "${ENV_FILE}" ]]; then
+    while IFS= read -r _line || [[ -n "${_line}" ]]; do
+      [[ "${_line}" =~ ^[[:space:]]*# ]] && continue
+      [[ "${_line}" =~ ^[[:space:]]*$ ]] && continue
+      [[ "${_line}" == *=* ]] || continue
+      _key="${_line%%=*}"
+      _val="${_line#*=}"
+      # Strip surrounding quotes (Docker env-file compat).
+      if [[ "${_val}" =~ ^\"(.*)\"$ ]]; then
+        _val="${BASH_REMATCH[1]}"
+      elif [[ "${_val}" =~ ^\'(.*)\'$ ]]; then
+        _val="${BASH_REMATCH[1]}"
+      fi
+      export "${_key}=${_val}"
+    done < "${ENV_FILE}"
+    unset _line _key _val
+  fi
   log_step "Building images with docker buildx bake (parallel, shared bases)"
   BAKE_CMD=("docker" "buildx" "bake")
   if [[ -n "${BUILD_FLAG}" ]]; then

@@ -22,8 +22,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 #   libpq-dev              — PostgreSQL client headers (psycopg2)
 #   libffi-dev + libssl-dev + openssl — FFI + SSL headers (streamer crypto deps)
 #   curl + ca-certificates — health checks, TLS root certs
-RUN --mount=type=cache,target=/var/cache/apt \
-    --mount=type=cache,target=/var/lib/apt \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update -qq \
  && apt-get install -y --no-install-recommends \
     build-essential \

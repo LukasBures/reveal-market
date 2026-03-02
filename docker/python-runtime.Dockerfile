@@ -19,8 +19,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 #   libpq5          — PostgreSQL client library (psycopg2 / asyncpg runtime)
 #   ca-certificates — TLS root certificates
 #   curl            — health check probes
-RUN --mount=type=cache,target=/var/cache/apt \
-    --mount=type=cache,target=/var/lib/apt \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update -qq \
  && apt-get install -y --no-install-recommends \
     ca-certificates \
