@@ -3,10 +3,12 @@ COMPOSE ?= docker compose
 ENV_FILE ?= .env.local
 COMPOSE_ENV_FILE := $(if $(wildcard $(ENV_FILE)),--env-file $(ENV_FILE),)
 INFRA_SERVICES ?= postgres redis
+MONITORING_SERVICES ?= prometheus grafana postgres-exporter redis-exporter
 ALL_SERVICES := postgres redis api worker hedger frontend prover streamer
 
 .PHONY: api worker hedger frontend caddy prover streamer all stack down test format fmt local smoke-local monitor-local prod help
-.PHONY: test-backend test-api test-worker test-frontend test-hedger test-streamer test-relayer test-contracts test-contracts-polygon test-contracts-zen test-prover
+.PHONY: monitor monitor-stack
+.PHONY: test-backend test-api test-worker test-frontend test-hedger test-streamer test-relayer test-contracts test-contracts-polygon test-contracts-zen test-prover test-db-live
 
 api:
 	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml $(COMPOSE_ENV_FILE) up --build $(INFRA_SERVICES) api
@@ -35,6 +37,12 @@ streamer:
 all:
 	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml $(COMPOSE_ENV_FILE) up --build $(ALL_SERVICES)
 
+monitor:
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml $(COMPOSE_ENV_FILE) up --build $(INFRA_SERVICES) $(MONITORING_SERVICES)
+
+monitor-stack:
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml $(COMPOSE_ENV_FILE) up --build $(ALL_SERVICES) $(MONITORING_SERVICES)
+
 down:
 	$(COMPOSE) -f docker-compose.yml -f docker-compose.override.yml $(COMPOSE_ENV_FILE) down
 
@@ -49,6 +57,9 @@ test-api:
 
 test-worker:
 	cd backend/worker && uv run --project . --extra dev pytest
+
+test-db-live:
+	cd backend/shared && uv run --project ../api --extra dev pytest tests/test_db_live.py -m live -v
 
 test-frontend:
 	cd frontend && ./run_tests.sh
@@ -82,6 +93,7 @@ help:
 	@printf "%s\n" \
 	"Targets:" \
 	"  api, worker, hedger, frontend, streamer, prover, all, stack, down" \
+	"  monitor (prometheus + grafana), monitor-stack (all + monitoring)" \
 	"  local (bake + up + smoke), smoke-local, monitor-local, prod" \
 	"  test, test-backend, test-frontend, test-contracts, test-prover" \
 	"  format (pre-commit)"

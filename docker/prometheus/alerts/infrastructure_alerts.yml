@@ -1,0 +1,94 @@
+groups:
+  - name: database_health
+    interval: 30s
+    rules:
+      - alert: PostgresConnectionsHigh
+        expr: |
+          sum(pg_stat_activity_count{datname="reveal_market"})
+          / on() pg_settings_max_connections > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PostgreSQL connections above 80% capacity"
+          description: "{{ $value | humanizePercentage }} of max_connections in use."
+
+      - alert: PostgresDeadlocks
+        expr: rate(pg_stat_database_deadlocks{datname="reveal_market"}[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PostgreSQL deadlocks detected"
+          description: "Deadlocks occurring at {{ $value }}/s in reveal_market."
+
+      - alert: PostgresActiveQueriesHigh
+        expr: pg_stat_activity_count{datname="reveal_market", state="active"} > 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High number of active PostgreSQL queries"
+          description: "{{ $value }} active queries detected in reveal_market."
+
+  - name: redis_health
+    interval: 15s
+    rules:
+      - alert: RedisMemoryHigh
+        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis memory usage above 80%"
+          description: "Redis is using {{ $value | humanizePercentage }} of maxmemory."
+
+      - alert: RedisMemoryCritical
+        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.95
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis memory usage above 95%"
+          description: "Redis is using {{ $value | humanizePercentage }} of maxmemory. Evictions imminent."
+
+      - alert: RedisConnectionsHigh
+        expr: redis_connected_clients / redis_config_maxclients > 0.80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis client connections above 80%"
+          description: "{{ $value | humanizePercentage }} of maxclients in use."
+
+      - alert: RedisEvictionsHigh
+        expr: rate(redis_evicted_keys_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis key eviction rate is high"
+          description: "{{ $value }} keys/s being evicted."
+
+  - name: prometheus_self
+    interval: 30s
+    rules:
+      - alert: PrometheusStorageHigh
+        expr: |
+          prometheus_tsdb_storage_blocks_bytes / (2 * 1024 * 1024 * 1024) > 0.80
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prometheus storage usage above 80% of 2GB limit"
+          description: "Current TSDB size: {{ $value | humanize1024 }}B."
+
+      - alert: PrometheusScrapeFailures
+        expr: |
+          sum by (job) (up == 0)
+          / count by (job) (up) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "More than 50% of {{ $labels.job }} scrapes are failing"

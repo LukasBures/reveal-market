@@ -1,0 +1,621 @@
+{
+  "uid": "rm-worker-operations",
+  "title": "Worker Operations",
+  "description": "Worker service metrics: Polymarket sync, proof queues, settlement, and cache",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "graphTooltip": 1,
+  "fiscalYearStartMonth": 0,
+  "liveNow": false,
+  "refresh": "30s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": ["5s", "10s", "30s", "1m", "5m"],
+    "time_options": ["5m", "15m", "1h", "6h", "12h", "24h", "2d", "7d"]
+  },
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Polymarket Ingestion",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 },
+      "id": 1,
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Polymarket Fetch Rate by Outcome",
+      "gridPos": { "x": 0, "y": 1, "w": 8, "h": 8 },
+      "id": 2,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "rate(worker_polymarket_fetch_total[5m])",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "gradientMode": "scheme",
+            "showPoints": "never",
+            "axisLabel": "fetches/s"
+          },
+          "color": { "mode": "palette-classic" },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["mean", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Retry & Rate Limit Events",
+      "gridPos": { "x": 8, "y": 1, "w": 8, "h": 8 },
+      "id": 3,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "rate(worker_polymarket_retry_total[5m])",
+          "legendFormat": "Retry ({{outcome}})",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(worker_polymarket_rate_limit_total[5m])",
+          "legendFormat": "Rate Limit ({{outcome}})",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "axisLabel": "events/s"
+          },
+          "color": { "mode": "palette-classic" },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Empty Pages",
+      "gridPos": { "x": 16, "y": 1, "w": 8, "h": 8 },
+      "id": 4,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "rate(worker_polymarket_empty_pages_total[5m])",
+          "legendFormat": "Empty Pages ({{outcome}})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "axisLabel": "pages/s"
+          },
+          "color": { "fixedColor": "yellow", "mode": "fixed" },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single", "sort": "none" }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Sync Cycle & Market Upserts",
+      "gridPos": { "x": 0, "y": 9, "w": 24, "h": 1 },
+      "id": 5,
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Sync Cycle Duration (p50 / p95)",
+      "gridPos": { "x": 0, "y": 10, "w": 12, "h": 8 },
+      "id": 6,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, rate(worker_sync_cycle_duration_seconds_bucket[5m]))",
+          "legendFormat": "p50 ({{outcome}})",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(worker_sync_cycle_duration_seconds_bucket[5m]))",
+          "legendFormat": "p95 ({{outcome}})",
+          "refId": "B"
+        },
+        {
+          "expr": "worker:sync_cycle_p95:5m",
+          "legendFormat": "p95 (recording rule)",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "axisLabel": "seconds"
+          },
+          "color": { "mode": "palette-classic" },
+          "unit": "s"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byRegexp", "options": "p95.*" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "yellow", "mode": "fixed" } }]
+          },
+          {
+            "matcher": { "id": "byRegexp", "options": "p50.*" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }]
+          }
+        ]
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["mean", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Market Upserts by Operation",
+      "gridPos": { "x": 12, "y": 10, "w": 12, "h": 8 },
+      "id": 7,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "rate(worker_market_upserts_total[5m])",
+          "legendFormat": "{{operation}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 80,
+            "showPoints": "never",
+            "stacking": { "mode": "normal" },
+            "axisLabel": "ops/s"
+          },
+          "color": { "mode": "palette-classic" },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["mean", "sum"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Proof Queue",
+      "gridPos": { "x": 0, "y": 18, "w": 24, "h": 1 },
+      "id": 8,
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Proof Queue Depth",
+      "gridPos": { "x": 0, "y": 19, "w": 6, "h": 7 },
+      "id": 9,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "worker_proof_queue_depth",
+          "legendFormat": "{{queue}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 20,
+            "gradientMode": "scheme",
+            "showPoints": "never",
+            "axisLabel": "items"
+          },
+          "color": { "mode": "palette-classic" },
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 10 },
+              { "color": "red", "value": 50 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single", "sort": "none" }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Proof Queue Oldest Age",
+      "gridPos": { "x": 6, "y": 19, "w": 6, "h": 7 },
+      "id": 10,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "worker_proof_queue_oldest_seconds",
+          "legendFormat": "{{queue}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "axisLabel": "seconds"
+          },
+          "color": { "mode": "palette-classic" },
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 300 },
+              { "color": "red", "value": 600 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single", "sort": "none" }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Proof Deadletter Count",
+      "gridPos": { "x": 12, "y": 19, "w": 6, "h": 7 },
+      "id": 11,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "rate(worker_proof_queue_deadletter_total[5m])",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "axisLabel": "events/s"
+          },
+          "color": { "fixedColor": "red", "mode": "shades" },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Proof Queue Overflow Events",
+      "gridPos": { "x": 18, "y": 19, "w": 6, "h": 7 },
+      "id": 12,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "rate(worker_proof_queue_overflow_total[5m])",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "axisLabel": "events/s"
+          },
+          "color": { "fixedColor": "orange", "mode": "fixed" },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single", "sort": "none" }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Settlement Queue",
+      "gridPos": { "x": 0, "y": 26, "w": 24, "h": 1 },
+      "id": 13,
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Settlement Queue Depth",
+      "gridPos": { "x": 0, "y": 27, "w": 8, "h": 7 },
+      "id": 14,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "worker_settlement_queue_depth",
+          "legendFormat": "{{queue}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 20,
+            "gradientMode": "scheme",
+            "showPoints": "never",
+            "axisLabel": "items"
+          },
+          "color": { "mode": "palette-classic" },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single", "sort": "none" }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Settlement Deadletter",
+      "gridPos": { "x": 8, "y": 27, "w": 8, "h": 7 },
+      "id": 15,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "rate(worker_settlement_queue_deadletter_total[5m])",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "axisLabel": "events/s"
+          },
+          "color": { "fixedColor": "red", "mode": "shades" },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Lock Batches Outcomes",
+      "gridPos": { "x": 16, "y": 27, "w": 8, "h": 7 },
+      "id": 16,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "rate(worker_lock_batches_total[5m])",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 80,
+            "showPoints": "never",
+            "stacking": { "mode": "normal" },
+            "axisLabel": "ops/s"
+          },
+          "color": { "mode": "palette-classic" },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Cache & Retention",
+      "gridPos": { "x": 0, "y": 34, "w": 24, "h": 1 },
+      "id": 17,
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Cache Invalidation Rate by Type",
+      "gridPos": { "x": 0, "y": 35, "w": 8, "h": 7 },
+      "id": 18,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "rate(worker_cache_invalidations_total[5m])",
+          "legendFormat": "{{type}}",
+          "refId": "A"
+        },
+        {
+          "expr": "worker:cache_invalidation_rate:5m",
+          "legendFormat": "recording: {{type}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "axisLabel": "invalidations/s"
+          },
+          "color": { "mode": "palette-classic" },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Retention Candidates",
+      "gridPos": { "x": 8, "y": 35, "w": 8, "h": 7 },
+      "id": 19,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "rate(worker_retention_candidates_total[5m])",
+          "legendFormat": "{{category}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 70,
+            "showPoints": "never",
+            "stacking": { "mode": "normal" },
+            "axisLabel": "candidates/s"
+          },
+          "color": { "mode": "palette-classic" },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Lease Skips",
+      "gridPos": { "x": 16, "y": 35, "w": 8, "h": 7 },
+      "id": 20,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "rate(worker_polymarket_lease_skipped_total[5m])",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "axisLabel": "skips/s"
+          },
+          "color": { "fixedColor": "yellow", "mode": "fixed" },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single", "sort": "none" }
+      }
+    }
+  ]
+}

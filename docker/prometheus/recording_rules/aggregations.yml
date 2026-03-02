@@ -1,0 +1,87 @@
+groups:
+  - name: api_aggregations
+    interval: 15s
+    rules:
+      - record: api:request_rate:5m
+        expr: sum by (method, path) (rate(api_request_latency_seconds_count[5m]))
+
+      - record: api:request_rate_total:5m
+        expr: sum(rate(api_request_latency_seconds_count[5m]))
+
+      - record: api:error_rate:5m
+        expr: |
+          sum(rate(api_request_latency_seconds_count{status_code=~"5.."}[5m]))
+          / sum(rate(api_request_latency_seconds_count[5m]))
+
+      - record: api:error_rate_by_path:5m
+        expr: |
+          sum by (path) (rate(api_request_latency_seconds_count{status_code=~"5.."}[5m]))
+          / sum by (path) (rate(api_request_latency_seconds_count[5m]))
+
+      - record: api:latency_p50:5m
+        expr: histogram_quantile(0.50, sum by (le) (rate(api_request_latency_seconds_bucket[5m])))
+
+      - record: api:latency_p95:5m
+        expr: histogram_quantile(0.95, sum by (le) (rate(api_request_latency_seconds_bucket[5m])))
+
+      - record: api:latency_p99:5m
+        expr: histogram_quantile(0.99, sum by (le) (rate(api_request_latency_seconds_bucket[5m])))
+
+      - record: api:latency_p95_by_path:5m
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le, path) (rate(api_request_latency_seconds_bucket[5m]))
+          )
+
+      - record: api:cache_hit_rate:5m
+        expr: |
+          sum(rate(api_cache_requests_total{outcome="hit"}[5m]))
+          / sum(rate(api_cache_requests_total[5m]))
+
+      - record: api:db_queries_p95:5m
+        expr: histogram_quantile(0.95, sum by (le) (rate(api_db_query_count_bucket[5m])))
+
+      - record: api:db_time_p95:5m
+        expr: histogram_quantile(0.95, sum by (le) (rate(api_db_query_time_ms_bucket[5m])))
+
+  - name: worker_aggregations
+    interval: 15s
+    rules:
+      - record: worker:polymarket_fetch_rate:5m
+        expr: sum by (outcome) (rate(worker_polymarket_fetch_total[5m]))
+
+      - record: worker:sync_cycle_p95:5m
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(worker_sync_cycle_duration_seconds_bucket[5m]))
+          )
+
+      - record: worker:cache_invalidation_rate:5m
+        expr: sum by (type) (rate(worker_cache_invalidations_total[5m]))
+
+  - name: infra_aggregations
+    interval: 30s
+    rules:
+      - record: redis:memory_usage_ratio
+        expr: redis_memory_used_bytes / redis_memory_max_bytes
+
+      - record: redis:hit_rate:5m
+        expr: |
+          rate(redis_keyspace_hits_total[5m])
+          / (rate(redis_keyspace_hits_total[5m]) + rate(redis_keyspace_misses_total[5m]))
+
+      - record: redis:ops_per_second:5m
+        expr: rate(redis_commands_processed_total[5m])
+
+  - name: trading_aggregations
+    interval: 15s
+    rules:
+      - record: prover:success_rate:15m
+        expr: |
+          rate(prover_proofs_success_total[15m])
+          / (rate(prover_proofs_success_total[15m]) + rate(prover_proofs_failure_total[15m]))
+
+      - record: relayer:tx_success_rate:5m
+        expr: |
+          sum(rate(relayer_tx_outcomes_total{outcome="success"}[5m]))
+          / sum(rate(relayer_tx_outcomes_total[5m]))

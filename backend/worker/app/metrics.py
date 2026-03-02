@@ -11,7 +11,7 @@ from shared.logging import log_event
 logger = logging.getLogger("reveal_market.worker")
 
 try:
-    from prometheus_client import REGISTRY, CollectorRegistry, Counter, Gauge
+    from prometheus_client import REGISTRY, CollectorRegistry, Counter, Gauge, Histogram
 except ImportError:  # pragma: no cover - optional dependency
 
     class _CounterStub:
@@ -36,11 +36,23 @@ except ImportError:  # pragma: no cover - optional dependency
         def set(value: float) -> None:
             return None
 
+    class _HistogramStub:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def labels(self, **kwargs):
+            return self
+
+        @staticmethod
+        def observe(amount: float) -> None:
+            return None
+
     class _CollectorRegistryStub:
         pass
 
     Counter = _CounterStub  # type: ignore[misc,assignment]
     Gauge = _GaugeStub  # type: ignore[misc,assignment]
+    Histogram = _HistogramStub  # type: ignore[misc,assignment]
     CollectorRegistry = _CollectorRegistryStub  # type: ignore[misc,assignment]
     REGISTRY = None  # type: ignore[assignment]
 
@@ -67,6 +79,22 @@ def _safe_gauge(name: str, documentation: str, labelnames: list[str]) -> Gauge:
         if isinstance(existing, Gauge):
             return existing
         return Gauge(name, documentation, labelnames, registry=CollectorRegistry())
+
+
+def _safe_histogram(name: str, documentation: str, labelnames: list[str], buckets: tuple[float, ...] = ()) -> Histogram:
+    """Register a Histogram while tolerating duplicate registrations in test processes."""
+
+    registry = REGISTRY
+    kwargs: dict[str, object] = {"registry": registry}
+    if buckets:
+        kwargs["buckets"] = buckets
+    try:
+        return Histogram(name, documentation, labelnames, **kwargs)  # type: ignore[arg-type]
+    except ValueError:
+        existing = getattr(registry, "_names_to_collectors", {}).get(name) if registry else None
+        if isinstance(existing, Histogram):
+            return existing
+        return Histogram(name, documentation, labelnames, **{**kwargs, "registry": CollectorRegistry()})  # type: ignore[arg-type]
 
 
 RETENTION_METRIC = _safe_counter(
@@ -156,6 +184,19 @@ LEASE_SKIP_COUNTER = _safe_counter(
     "worker_polymarket_lease_skipped_total",
     "Polymarket ingest skips due to lease already held",
     ["outcome"],
+)
+
+SYNC_CYCLE_DURATION = _safe_histogram(
+    "worker_sync_cycle_duration_seconds",
+    "Duration of a complete Polymarket sync cycle",
+    ["outcome"],
+    buckets=(0.5, 1, 2, 5, 10, 30, 60, 120, 300),
+)
+
+MARKET_UPSERT_COUNTER = _safe_counter(
+    "worker_market_upserts_total",
+    "Market persistence operations by type",
+    ["operation"],
 )
 
 

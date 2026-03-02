@@ -1,0 +1,696 @@
+{
+  "uid": "rm-risk-hedging",
+  "title": "Risk & Hedging",
+  "description": "Hedger exposure, risk breaches, settlement, and streamer connectivity",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "graphTooltip": 1,
+  "fiscalYearStartMonth": 0,
+  "liveNow": false,
+  "refresh": "30s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": ["5s", "10s", "30s", "1m", "5m"],
+    "time_options": ["5m", "15m", "1h", "6h", "12h", "24h", "2d", "7d"]
+  },
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Exposure & Coverage",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 },
+      "id": 1,
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Market Net Exposure (USD)",
+      "gridPos": { "x": 0, "y": 1, "w": 12, "h": 8 },
+      "id": 2,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "hedger_market_net_exposure_usd",
+          "legendFormat": "{{market_id}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "axisLabel": "USD"
+          },
+          "color": { "mode": "palette-classic" },
+          "unit": "currencyUSD",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "min", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Coverage Ratio",
+      "gridPos": { "x": 12, "y": 1, "w": 12, "h": 8 },
+      "id": 3,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "hedger_coverage_ratio",
+          "legendFormat": "{{market_id}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "axisLabel": "ratio"
+          },
+          "color": { "mode": "palette-classic" },
+          "unit": "percentunit",
+          "min": 0,
+          "max": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "green", "value": 0.9 }
+            ]
+          },
+          "custom.thresholdsStyle": { "mode": "line" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "min"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Balances & Risk",
+      "gridPos": { "x": 0, "y": 9, "w": 24, "h": 1 },
+      "id": 4,
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Float Balance (ZEN)",
+      "gridPos": { "x": 0, "y": 10, "w": 6, "h": 6 },
+      "id": 5,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "hedger_float_balance_zen",
+          "legendFormat": "Float ZEN",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 4,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "green", "value": 10 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "horizontal",
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Hot Wallet USDC",
+      "gridPos": { "x": 6, "y": 10, "w": 6, "h": 6 },
+      "id": 6,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "hedger_hot_wallet_usdc_balance",
+          "legendFormat": "USDC",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 100 },
+              { "color": "green", "value": 1000 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "horizontal",
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "type": "table",
+      "title": "Risk Breaches",
+      "gridPos": { "x": 12, "y": 10, "w": 12, "h": 6 },
+      "id": 7,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "increase(hedger_risk_breaches_total[1h])",
+          "legendFormat": "{{code}} ({{severity}})",
+          "refId": "A",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "displayMode": "color-background-solid"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Time" },
+            "properties": [{ "id": "custom.hidden", "value": true }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "__name__" },
+            "properties": [{ "id": "custom.hidden", "value": true }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "job" },
+            "properties": [{ "id": "custom.hidden", "value": true }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "instance" },
+            "properties": [{ "id": "custom.hidden", "value": true }]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "footer": { "show": false },
+        "frameIndex": 0
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true, "__name__": true, "job": true, "instance": true },
+            "renameByName": { "code": "Code", "severity": "Severity", "Value": "Count (1h)" }
+          }
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Settlement & Prover Latency",
+      "gridPos": { "x": 0, "y": 16, "w": 24, "h": 1 },
+      "id": 8,
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Event Listener Lag",
+      "gridPos": { "x": 0, "y": 17, "w": 8, "h": 7 },
+      "id": 9,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "hedger_event_listener_lag_seconds",
+          "legendFormat": "Listener Lag",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "axisLabel": "seconds"
+          },
+          "color": { "fixedColor": "orange", "mode": "fixed" },
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red", "value": 30 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["mean", "max"] },
+        "tooltip": { "mode": "single", "sort": "none" }
+      }
+    },
+    {
+      "type": "heatmap",
+      "title": "Settlement Latency",
+      "gridPos": { "x": 8, "y": 17, "w": 8, "h": 7 },
+      "id": 10,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "sum(increase(hedger_settlement_latency_seconds_bucket[5m])) by (le)",
+          "legendFormat": "{{le}}",
+          "refId": "A",
+          "format": "heatmap"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "calculate": false,
+        "yAxis": {
+          "unit": "s",
+          "axisLabel": "Latency"
+        },
+        "rowsFrame": {
+          "layout": "le"
+        },
+        "color": {
+          "mode": "scheme",
+          "scheme": "Spectral",
+          "steps": 64,
+          "reverse": true,
+          "fill": "dark-orange"
+        },
+        "cellGap": 1,
+        "filterValues": { "le": 1e-9 },
+        "tooltip": { "show": true, "yHistogram": true },
+        "legend": { "show": true }
+      }
+    },
+    {
+      "type": "heatmap",
+      "title": "Prover Roundtrip",
+      "gridPos": { "x": 16, "y": 17, "w": 8, "h": 7 },
+      "id": 11,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "sum(increase(hedger_prover_roundtrip_seconds_bucket[5m])) by (le)",
+          "legendFormat": "{{le}}",
+          "refId": "A",
+          "format": "heatmap"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "calculate": false,
+        "yAxis": {
+          "unit": "s",
+          "axisLabel": "Latency"
+        },
+        "rowsFrame": {
+          "layout": "le"
+        },
+        "color": {
+          "mode": "scheme",
+          "scheme": "Spectral",
+          "steps": 64,
+          "reverse": true,
+          "fill": "dark-orange"
+        },
+        "cellGap": 1,
+        "filterValues": { "le": 1e-9 },
+        "tooltip": { "show": true, "yHistogram": true },
+        "legend": { "show": true }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Hedge Execution & Decisions",
+      "gridPos": { "x": 0, "y": 24, "w": 24, "h": 1 },
+      "id": 12,
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Hedge Execution Outcomes",
+      "gridPos": { "x": 0, "y": 25, "w": 12, "h": 7 },
+      "id": 13,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "rate(hedger_hedge_executions_total[5m])",
+          "legendFormat": "{{action}} / {{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 80,
+            "showPoints": "never",
+            "stacking": { "mode": "normal" },
+            "axisLabel": "executions/s"
+          },
+          "color": { "mode": "palette-classic" },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["sum", "mean"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Hedge Decision Breakdown",
+      "gridPos": { "x": 12, "y": 25, "w": 12, "h": 7 },
+      "id": 14,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "rate(hedger_hedge_decisions_total[5m])",
+          "legendFormat": "{{action}} ({{reason}})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 80,
+            "showPoints": "never",
+            "stacking": { "mode": "normal" },
+            "axisLabel": "decisions/s"
+          },
+          "color": { "mode": "palette-classic" },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["sum", "mean"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Streamer & Connectivity",
+      "gridPos": { "x": 0, "y": 32, "w": 24, "h": 1 },
+      "id": 15,
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "FX Age",
+      "gridPos": { "x": 0, "y": 33, "w": 6, "h": 7 },
+      "id": 16,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "streamer_fx_age_seconds",
+          "legendFormat": "FX Age",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "axisLabel": "seconds"
+          },
+          "color": { "fixedColor": "blue", "mode": "fixed" },
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 10 },
+              { "color": "red", "value": 60 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single", "sort": "none" }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "CLOB WS Connected",
+      "gridPos": { "x": 6, "y": 33, "w": 4, "h": 7 },
+      "id": 17,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "streamer_clob_ws_connected",
+          "legendFormat": "CLOB",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "DISCONNECTED", "color": "red" },
+                "1": { "text": "CONNECTED", "color": "green" }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "RTDS WS Connected",
+      "gridPos": { "x": 10, "y": 33, "w": 4, "h": 7 },
+      "id": 18,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "streamer_rtds_ws_connected",
+          "legendFormat": "RTDS",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "DISCONNECTED", "color": "red" },
+                "1": { "text": "CONNECTED", "color": "green" }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Stale Markets",
+      "gridPos": { "x": 14, "y": 33, "w": 4, "h": 7 },
+      "id": 19,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "streamer_stale_markets_total",
+          "legendFormat": "Stale",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Stream Delivery Rate",
+      "gridPos": { "x": 18, "y": 33, "w": 6, "h": 7 },
+      "id": 20,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "sum(rate(streamer_stream_deliveries_total[5m])) by (transport)",
+          "legendFormat": "{{transport}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(streamer_stream_dropped_total[5m])) by (reason)",
+          "legendFormat": "dropped ({{reason}})",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "axisLabel": "events/s"
+          },
+          "color": { "mode": "palette-classic" },
+          "unit": "ops"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byRegexp", "options": "dropped.*" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }]
+          }
+        ]
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["mean"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    }
+  ]
+}

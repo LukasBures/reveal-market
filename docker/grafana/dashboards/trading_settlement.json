@@ -1,0 +1,635 @@
+{
+  "uid": "rm-trading-settlement",
+  "title": "Trading & Settlement",
+  "description": "Relayer transaction pipeline, prover performance, and on-chain settlement metrics",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "graphTooltip": 1,
+  "fiscalYearStartMonth": 0,
+  "liveNow": false,
+  "refresh": "30s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": ["5s", "10s", "30s", "1m", "5m"],
+    "time_options": ["5m", "15m", "1h", "6h", "12h", "24h", "2d", "7d"]
+  },
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Relayer Latency & TX Outcomes",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 },
+      "id": 1,
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Relayer Request Latency (p95)",
+      "gridPos": { "x": 0, "y": 1, "w": 8, "h": 8 },
+      "id": 2,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(relayer_request_latency_seconds_bucket[5m])) by (endpoint, le))",
+          "legendFormat": "p95 {{endpoint}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "axisLabel": "seconds"
+          },
+          "color": { "mode": "palette-classic" },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["mean", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "TX Latency by Action",
+      "gridPos": { "x": 8, "y": 1, "w": 8, "h": 8 },
+      "id": 3,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(relayer_tx_latency_seconds_bucket[5m])) by (action, le))",
+          "legendFormat": "p50 {{action}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(relayer_tx_latency_seconds_bucket[5m])) by (action, le))",
+          "legendFormat": "p95 {{action}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "axisLabel": "seconds"
+          },
+          "color": { "mode": "palette-classic" },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["mean", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "TX Outcomes (stacked)",
+      "gridPos": { "x": 16, "y": 1, "w": 8, "h": 8 },
+      "id": 4,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "rate(relayer_tx_outcomes_total[5m])",
+          "legendFormat": "{{action}} / {{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 80,
+            "showPoints": "never",
+            "stacking": { "mode": "normal" },
+            "axisLabel": "tx/s"
+          },
+          "color": { "mode": "palette-classic" },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["sum"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "type": "row",
+      "title": "RPC & Chain Health",
+      "gridPos": { "x": 0, "y": 9, "w": 24, "h": 1 },
+      "id": 5,
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "RPC Errors",
+      "gridPos": { "x": 0, "y": 10, "w": 6, "h": 7 },
+      "id": 6,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "rate(relayer_rpc_errors_total[5m])",
+          "legendFormat": "{{label}} ({{error_type}})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "axisLabel": "errors/s"
+          },
+          "color": { "fixedColor": "red", "mode": "shades" },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Circuit Breaker",
+      "gridPos": { "x": 6, "y": 10, "w": 6, "h": 7 },
+      "id": 7,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "relayer_rpc_circuit_open",
+          "legendFormat": "Circuit",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "CLOSED", "color": "green" },
+                "1": { "text": "OPEN", "color": "red" }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Chain Head Lag",
+      "gridPos": { "x": 12, "y": 10, "w": 6, "h": 7 },
+      "id": 8,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "relayer_chain_head_lag_seconds",
+          "legendFormat": "Head Lag",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "axisLabel": "seconds"
+          },
+          "color": { "fixedColor": "blue", "mode": "fixed" },
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 10 },
+              { "color": "red", "value": 30 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single", "sort": "none" }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Fee Bump Factor",
+      "gridPos": { "x": 18, "y": 10, "w": 6, "h": 7 },
+      "id": 9,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "relayer_fee_bump_factor",
+          "legendFormat": "Bump Factor",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "axisLabel": "factor"
+          },
+          "color": { "fixedColor": "orange", "mode": "fixed" },
+          "unit": "short",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single", "sort": "none" }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Relayer Queue",
+      "gridPos": { "x": 0, "y": 17, "w": 24, "h": 1 },
+      "id": 10,
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Queue Depth",
+      "gridPos": { "x": 0, "y": 18, "w": 8, "h": 7 },
+      "id": 11,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "relayer_queue_depth",
+          "legendFormat": "Queue Depth",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 20,
+            "gradientMode": "scheme",
+            "showPoints": "never",
+            "axisLabel": "items"
+          },
+          "color": { "fixedColor": "blue", "mode": "fixed" },
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 10 },
+              { "color": "red", "value": 50 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single", "sort": "none" }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Deadletter Depth",
+      "gridPos": { "x": 8, "y": 18, "w": 8, "h": 7 },
+      "id": 12,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "relayer_queue_deadletter_depth",
+          "legendFormat": "Deadletter",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(relayer_queue_deadletter_total[5m])",
+          "legendFormat": "DLQ Rate ({{action}})",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "axisLabel": "items"
+          },
+          "color": { "mode": "palette-classic" },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Deadletter" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }]
+          }
+        ]
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Oldest Backlog Age",
+      "gridPos": { "x": 16, "y": 18, "w": 8, "h": 7 },
+      "id": 13,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "relayer_queue_oldest_backlog_age_seconds",
+          "legendFormat": "Oldest Age",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "axisLabel": "seconds"
+          },
+          "color": { "fixedColor": "orange", "mode": "fixed" },
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 60 },
+              { "color": "red", "value": 300 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single", "sort": "none" }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Prover",
+      "gridPos": { "x": 0, "y": 25, "w": 24, "h": 1 },
+      "id": 14,
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Prover Success / Failure Rate",
+      "gridPos": { "x": 0, "y": 26, "w": 8, "h": 7 },
+      "id": 15,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "rate(prover_proofs_success_total[5m])",
+          "legendFormat": "Success/s",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(prover_proofs_failure_total[5m])",
+          "legendFormat": "Failure/s",
+          "refId": "B"
+        },
+        {
+          "expr": "rate(prover_proof_cache_hits_total[5m])",
+          "legendFormat": "Cache Hits/s",
+          "refId": "C"
+        },
+        {
+          "expr": "prover:success_rate:15m",
+          "legendFormat": "Success Rate (15m)",
+          "refId": "D"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "axisLabel": "proofs/s"
+          },
+          "color": { "mode": "palette-classic" },
+          "unit": "ops"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Success/s" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Failure/s" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Cache Hits/s" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }]
+          }
+        ]
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["mean", "sum"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "type": "heatmap",
+      "title": "Prover Latency Heatmap",
+      "gridPos": { "x": 8, "y": 26, "w": 8, "h": 7 },
+      "id": 16,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "sum(increase(prover_request_latency_seconds_bucket[5m])) by (le)",
+          "legendFormat": "{{le}}",
+          "refId": "A",
+          "format": "heatmap"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "calculate": false,
+        "yAxis": {
+          "unit": "s",
+          "axisLabel": "Latency"
+        },
+        "rowsFrame": {
+          "layout": "le"
+        },
+        "color": {
+          "mode": "scheme",
+          "scheme": "Spectral",
+          "steps": 64,
+          "reverse": true,
+          "fill": "dark-orange"
+        },
+        "cellGap": 1,
+        "filterValues": { "le": 1e-9 },
+        "tooltip": { "show": true, "yHistogram": true },
+        "legend": { "show": true }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Active Proofs",
+      "gridPos": { "x": 16, "y": 26, "w": 4, "h": 7 },
+      "id": 17,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "prover_active_proofs",
+          "legendFormat": "Active",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 3 },
+              { "color": "red", "value": 5 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Artifacts Status",
+      "gridPos": { "x": 20, "y": 26, "w": 4, "h": 7 },
+      "id": 18,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "prover_artifacts_ok",
+          "legendFormat": "Artifacts",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "MISSING", "color": "red" },
+                "1": { "text": "OK", "color": "green" }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      }
+    }
+  ]
+}

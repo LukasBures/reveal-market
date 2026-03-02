@@ -15,6 +15,11 @@
   respond @internal 404
 }
 
+(block_metrics) {
+  @metrics path /metrics
+  respond @metrics 404
+}
+
 (header_common) {
   header {
     Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
@@ -164,6 +169,7 @@ stream.revealmarket.xyz {
   import health_common
   import header_common
   import block_internal
+  import block_metrics
   import cache_no_store
   import access_log_json
   import proxy_streamer
@@ -176,6 +182,7 @@ api.revealmarket.xyz {
   import health_common
   import header_common
   import block_internal
+  import block_metrics
   import cache_no_store
   import access_log_json
   import proxy_api

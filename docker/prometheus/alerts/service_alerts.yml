@@ -1,0 +1,84 @@
+groups:
+  - name: service_availability
+    interval: 15s
+    rules:
+      - alert: ServiceDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: "{{ $labels.job }} has been unreachable for more than 2 minutes."
+
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum by (job) (rate(api_request_latency_seconds_count{status_code=~"5.."}[5m]))
+            /
+            sum by (job) (rate(api_request_latency_seconds_count[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High 5xx error rate on {{ $labels.job }}"
+          description: "More than 5% of requests are returning 5xx for 5 minutes. Current: {{ $value | humanizePercentage }}."
+
+      - alert: HighLatencyP95
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le, job) (rate(api_request_latency_seconds_bucket[5m]))
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High p95 latency on {{ $labels.job }}"
+          description: "95th percentile latency exceeds 2 seconds. Current: {{ $value | humanizeDuration }}."
+
+      - alert: CacheHitRateLow
+        expr: |
+          (
+            sum(rate(api_cache_requests_total{outcome="hit"}[10m]))
+            /
+            sum(rate(api_cache_requests_total[10m]))
+          ) < 0.8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API cache hit rate below 80%"
+          description: "Cache hit rate has been {{ $value | humanizePercentage }} for 10 minutes."
+
+  - name: worker_health
+    interval: 15s
+    rules:
+      - alert: WorkerSyncStale
+        expr: |
+          changes(worker_sync_cycle_duration_seconds_count{job="worker"}[10m]) == 0
+          or absent(worker_sync_cycle_duration_seconds_count{job="worker"})
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Worker sync appears stalled"
+          description: "No sync cycle completed in the last 10 minutes."
+
+      - alert: ProofQueueDepthCritical
+        expr: sum(worker_proof_queue_depth) > 100
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Proof queue depth is critically high"
+          description: "{{ $value }} pending proof jobs for more than 5 minutes."
+
+      - alert: SettlementQueueBacklog
+        expr: sum(worker_settlement_queue_depth) > 50
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Settlement queue has a significant backlog"
+          description: "{{ $value }} pending settlement jobs for more than 10 minutes."

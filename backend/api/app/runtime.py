@@ -14,7 +14,7 @@ from threading import Event
 import httpx
 from prometheus_fastapi_instrumentator import Instrumentator
 from redis.asyncio import Redis
-from shared.db_metrics import attach_db_metrics
+from shared.db_metrics import attach_db_metrics, attach_pool_metrics
 from shared.env_presets import get_preset, resolve_mode
 from shared.indexers import AsyncGoldskyClient
 
@@ -76,3 +76,4 @@ load_shed_state = LoadSheddingState()
 
 def configure_db_metrics(engine) -> None:
     attach_db_metrics(engine)
+    attach_pool_metrics(engine)

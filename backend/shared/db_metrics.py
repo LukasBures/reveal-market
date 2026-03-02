@@ -117,3 +117,35 @@ def _after_cursor_execute(_conn, _cursor, statement, _parameters, _context, _exe
 def attach_db_metrics(engine: Engine) -> None:
     event.listen(engine, "before_cursor_execute", _before_cursor_execute)
     event.listen(engine, "after_cursor_execute", _after_cursor_execute)
+
+
+# ---------------------------------------------------------------------------
+# Connection pool gauges — scraped by Prometheus on each /metrics request.
+# Uses a callback-style Gauge so values are always fresh without polling.
+# ---------------------------------------------------------------------------
+
+try:
+    from prometheus_client import Gauge as _Gauge
+
+    DB_POOL_SIZE = _Gauge("db_pool_size", "Connection pool configured size")
+    DB_POOL_CHECKED_OUT = _Gauge("db_pool_checked_out", "Connections currently checked out from pool")
+    DB_POOL_OVERFLOW = _Gauge("db_pool_overflow", "Current overflow connections beyond pool_size")
+
+    _pool_engine: Engine | None = None
+
+    def attach_pool_metrics(engine: Engine) -> None:
+        """Bind the pool gauge collector to a specific engine."""
+        global _pool_engine  # noqa: PLW0603
+        _pool_engine = engine
+
+        # Register a before-collect callback so values update on each scrape.
+        DB_POOL_SIZE.set_function(lambda: pool.size() if (pool := getattr(_pool_engine, "pool", None)) else 0)
+        DB_POOL_CHECKED_OUT.set_function(
+            lambda: pool.checkedout() if (pool := getattr(_pool_engine, "pool", None)) else 0
+        )
+        DB_POOL_OVERFLOW.set_function(lambda: pool.overflow() if (pool := getattr(_pool_engine, "pool", None)) else 0)
+
+except Exception:  # pragma: no cover - optional dependency
+
+    def attach_pool_metrics(engine: Engine) -> None:  # type: ignore[misc]
+        pass

@@ -18,6 +18,11 @@ engine = create_async_engine(
     pool_size=settings.database_pool_size,
     max_overflow=settings.database_max_overflow,
     pool_timeout=settings.database_pool_timeout,
+    pool_recycle=1800,
+    connect_args={
+        "prepared_statement_cache_size": 256,
+        "command_timeout": 30,
+    },
 )
 attach_db_metrics(engine.sync_engine)
 SessionLocal = async_sessionmaker(

@@ -37,7 +37,7 @@ from .market_sync import (
     market_record_to_payload,
     snapshot_market_record,
 )
-from .metrics import LEASE_SKIP_COUNTER, POLYMARKET_FETCH_COUNTER
+from .metrics import LEASE_SKIP_COUNTER, MARKET_UPSERT_COUNTER, POLYMARKET_FETCH_COUNTER, SYNC_CYCLE_DURATION
 from .polymarket import MarketPayload, build_filters_from_settings
 from .prime import prime_featured_views, prime_markets_cache
 from .proofs import (
@@ -2170,6 +2170,12 @@ async def record_batch_stats(
 ) -> None:
     """Persist batch-level metrics for observability dashboards."""
 
+    # Emit Prometheus counters for market persistence operations.
+    for op in ("created", "updated", "deleted"):
+        count = sync_stats.get(f"markets_{op}", 0)
+        if isinstance(count, (int, float)) and count > 0:
+            MARKET_UPSERT_COUNTER.labels(operation=op).inc(count)
+
     if redis_client is None:
         return
     payload = {
@@ -2222,8 +2228,30 @@ async def _run_worker_tick(redis_client: Redis | None, context: WorkerContext) -
 
 async def run_worker() -> None:
     """Main polling loop that downloads markets and writes them into the database asynchronously."""
+    # Start a lightweight Prometheus metrics HTTP server on port 9100.
+    # Runs in a background thread; does not interfere with the asyncio event loop.
     try:
-        redis_client = Redis.from_url(runtime.settings.redis_url, decode_responses=True)
+        from prometheus_client import start_http_server
+
+        start_http_server(9100, addr="0.0.0.0")  # noqa: S104 - bind all interfaces for Docker
+        log_event(
+            logger, logging.INFO, event="worker.metrics.started", message="Prometheus metrics server started on :9100"
+        )
+    except Exception as exc:  # pragma: no cover - optional
+        log_event(
+            logger, logging.WARNING, event="worker.metrics.failed", message=f"Failed to start metrics server: {exc}"
+        )
+
+    try:
+        redis_client = Redis.from_url(
+            runtime.settings.redis_url,
+            decode_responses=True,
+            max_connections=20,
+            socket_timeout=5.0,
+            socket_connect_timeout=3.0,
+            retry_on_timeout=True,
+            health_check_interval=30,
+        )
     except Exception as exc:  # pragma: no cover - defensive
         log_event(
             logger,
@@ -2263,8 +2291,10 @@ async def run_worker() -> None:
             loop_start = time.monotonic()
             try:
                 await _run_worker_tick(redis_client, worker_context)
+                SYNC_CYCLE_DURATION.labels(outcome="success").observe(time.monotonic() - loop_start)
                 sleep_for = _calculate_sleep(loop_start)
             except Exception as exc:  # pragma: no cover - defensive
+                SYNC_CYCLE_DURATION.labels(outcome="error").observe(time.monotonic() - loop_start)
                 log_event(
                     logger,
                     logging.ERROR,

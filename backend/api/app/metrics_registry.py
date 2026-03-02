@@ -1,4 +1,9 @@
-from prometheus_client import Counter, Histogram
+from prometheus_client import Counter, Gauge, Histogram
+
+ACTIVE_REQUESTS = Gauge(
+    "api_active_requests",
+    "Number of in-flight HTTP requests currently being processed",
+)
 
 REQUEST_LATENCY = Histogram(
     "api_request_latency_seconds",

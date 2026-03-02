@@ -21,7 +21,14 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.logging_config import setup_logging
 from app.metrics import classify_latency_bucket
-from app.metrics_registry import CACHE_REQUESTS, DB_QUERY_COUNT, DB_QUERY_MAX_MS, DB_QUERY_TIME_MS, REQUEST_LATENCY
+from app.metrics_registry import (
+    ACTIVE_REQUESTS,
+    CACHE_REQUESTS,
+    DB_QUERY_COUNT,
+    DB_QUERY_MAX_MS,
+    DB_QUERY_TIME_MS,
+    REQUEST_LATENCY,
+)
 from app.rate_limit import RateLimiter, RateLimitMiddleware
 from app.runtime import (
     instrumentator,
@@ -226,6 +233,7 @@ def attach_request_context(app: FastAPI) -> None:
         request_id = request.headers.get("x-request-id") or request.headers.get("traceparent") or str(uuid.uuid4())
         token = set_request_id(request_id)
         start_time = time.perf_counter()
+        ACTIVE_REQUESTS.inc()
         reset_db_metrics()
         request.state.cache_context = {
             "cache_hit": None,
@@ -251,6 +259,7 @@ def attach_request_context(app: FastAPI) -> None:
                     db_failures=load_shed_state.db_failures,
                     cache_failures=load_shed_state.cache_failures,
                 )
+                ACTIVE_REQUESTS.dec()
                 reset_request_id(token)
                 response = JSONResponse(
                     {"detail": "service_unavailable"},
@@ -270,6 +279,7 @@ def attach_request_context(app: FastAPI) -> None:
         try:
             response = await call_next(request)
         except HTTPException as exc:
+            ACTIVE_REQUESTS.dec()
             duration_ms = (time.perf_counter() - start_time) * 1000
             cache_meta = extract_cache_metadata(request)
             metric_path = _metric_path(request)
@@ -308,6 +318,7 @@ def attach_request_context(app: FastAPI) -> None:
             reset_request_id(token)
             raise
         except Exception:
+            ACTIVE_REQUESTS.dec()
             duration_ms = (time.perf_counter() - start_time) * 1000
             cache_meta = extract_cache_metadata(request)
             metric_path = _metric_path(request)
@@ -345,6 +356,7 @@ def attach_request_context(app: FastAPI) -> None:
             )
             reset_request_id(token)
             raise
+        ACTIVE_REQUESTS.dec()
         cache_meta = extract_cache_metadata(request)
         db_metrics = snapshot_db_metrics()
         if (

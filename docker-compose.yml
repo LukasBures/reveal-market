@@ -23,9 +23,9 @@ services:
       # ~25% of container memory (4G)
       - "-c"
       - "shared_buffers=1GB"
-      # Per-sort / per-hash; keep conservative to avoid OOM
+      # Per-sort / per-hash; 32MB gives room for complex sorts within 4GB container
       - "-c"
-      - "work_mem=16MB"
+      - "work_mem=32MB"
       # Used for vacuum, index builds, retention cleanup
       - "-c"
       - "maintenance_work_mem=512MB"
@@ -41,7 +41,7 @@ services:
       - "-c"
       - "wal_compression=on"
       - "-c"
-      - "wal_buffers=64MB"
+      - "wal_buffers=32MB"
       # ---- Parallelism / CPU ----
       # Match Docker CPU limits
       - "-c"
@@ -57,7 +57,13 @@ services:
       - "-c"
       - "random_page_cost=1.1"
       - "-c"
-      - "effective_cache_size=1.5GB"
+      - "effective_cache_size=3GB"
+      # Disable JIT for OLTP workloads (saves 5-20ms per query).
+      - "-c"
+      - "jit=off"
+      # Alpine doesn't support huge pages; avoid startup warning.
+      - "-c"
+      - "huge_pages=off"
       # ---- Autovacuum (important for retention deletes) ----
       - "-c"
       - "autovacuum_max_workers=3"
@@ -67,6 +73,11 @@ services:
       - "autovacuum_vacuum_scale_factor=0.05"
       - "-c"
       - "autovacuum_analyze_scale_factor=0.02"
+      # ---- Extensions ----
+      - "-c"
+      - "shared_preload_libraries=pg_stat_statements"
+      - "-c"
+      - "pg_stat_statements.track=all"
       # ---- Safety / Observability ----
       - "-c"
       - "log_min_duration_statement=3s"
@@ -74,6 +85,13 @@ services:
       - "log_checkpoints=on"
       - "-c"
       - "log_autovacuum_min_duration=1s"
+      # ---- Safety ----
+      # Kill runaway queries after 60s.
+      - "-c"
+      - "statement_timeout=60s"
+      # Kill idle-in-transaction sessions after 120s.
+      - "-c"
+      - "idle_in_transaction_session_timeout=120s"
     environment:
       POSTGRES_USER: market_admin
       POSTGRES_PASSWORD: <REDACTED>
@@ -83,6 +101,7 @@ services:
       TZ: UTC
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init-extensions.sql:/docker-entrypoint-initdb.d/01-extensions.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U market_admin -d reveal_market"]
       interval: 10s
@@ -216,6 +235,10 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    labels:
+      - "prometheus.scrape=true"
+      - "prometheus.port=9100"
+      - "prometheus.path=/metrics"
     healthcheck:
       test: ["CMD", "python", "-m", "app.healthcheck"]
       interval: 20s
@@ -279,6 +302,10 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    labels:
+      - "prometheus.scrape=true"
+      - "prometheus.port=8090"
+      - "prometheus.path=/metrics"
     healthcheck:
       # Keep liveness checks lightweight; deep DB checks are exposed via /healthz/deep.
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8090/healthz >/dev/null || exit 1"]
@@ -318,6 +345,10 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    labels:
+      - "prometheus.scrape=true"
+      - "prometheus.port=8088"
+      - "prometheus.path=/metrics"
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${RELAYER_PORT:-8088}/healthz || exit 1"]
       interval: 15s
@@ -402,6 +433,10 @@ services:
       RM_PROVER_SHARED_SECRET: ${RM_PROVER_SHARED_SECRET}
       PROVER_BACKEND: ${PROVER_BACKEND}
       PYTHONUNBUFFERED: 1
+    labels:
+      - "prometheus.scrape=true"
+      - "prometheus.port=8085"
+      - "prometheus.path=/metrics"
     deploy:
       replicas: 1
       resources:
@@ -448,6 +483,10 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    labels:
+      - "prometheus.scrape=true"
+      - "prometheus.port=8100"
+      - "prometheus.path=/metrics"
     healthcheck:
       test: ["CMD", "python", "-m", "app.healthcheck"]
       interval: 20s
@@ -464,7 +503,154 @@ services:
           cpus: "0.25"
           memory: 256M
 
+  # ---- Monitoring ----
+
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    container_name: reveal-market-prometheus
+    restart: unless-stopped
+    user: "65534:65534"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--storage.tsdb.retention.size=2GB"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+      - "--web.enable-lifecycle"
+      - "--web.enable-admin-api"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docker/prometheus/alerts:/etc/prometheus/alerts:ro
+      - ./docker/prometheus/recording_rules:/etc/prometheus/recording_rules:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      api:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9090/-/healthy || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+
+  grafana:
+    image: grafana/grafana:11.5.2
+    container_name: reveal-market-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: ${GRAFANA_ANONYMOUS_ENABLED:-true}
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/platform_overview.json
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3001}
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.1"
+          memory: 128M
+
+  postgres-exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.16.0
+    container_name: reveal-market-postgres-exporter
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: "postgresql://market_admin:<REDACTED>@postgres:5432/reveal_market?sslmode=disable"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9187/metrics | head -1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+        reservations:
+          cpus: "0.05"
+          memory: 32M
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.67.0
+    container_name: reveal-market-redis-exporter
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: "redis://redis:6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    depends_on:
+      redis:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9121/metrics | head -1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+        reservations:
+          cpus: "0.05"
+          memory: 32M
+
 volumes:
   # Named volumes keep state between docker compose up/down cycles.
   postgres_data:
   redis_data:
+  prometheus_data:
+  grafana_data:

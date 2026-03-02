@@ -562,6 +562,11 @@ HEDGER_API_PORT="${HEDGER_API_PORT:-8090}"
 POSTGRES_URI="${POSTGRES_URI:-postgres://market_admin:<REDACTED>@localhost:5432/reveal_market}"
 REDIS_CMD="${REDIS_CMD:-redis-cli -h localhost -p 6379}"
 
+PROMETHEUS_PORT="${PROMETHEUS_PORT:-9090}"
+GRAFANA_PORT="${GRAFANA_PORT:-3001}"
+PROVER_PORT="${PROVER_PORT:-8085}"
+WORKER_METRICS_PORT="${WORKER_METRICS_PORT:-9100}"
+
 cat <<EOF
 ------------------------------------------------------------
 Stack ready. Useful URLs:
@@ -572,27 +577,31 @@ Stack ready. Useful URLs:
     • API health:           http://localhost:${API_PORT}/healthz
     • API heartbeats:       http://localhost:${API_PORT}/healthz/heartbeats
     • Streamer health:      http://localhost:${STREAMER_PORT}/healthz
+    • Streamer FX feed:     http://localhost:${STREAMER_PORT}/fx/zen-usd
     • Streamer history:     http://localhost:${STREAMER_PORT}/history?market_id=...&outcome=0
-  Infra:
+
+  Services:
     • Relayer health:       http://localhost:${RELAYER_PORT}/healthz
     • Hedger health:        http://localhost:${HEDGER_API_PORT}/healthz
-    • Prover health:        http://localhost:8085/healthz
+    • Prover health:        http://localhost:${PROVER_PORT}/healthz
 
-Internal service ports (for debugging):
+  Monitoring:
+    • Grafana dashboards:   http://localhost:${GRAFANA_PORT}
+    • Prometheus UI:        http://localhost:${PROMETHEUS_PORT}
+    • Prometheus targets:   http://localhost:${PROMETHEUS_PORT}/targets
+    • Prometheus alerts:    http://localhost:${PROMETHEUS_PORT}/alerts
 
-  Apps:
-    • API direct:           http://localhost:${API_PORT}
-    • Streamer direct:      http://localhost:${STREAMER_PORT}
-    • Frontend direct:      http://localhost:${FRONTEND_PORT}
-  Infra:
-    • Relayer (internal):   http://relayer:${RELAYER_PORT}/healthz
-    • Hedger (internal):    http://hedger:${HEDGER_API_PORT}/healthz
-    • Prover (internal):    http://prover:8085/healthz
+  Metrics endpoints:
+    • API metrics:          http://localhost:${API_PORT}/metrics
+    • Worker metrics:       http://localhost:${WORKER_METRICS_PORT}/metrics
+    • Streamer metrics:     http://localhost:${STREAMER_PORT}/metrics
+    • Hedger metrics:       http://localhost:${HEDGER_API_PORT}/metrics
+    • Relayer metrics:      http://localhost:${RELAYER_PORT}/metrics
+    • Prover metrics:       http://localhost:${PROVER_PORT}/metrics
 
-Datastores:
-
-  • Postgres (psql):        postgres://market_admin:<REDACTED>@localhost:5432/reveal_market
-  • Redis (CLI):            redis-cli -h localhost -p 6379
+  Datastores:
+    • Postgres (psql):      postgres://market_admin:<REDACTED>@localhost:5432/reveal_market
+    • Redis (CLI):          redis-cli -h localhost -p 6379
 ------------------------------------------------------------
 EOF
 

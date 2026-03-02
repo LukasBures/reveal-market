@@ -1,0 +1,112 @@
+groups:
+  - name: trading_and_settlement
+    interval: 15s
+    rules:
+      - alert: ProverFailures
+        expr: increase(prover_proofs_failure_total[15m]) >= 3
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Multiple prover failures detected"
+          description: "{{ $value }} proof generation failures in the last 15 minutes."
+
+      - alert: ProverDown
+        expr: prover_up == 0 or absent(prover_up)
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prover service is not responding"
+          description: "The prover health indicator has been 0 for more than 2 minutes."
+
+      - alert: ProverArtifactsMissing
+        expr: prover_artifacts_ok == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prover circuit artifacts are missing"
+          description: "Prover cannot generate proofs without circuit artifacts."
+
+      - alert: RiskBreachCritical
+        expr: increase(hedger_risk_breaches_total{severity="critical"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical risk breach detected"
+          description: "Risk breach code={{ $labels.code }} severity={{ $labels.severity }}."
+
+      - alert: FXStaleness
+        expr: streamer_fx_age_seconds > 60
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "FX price data is stale"
+          description: "Last FX update was {{ $value }}s ago."
+
+      - alert: FXStalenessCritical
+        expr: streamer_fx_age_seconds > 300
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "FX price data is critically stale"
+          description: "Last FX update was {{ $value }}s ago. Pricing quotes may be invalid."
+
+      - alert: RelayerCircuitBreakerOpen
+        expr: relayer_rpc_circuit_open == 1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Relayer RPC circuit breaker is open"
+          description: "The relayer cannot communicate with the blockchain RPC."
+
+      - alert: RelayerQueueBacklog
+        expr: relayer_queue_depth > 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Relayer transaction queue backlog"
+          description: "{{ $value }} pending transactions in the relayer queue."
+
+      - alert: RelayerDeadLetterGrowth
+        expr: increase(relayer_queue_deadletter_total[30m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Relayer dead-letter queue is growing"
+          description: "{{ $value }} jobs moved to dead-letter in the last 30 minutes."
+
+      - alert: ChainHeadLag
+        expr: relayer_chain_head_lag_seconds > 120
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Chain head is lagging"
+          description: "Block timestamp is {{ $value }}s behind current time."
+
+      - alert: HedgerExposureHigh
+        expr: |
+          abs(hedger_market_net_exposure_usd) > 10000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High net exposure on market {{ $labels.market_id }}"
+          description: "Net exposure: ${{ $value }}."
+
+      - alert: HedgerFloatLow
+        expr: hedger_float_balance_zen < 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Hedger ZEN float balance is low"
+          description: "Float balance: {{ $value }} ZEN."
