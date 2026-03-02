@@ -103,20 +103,26 @@ contract Verifier is IVerifier, Ownable2Step {
         _validateG1Point(proof.C);
 
         Pairing.G1Point memory vkx = _ic[0];
-        for (uint256 i = 0; i < EXPECTED_INPUTS; ++i) {
+        for (uint256 i = 0; i < EXPECTED_INPUTS;) {
             uint256 signal = pubSignals[i];
             if (signal >= SNARK_SCALAR_FIELD) {
                 return false;
             }
-            Pairing.G1Point memory icPoint = _ic[i + 1];
-            if (icPoint.X == 0 && icPoint.Y == 0) {
-                if (signal != 0) {
-                    return false;
+            if (signal == 0) {
+                unchecked {
+                    ++i;
                 }
                 continue;
             }
+            Pairing.G1Point memory icPoint = _ic[i + 1];
+            if (icPoint.X == 0 && icPoint.Y == 0) {
+                return false;
+            }
             Pairing.G1Point memory term = Pairing.scalarMul(icPoint, signal);
             vkx = Pairing.add(vkx, term);
+            unchecked {
+                ++i;
+            }
         }
 
         try this._pairingCheck(proof, vkx) returns (bool ok) {
@@ -173,11 +179,14 @@ contract Verifier is IVerifier, Ownable2Step {
 
         delete _ic;
         _ic = new Pairing.G1Point[](icPoints.length);
-        for (uint256 i = 0; i < icPoints.length; ++i) {
+        for (uint256 i = 0; i < icPoints.length;) {
             Pairing.G1Point memory point = _buildG1(icPoints[i]);
             if (_isInfinityG1(point)) revert InvalidCurvePoint();
             if (!Pairing.isValidG1Point(point)) revert InvalidCurvePoint();
             _ic[i] = point;
+            unchecked {
+                ++i;
+            }
         }
         circuitHash = circuitHash_;
         verifyingKeyHash = keccak256(abi.encode(alpha1, beta2, gamma2, delta2, icPoints, circuitHash_, EXPECTED_INPUTS));

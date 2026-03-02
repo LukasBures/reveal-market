@@ -281,9 +281,10 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
         vm.prank(oracle);
         market.verifyAndSettle("", signals);
 
+        bytes32[] memory proof = _buildMerkleProof(leaves, 1, 0);
         vm.expectRevert(RevealMarket.WrongOutcome.selector);
         vm.prank(relayerOwner);
-        market.claim(user, 0, 0, netAmount, payout, _salt("claim-outcome"), _buildMerkleProof(leaves, 1, 0));
+        market.claim(user, 0, 0, netAmount, payout, _salt("claim-outcome"), proof);
     }
 
     function testClaimRevertsWhenPaused() external {
@@ -297,9 +298,10 @@ contract RevealMarketGuardsTest is Test, PoseidonTestUtils {
         vm.prank(address(factory));
         market.setClaimsPaused(true);
 
+        bytes32[] memory proof = _buildMerkleProof(leaves, 1, 0);
         vm.expectRevert(RevealMarket.ClaimsPaused.selector);
         vm.prank(relayerOwner);
-        market.claim(user, 0, 1, netAmount, payout, _salt("claim-pause"), _buildMerkleProof(leaves, 1, 0));
+        market.claim(user, 0, 1, netAmount, payout, _salt("claim-pause"), proof);
     }
 
     function testEnableRefundsRejectsAfterSettlement() external {

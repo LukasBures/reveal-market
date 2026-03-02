@@ -17,9 +17,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="HEDGER_", env_file=".env", extra="ignore")
 
-    environment: str = Field(
-        default_factory=lambda: str(PRESET.get("hedger_environment", "prod"))
-    )
+    environment: str = Field(default_factory=lambda: str(PRESET.get("hedger_environment", "prod")))
     log_level: str = Field(default="INFO")
     api_host: str = Field(default="0.0.0.0")  # noqa: S104 - service must bind for docker/compose
     api_port: int = Field(default=8090)

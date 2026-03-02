@@ -21,16 +21,12 @@ abstract contract PoseidonTestUtils {
         bytes32 salt,
         address user
     ) internal pure returns (bytes32) {
-        uint256 userSalt = PoseidonT3.poseidon([uint256(uint160(user)), uint256(salt)]);
-        uint256 h1 = PoseidonT3.poseidon([ticketId, outcomeId]);
-        uint256 h2 = PoseidonT3.poseidon([amount, payout]);
-        uint256 h3 = PoseidonT3.poseidon([h2, userSalt]);
-        uint256 leaf = PoseidonT3.poseidon([h1, h3]);
+        uint256 leaf = PoseidonT3.computeLeaf(ticketId, outcomeId, amount, payout, uint256(uint160(user)), uint256(salt));
         return bytes32(leaf);
     }
 
     function _poseidonHashPair(bytes32 left, bytes32 right) internal pure returns (bytes32) {
-        return bytes32(PoseidonT3.poseidon([uint256(left), uint256(right)]));
+        return bytes32(PoseidonT3.poseidon(uint256(left), uint256(right)));
     }
 
     function _buildBatchRoot(bytes32[] memory leaves, uint256 count) internal pure returns (bytes32) {

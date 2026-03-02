@@ -189,18 +189,19 @@ contract MarketFactory is Ownable2Step {
             bytes32 codehash = verifier.codehash;
             bytes32 keyHash = IVerifier(verifier).verifyingKeyHash();
             bytes32 pinnedCodehash = pinnedVerifierCodehash[verifier];
+            bytes32 pinnedKeyHash = pinnedVerifierKeyHash[verifier];
             if (pinnedCodehash == bytes32(0)) {
                 pinnedVerifierCodehash[verifier] = codehash;
                 pinnedVerifierKeyHash[verifier] = keyHash;
-            } else if (pinnedCodehash != codehash || pinnedVerifierKeyHash[verifier] != keyHash) {
+                pinnedCodehash = codehash;
+                pinnedKeyHash = keyHash;
+            } else if (pinnedCodehash != codehash || pinnedKeyHash != keyHash) {
                 revert VerifierDrift();
             }
             approvedVerifier[verifier] = true;
-            approvedVerifierCodehash[verifier] = pinnedVerifierCodehash[verifier];
-            approvedVerifierKeyHash[verifier] = pinnedVerifierKeyHash[verifier];
-            emit VerifierApprovalUpdated(
-                verifier, approvedVerifierCodehash[verifier], approvedVerifierKeyHash[verifier], true
-            );
+            approvedVerifierCodehash[verifier] = pinnedCodehash;
+            approvedVerifierKeyHash[verifier] = pinnedKeyHash;
+            emit VerifierApprovalUpdated(verifier, pinnedCodehash, pinnedKeyHash, true);
             return;
         }
 
@@ -313,13 +314,21 @@ contract MarketFactory is Ownable2Step {
         if (address(oldRelayer) == targetRelayerAddress) revert InvalidRelayer();
 
         RelayerEscrow targetRelayer = RelayerEscrow(payable(targetRelayerAddress));
-        for (uint256 i = 0; i < users.length; ++i) {
+        for (uint256 i = 0; i < users.length;) {
             address user = users[i];
             uint256 balance = oldRelayer.balances(user);
-            if (balance == 0) continue;
+            if (balance == 0) {
+                unchecked {
+                    ++i;
+                }
+                continue;
+            }
             oldRelayer.withdrawTo(user, targetRelayerAddress, balance);
             targetRelayer.creditMigrated(user, balance);
             emit EscrowBalanceMigrated(market, user, address(oldRelayer), targetRelayerAddress, balance);
+            unchecked {
+                ++i;
+            }
         }
     }
 
@@ -453,10 +462,12 @@ contract MarketFactory is Ownable2Step {
         if (params.authorizationSigner == address(0)) revert InvalidSigner();
         if (params.fixedTicketSize == 0) revert InvalidTicketSize();
         if (params.commitDeadline <= block.timestamp) revert InvalidDeadlines();
-        if (protocolPool.marketFactory() != address(this)) revert DependencyNotHooked();
-        if (relayerEscrow.marketFactory() != address(this)) revert DependencyNotHooked();
-        if (address(protocolPool.COLLATERAL_TOKEN()) != COLLATERAL_TOKEN) revert InvalidProtocolPool();
-        if (address(relayerEscrow.COLLATERAL_TOKEN()) != COLLATERAL_TOKEN) revert InvalidRelayer();
+        ProtocolPool cachedPool = protocolPool;
+        RelayerEscrow cachedRelayer = relayerEscrow;
+        if (cachedPool.marketFactory() != address(this)) revert DependencyNotHooked();
+        if (cachedRelayer.marketFactory() != address(this)) revert DependencyNotHooked();
+        if (address(cachedPool.COLLATERAL_TOKEN()) != COLLATERAL_TOKEN) revert InvalidProtocolPool();
+        if (address(cachedRelayer.COLLATERAL_TOKEN()) != COLLATERAL_TOKEN) revert InvalidRelayer();
         _validateVerifier(params.verifier, params.circuitHash);
         uint256 appliedRakeBps = globalRakeBps;
 
@@ -467,8 +478,8 @@ contract MarketFactory is Ownable2Step {
             .initialize(
                 RevealMarket.InitParams({
                     factory: address(this),
-                    protocolPool: address(protocolPool),
-                    relayerEscrow: address(relayerEscrow),
+                    protocolPool: address(cachedPool),
+                    relayerEscrow: address(cachedRelayer),
                     oracle: params.oracle,
                     verifier: params.verifier,
                     circuitHash: params.circuitHash,
@@ -485,12 +496,12 @@ contract MarketFactory is Ownable2Step {
 
         isMarket[deployedMarket] = true;
         marketForId[marketId] = deployedMarket;
-        marketRelayer[deployedMarket] = address(relayerEscrow);
+        marketRelayer[deployedMarket] = address(cachedRelayer);
 
-        protocolPool.registerMarket(deployedMarket, params.protocolLiabilityCap);
-        relayerEscrow.registerMarket(deployedMarket);
-        _trackRelayer(address(relayerEscrow));
-        _activateRelayer(address(relayerEscrow));
+        cachedPool.registerMarket(deployedMarket, params.protocolLiabilityCap);
+        cachedRelayer.registerMarket(deployedMarket);
+        _trackRelayer(address(cachedRelayer));
+        _activateRelayer(address(cachedRelayer));
 
         market = deployedMarket;
 
@@ -563,7 +574,7 @@ contract MarketFactory is Ownable2Step {
         if (count > MAX_RELAYER_PAUSE_BATCH) revert PauseBatchTooLarge();
         if (start + count > len) revert InvalidPauseRange();
 
-        for (uint256 i = 0; i < count; ++i) {
+        for (uint256 i = 0; i < count;) {
             address relayer = activeRelayers[start + i];
             if (paused) {
                 // When pausing, revert on any failure — an active relayer must not dodge the pause.
@@ -582,6 +593,9 @@ contract MarketFactory is Ownable2Step {
                 } catch {
                     emit RelayerPausePropagationFailed(relayer);
                 }
+            }
+            unchecked {
+                ++i;
             }
         }
     }

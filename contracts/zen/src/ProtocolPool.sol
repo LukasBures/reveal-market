@@ -356,9 +356,12 @@ contract ProtocolPool is Ownable2Step, ReentrancyGuard {
     function _unlockedSharesOf(address lp) internal view returns (uint256 unlocked) {
         DepositRecord[] storage records = _deposits[lp];
         uint256 len = records.length;
-        for (uint256 i; i < len; ++i) {
+        for (uint256 i; i < len;) {
             if (records[i].unlockTime <= block.timestamp && records[i].shares > 0) {
                 unlocked += records[i].shares;
+            }
+            unchecked {
+                ++i;
             }
         }
     }
@@ -378,15 +381,23 @@ contract ProtocolPool is Ownable2Step, ReentrancyGuard {
         uint256 len = records.length;
         if (len == 0) return;
         uint256 write = 0;
-        for (uint256 read = 0; read < len; ++read) {
+        for (uint256 read = 0; read < len;) {
             if (records[read].shares > 0) {
                 if (write != read) records[write] = records[read];
-                ++write;
+                unchecked {
+                    ++write;
+                }
+            }
+            unchecked {
+                ++read;
             }
         }
         uint256 toRemove = len - write;
-        for (uint256 i = 0; i < toRemove; ++i) {
+        for (uint256 i = 0; i < toRemove;) {
             records.pop();
+            unchecked {
+                ++i;
+            }
         }
     }
 
@@ -395,14 +406,22 @@ contract ProtocolPool is Ownable2Step, ReentrancyGuard {
         DepositRecord[] storage records = _deposits[lp];
         uint256 len = records.length;
         uint256 remaining = sharesToBurn;
-        for (uint256 i; i < len && remaining > 0; ++i) {
-            if (records[i].unlockTime > block.timestamp || records[i].shares == 0) continue;
+        for (uint256 i; i < len && remaining > 0;) {
+            if (records[i].unlockTime > block.timestamp || records[i].shares == 0) {
+                unchecked {
+                    ++i;
+                }
+                continue;
+            }
             if (records[i].shares <= remaining) {
                 remaining -= records[i].shares;
                 records[i].shares = 0;
             } else {
                 records[i].shares -= remaining;
                 remaining = 0;
+            }
+            unchecked {
+                ++i;
             }
         }
         if (remaining > 0) revert InsufficientUnlockedShares();

@@ -195,6 +195,7 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     error VerifierNotApproved();
     error FieldElementOutOfRange();
     error OracleAuthorizationExpired();
+    error NativeTransfersDisabled();
 
     modifier onlyRelayer() {
         _onlyRelayer();
@@ -221,11 +222,12 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     }
 
     function _onlyRelayerOrFactoryOwner() internal view {
+        if (msg.sender == relayerEscrow) return;
         address relayerOwner = RelayerEscrow(payable(relayerEscrow)).owner();
+        if (msg.sender == relayerOwner) return;
         address factoryOwner = IOwnable(factory).owner();
-        if (msg.sender != relayerEscrow && msg.sender != relayerOwner && msg.sender != factoryOwner) {
-            revert NotAuthorized();
-        }
+        if (msg.sender == factoryOwner) return;
+        revert NotAuthorized();
     }
 
     function _onlyOracle() internal view {
@@ -280,11 +282,16 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         if (phase != Phase.Commit) revert InvalidPhase();
         if (block.timestamp >= commitDeadline) revert CommitWindowClosed();
         if (commitsPaused) revert CommitsPaused();
-        if (RelayerEscrow(payable(relayerEscrow)).commitsPaused()) revert CommitsPaused();
+        address cachedRelayerEscrow = relayerEscrow;
+        if (RelayerEscrow(payable(cachedRelayerEscrow)).commitsPaused()) revert CommitsPaused();
         if (msg.value != 0) revert InvalidPayment();
-        if (auth.ticketValue != ticketSize) revert InvalidPayment();
+        uint256 cachedTicketSize = ticketSize;
+        if (auth.ticketValue != cachedTicketSize) revert InvalidPayment();
         if (auth.user == address(0)) revert InvalidAddress();
-        if (IERC20(collateralToken).balanceOf(address(this)) < totalEscrow + ticketSize) revert InvalidPayment();
+        address cachedCollateralToken = collateralToken;
+        if (IERC20(cachedCollateralToken).balanceOf(address(this)) < totalEscrow + cachedTicketSize) {
+            revert InvalidPayment();
+        }
         if (commitments.length >= maxCommitments) revert MaxCommitmentsReached();
         if (uint256(auth.commitment) >= SNARK_SCALAR_FIELD) revert FieldElementOutOfRange();
         uint256 expectedTicketId = commitments.length;
@@ -313,8 +320,9 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         usedCommitNonces[auth.user][auth.nonce] = true;
         commitments.push(auth.commitment);
         commitmentUsers.push(auth.user);
-        uint256 rake = (ticketSize * rakeBps) / 10_000;
-        uint256 net = ticketSize - rake;
+        uint256 cachedRakeBps = rakeBps;
+        uint256 rake = (cachedTicketSize * cachedRakeBps) / 10_000;
+        uint256 net = cachedTicketSize - rake;
         totalEscrow += net;
         rakeCollected += rake;
         emit Committed(expectedTicketId, auth.commitment, totalEscrow);
@@ -349,21 +357,27 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         uint256 expectedBatches = (commitments.length + BATCH_SIZE - 1) / BATCH_SIZE;
         if (roots.length != expectedBatches) revert BatchCountMismatch();
         uint256 total = 0;
-        for (uint256 i = 0; i < counts.length; ++i) {
+        for (uint256 i = 0; i < counts.length;) {
             uint256 count = counts[i];
             if (count > BATCH_SIZE) revert BatchSizeExceeded();
             uint256 remaining = commitments.length - total;
             uint256 expectedCount = remaining > BATCH_SIZE ? BATCH_SIZE : remaining;
             if (count != expectedCount) revert BatchCountMismatch();
             total += count;
+            unchecked {
+                ++i;
+            }
         }
         if (total != commitments.length) revert BatchCountMismatch();
 
         delete batchRoots;
         delete batchCounts;
-        for (uint256 i = 0; i < roots.length; ++i) {
+        for (uint256 i = 0; i < roots.length;) {
             batchRoots.push(roots[i]);
             batchCounts.push(counts[i]);
+            unchecked {
+                ++i;
+            }
         }
 
         lockedVerifierKeyHash = IVerifier(verifier).verifyingKeyHash();
@@ -400,9 +414,10 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         if (batchRoots.length != 1) revert InvalidBatchIndex();
         if (phase != Phase.Locked) revert InvalidPhase();
         if (!resultPosted) revert ResultMissing();
-        if (IVerifier(verifier).circuitHash() != circuitHash) revert CircuitHashMismatch();
+        address cachedVerifier = verifier;
+        if (IVerifier(cachedVerifier).circuitHash() != circuitHash) revert CircuitHashMismatch();
         if (!_isVerifierApprovedForSettlement()) revert VerifierNotApproved();
-        if (IVerifier(verifier).verifyingKeyHash() != lockedVerifierKeyHash) revert VerifierKeyMismatch();
+        if (IVerifier(cachedVerifier).verifyingKeyHash() != lockedVerifierKeyHash) revert VerifierKeyMismatch();
 
         if (
             publicSignals[0] != uint256(batchRoots[0]) || publicSignals[1] != marketId
@@ -412,7 +427,7 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         if (publicSignals[8] != uint256(circuitHash)) revert CircuitHashMismatch();
         if (publicSignals[9] != 0) revert PaddingMismatch();
 
-        bool ok = IVerifier(verifier).verifyProof(proof, publicSignals);
+        bool ok = IVerifier(cachedVerifier).verifyProof(proof, publicSignals);
         if (!ok) revert InvalidProof();
 
         _finalizeSettlement(publicSignals[3], publicSignals[4], publicSignals[6], publicSignals[7]);
@@ -426,22 +441,44 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     ) external onlyOracle nonReentrant {
         if (phase != Phase.Locked) revert InvalidPhase();
         if (!resultPosted) revert ResultMissing();
-        if (IVerifier(verifier).circuitHash() != circuitHash) revert CircuitHashMismatch();
+        address cachedVerifier = verifier;
+        if (IVerifier(cachedVerifier).circuitHash() != circuitHash) revert CircuitHashMismatch();
         if (!_isVerifierApprovedForSettlement()) revert VerifierNotApproved();
-        if (IVerifier(verifier).verifyingKeyHash() != lockedVerifierKeyHash) revert VerifierKeyMismatch();
+        if (IVerifier(cachedVerifier).verifyingKeyHash() != lockedVerifierKeyHash) revert VerifierKeyMismatch();
         if (proofs.length != publicSignals.length || proofs.length != batchIndexes.length) {
             revert BatchProofLengthMismatch();
         }
         uint256 batchCount = batchRoots.length;
         if (batchCount == 0 || proofs.length == 0) revert BatchProofLengthMismatch();
 
-        for (uint256 i = 0; i < proofs.length; ++i) {
-            _verifyBatchProof(proofs[i], publicSignals[i], batchIndexes[i], batchCount);
+        uint256 memBatchCount = settledBatchCount;
+        uint256 memEscrowSum = settledEscrowSum;
+        uint256 memLiabilitySum = settledLiabilitySum;
+        uint256 memPoolYesSum = settledPoolYesSum;
+        uint256 memPoolNoSum = settledPoolNoSum;
+
+        for (uint256 i = 0; i < proofs.length;) {
+            _verifyBatchProof(proofs[i], publicSignals[i], batchIndexes[i], batchCount, cachedVerifier);
+            memBatchCount += 1;
+            memEscrowSum += publicSignals[i][3];
+            memLiabilitySum += publicSignals[i][4];
+            memPoolYesSum += publicSignals[i][6];
+            memPoolNoSum += publicSignals[i][7];
+            emit BatchProofAccepted(batchIndexes[i], memBatchCount);
+            unchecked {
+                ++i;
+            }
         }
 
-        if (settledBatchCount == batchCount) {
-            if (settledEscrowSum != totalEscrow) revert TotalsMismatch();
-            _finalizeSettlement(settledEscrowSum, settledLiabilitySum, settledPoolYesSum, settledPoolNoSum);
+        settledBatchCount = memBatchCount;
+        settledEscrowSum = memEscrowSum;
+        settledLiabilitySum = memLiabilitySum;
+        settledPoolYesSum = memPoolYesSum;
+        settledPoolNoSum = memPoolNoSum;
+
+        if (memBatchCount == batchCount) {
+            if (memEscrowSum != totalEscrow) revert TotalsMismatch();
+            _finalizeSettlement(memEscrowSum, memLiabilitySum, memPoolYesSum, memPoolNoSum);
         }
     }
 
@@ -747,18 +784,19 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         uint256 required = totalLiability_;
         if (required > totalEscrow_ + protocolLiabilityCap) revert LiabilityExceedsCoverage();
 
-        uint256 balance = IERC20(collateralToken).balanceOf(address(this));
+        address cachedCollateralToken = collateralToken;
+        uint256 balance = IERC20(cachedCollateralToken).balanceOf(address(this));
         if (required > balance) {
             uint256 deficit = required - balance;
             protocolTopUp = deficit;
             IProtocolPool(protocolPool).draw(address(this), deficit);
+            balance = IERC20(cachedCollateralToken).balanceOf(address(this));
         }
 
-        if (required > IERC20(collateralToken).balanceOf(address(this))) revert InsufficientCoverage();
+        if (required > balance) revert InsufficientCoverage();
 
         // forward any surplus immediately; keep only what is needed for claims
-        uint256 tokenBalance = IERC20(collateralToken).balanceOf(address(this));
-        uint256 surplus = tokenBalance > totalLiability_ ? tokenBalance - totalLiability_ : 0;
+        uint256 surplus = balance > totalLiability_ ? balance - totalLiability_ : 0;
         if (surplus > 0) {
             _safeTransferExact(protocolPool, surplus);
         }
@@ -848,29 +886,24 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         bytes calldata proof,
         uint256[10] calldata signals,
         uint16 batchIndex,
-        uint256 batchCount
+        uint256 batchCount,
+        address cachedVerifier
     ) internal {
-        if (!_isVerifierApprovedForSettlement()) revert VerifierNotApproved();
-        if (IVerifier(verifier).verifyingKeyHash() != lockedVerifierKeyHash) revert VerifierKeyMismatch();
         if (batchIndex >= batchCount) revert InvalidBatchIndex();
-        if (batchProofEpoch[batchIndex] == currentBatchProofEpoch) revert BatchAlreadyVerified();
-        if (signals[0] != uint256(batchRoots[batchIndex]) || signals[1] != marketId || signals[2] != winningOutcomeId) {
+        uint256 epoch = currentBatchProofEpoch;
+        if (batchProofEpoch[batchIndex] == epoch) revert BatchAlreadyVerified();
+        uint256 cachedMarketId = marketId;
+        if (signals[0] != uint256(batchRoots[batchIndex]) || signals[1] != cachedMarketId || signals[2] != winningOutcomeId) {
             revert TotalsMismatch();
         }
         if (signals[5] != rakeBps) revert RakeMismatch();
         if (signals[8] != uint256(circuitHash)) revert CircuitHashMismatch();
         if (signals[9] != 0) revert PaddingMismatch();
 
-        bool ok = IVerifier(verifier).verifyProof(proof, signals);
+        bool ok = IVerifier(cachedVerifier).verifyProof(proof, signals);
         if (!ok) revert InvalidProof();
 
-        batchProofEpoch[batchIndex] = currentBatchProofEpoch;
-        settledBatchCount += 1;
-        settledEscrowSum += signals[3];
-        settledLiabilitySum += signals[4];
-        settledPoolYesSum += signals[6];
-        settledPoolNoSum += signals[7];
-        emit BatchProofAccepted(batchIndex, settledBatchCount);
+        batchProofEpoch[batchIndex] = epoch;
     }
 
     function _releaseLiabilityReservation() internal {
@@ -891,11 +924,7 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         ) {
             revert FieldElementOutOfRange();
         }
-        uint256 userSalt = PoseidonT3.poseidon([uint256(uint160(user)), uint256(salt)]);
-        uint256 h1 = PoseidonT3.poseidon([ticketId, outcomeId]);
-        uint256 h2 = PoseidonT3.poseidon([amount, payout]);
-        uint256 h3 = PoseidonT3.poseidon([h2, userSalt]);
-        uint256 leaf = PoseidonT3.poseidon([h1, h3]);
+        uint256 leaf = PoseidonT3.computeLeaf(ticketId, outcomeId, amount, payout, uint256(uint160(user)), uint256(salt));
         hash = bytes32(leaf);
     }
 
@@ -909,17 +938,14 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
         uint256 indexInBatch = ticketId % BATCH_SIZE;
         if (indexInBatch >= batchCounts[batchIndex]) return false;
 
-        uint256 computed = uint256(leaf);
-        uint256 index = indexInBatch;
-        for (uint256 i = 0; i < MERKLE_DEPTH; ++i) {
-            uint256 sibling = uint256(proof[i]);
-            if ((index & 1) == 1) {
-                computed = PoseidonT3.poseidon([sibling, computed]);
-            } else {
-                computed = PoseidonT3.poseidon([computed, sibling]);
+        bytes32[8] memory siblings;
+        for (uint256 i = 0; i < 8;) {
+            siblings[i] = proof[i];
+            unchecked {
+                ++i;
             }
-            index >>= 1;
         }
+        uint256 computed = PoseidonT3.verifyMerkle(uint256(leaf), indexInBatch, siblings);
         return computed == uint256(batchRoots[batchIndex]);
     }
 
@@ -955,14 +981,15 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     ///      This is safe because the collateral token is a known, trusted ERC20 set at initialization;
     ///      the strict checks serve as a defense-in-depth invariant rather than a runtime expectation.
     function _safeTransferExact(address recipient, uint256 amount) internal {
-        uint256 senderBalanceBefore = IERC20(collateralToken).balanceOf(address(this));
-        uint256 recipientBalanceBefore = IERC20(collateralToken).balanceOf(recipient);
-        IERC20(collateralToken).safeTransfer(recipient, amount);
-        uint256 senderBalanceAfter = IERC20(collateralToken).balanceOf(address(this));
+        IERC20 token = IERC20(collateralToken);
+        uint256 senderBalanceBefore = token.balanceOf(address(this));
+        uint256 recipientBalanceBefore = token.balanceOf(recipient);
+        token.safeTransfer(recipient, amount);
+        uint256 senderBalanceAfter = token.balanceOf(address(this));
         if (senderBalanceAfter > senderBalanceBefore) revert FeeOnTransferNotSupported();
         uint256 senderDebited = senderBalanceBefore - senderBalanceAfter;
         if (senderDebited != amount) revert FeeOnTransferNotSupported();
-        uint256 recipientBalanceAfter = IERC20(collateralToken).balanceOf(recipient);
+        uint256 recipientBalanceAfter = token.balanceOf(recipient);
         if (recipientBalanceAfter < recipientBalanceBefore) revert FeeOnTransferNotSupported();
         uint256 recipientReceived = recipientBalanceAfter - recipientBalanceBefore;
         if (recipientReceived < amount) revert FeeOnTransferNotSupported();
@@ -979,6 +1006,6 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     }
 
     receive() external payable {
-        revert("Native transfers disabled");
+        revert NativeTransfersDisabled();
     }
 }

@@ -7,11 +7,11 @@ library PoseidonT3 {
     uint256 internal constant N_ROUNDS_F = 8;
     uint256 internal constant N_ROUNDS_P = 57;
 
-    function poseidon(uint256[2] memory inputs) internal pure returns (uint256) {
+    function poseidon(uint256 a, uint256 b) public pure returns (uint256) {
         uint256[3] memory state;
         state[0] = 0;
-        state[1] = inputs[0] % PRIME;
-        state[2] = inputs[1] % PRIME;
+        state[1] = a % PRIME;
+        state[2] = b % PRIME;
 
         uint256[195] memory C = [
             0x0ee9a592ba9a9518d05986d656f40c2114c4993c11bb29938d21d47304cd8e6e,
@@ -264,5 +264,43 @@ library PoseidonT3 {
         uint256 x2 = mulmod(x, x, PRIME);
         uint256 x4 = mulmod(x2, x2, PRIME);
         return mulmod(x4, x, PRIME);
+    }
+
+    /// @notice Batch-computes the Poseidon leaf hash for a commitment ticket in a single DELEGATECALL.
+    function computeLeaf(
+        uint256 ticketId,
+        uint256 outcomeId,
+        uint256 amount,
+        uint256 payout,
+        uint256 userAddr,
+        uint256 salt
+    ) public pure returns (uint256) {
+        uint256 userSalt = poseidon(userAddr, salt);
+        uint256 h1 = poseidon(ticketId, outcomeId);
+        uint256 h2 = poseidon(amount, payout);
+        uint256 h3 = poseidon(h2, userSalt);
+        return poseidon(h1, h3);
+    }
+
+    /// @notice Batch-computes a Merkle proof verification in a single DELEGATECALL.
+    function verifyMerkle(uint256 leaf, uint256 index, bytes32[8] memory siblings)
+        public
+        pure
+        returns (uint256)
+    {
+        uint256 computed = leaf;
+        for (uint256 i = 0; i < 8;) {
+            uint256 sibling = uint256(siblings[i]);
+            if ((index & 1) == 1) {
+                computed = poseidon(sibling, computed);
+            } else {
+                computed = poseidon(computed, sibling);
+            }
+            index >>= 1;
+            unchecked {
+                ++i;
+            }
+        }
+        return computed;
     }
 }

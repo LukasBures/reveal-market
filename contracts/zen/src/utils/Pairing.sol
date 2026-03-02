@@ -10,6 +10,11 @@ library Pairing {
     uint256 private constant G1_GENERATOR_X = 1;
     uint256 private constant G1_GENERATOR_Y = 2;
 
+    error PairingAddFailed();
+    error PairingScalarMulFailed();
+    error PairingPointLengthMismatch();
+    error PairingOpFailed();
+
     struct G1Point {
         uint256 X;
         uint256 Y;
@@ -44,7 +49,7 @@ library Pairing {
         assembly ("memory-safe") {
             success := staticcall(gas(), 0x06, input, 0x80, r, 0x40)
         }
-        require(success, "Pairing: add failed");
+        if (!success) revert PairingAddFailed();
     }
 
     /// @notice Performs scalar multiplication on a G1 point via precompile.
@@ -57,16 +62,16 @@ library Pairing {
         assembly ("memory-safe") {
             success := staticcall(gas(), 0x07, input, 0x60, r, 0x40)
         }
-        require(success, "Pairing: scalar mul failed");
+        if (!success) revert PairingScalarMulFailed();
     }
 
     /// @notice Performs a pairing check on supplied points.
     function pairing(G1Point[] memory p1, G2Point[] memory p2) internal view returns (bool) {
-        require(p1.length == p2.length, "Pairing: point length mismatch");
+        if (p1.length != p2.length) revert PairingPointLengthMismatch();
         uint256 elements = p1.length;
         uint256 inputSize = elements * 6;
         uint256[] memory input = new uint256[](inputSize);
-        for (uint256 i = 0; i < elements; ++i) {
+        for (uint256 i = 0; i < elements;) {
             uint256 j = i * 6;
             input[j + 0] = p1[i].X;
             input[j + 1] = p1[i].Y;
@@ -74,13 +79,16 @@ library Pairing {
             input[j + 3] = p2[i].X[1];
             input[j + 4] = p2[i].Y[0];
             input[j + 5] = p2[i].Y[1];
+            unchecked {
+                ++i;
+            }
         }
         uint256[1] memory out;
         bool success;
         assembly ("memory-safe") {
             success := staticcall(gas(), 0x08, add(input, 0x20), mul(inputSize, 0x20), out, 0x20)
         }
-        require(success, "Pairing: pairing op failed");
+        if (!success) revert PairingOpFailed();
         return out[0] != 0;
     }
 

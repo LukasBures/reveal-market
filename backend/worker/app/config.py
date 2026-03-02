@@ -294,9 +294,7 @@ class Settings(BaseSettings):
     resolution_backfill_limit: int = Field(default=50, ge=0)
     resolution_gap_warn_threshold: int = Field(default=5, ge=0)
     resolution_gap_warn_seconds: int = Field(default=1800, ge=0)
-    run_migrations_on_startup: bool = Field(
-        default_factory=lambda: bool(PRESET.get("run_migrations_on_startup", True))
-    )
+    run_migrations_on_startup: bool = Field(default_factory=lambda: bool(PRESET.get("run_migrations_on_startup", True)))
     resolved_retention_seconds: int = Field(default=86400, ge=3600)
     resolved_retention_dry_run: bool = Field(default=False)
     featured_categories: list[str] = Field(default_factory=list)

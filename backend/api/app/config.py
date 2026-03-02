@@ -151,9 +151,7 @@ class Settings(BaseSettings):
     rate_limit_requests_per_window: int = Field(default=300, ge=1)
     rate_limit_window_seconds: int = Field(default=60, ge=1)
     rate_limit_whitelist: list[str] = Field(default_factory=list)
-    rate_limit_trusted_proxies: list[str] = Field(
-        default_factory=lambda: _preset_list("rate_limit_trusted_proxies")
-    )
+    rate_limit_trusted_proxies: list[str] = Field(default_factory=lambda: _preset_list("rate_limit_trusted_proxies"))
     fx_feed_url: AnyHttpUrl = Field(default=AnyHttpUrl("http://streamer:8100/fx/zen-usd"))
     fx_timeout_seconds: float = Field(default=5.0, gt=0)
     fx_connect_timeout_seconds: float = Field(default=1.5, gt=0)
@@ -208,9 +206,7 @@ class Settings(BaseSettings):
     db_query_slowest_warn_ms: float = Field(default=250.0, ge=0)
     db_query_sample_slow_sql: bool = Field(default=False)
     db_query_sample_max_length: int = Field(default=2000, ge=256)
-    run_migrations_on_startup: bool = Field(
-        default_factory=lambda: bool(PRESET.get("run_migrations_on_startup", True))
-    )
+    run_migrations_on_startup: bool = Field(default_factory=lambda: bool(PRESET.get("run_migrations_on_startup", True)))
     pricing_signer_private_key: SecretStr | None = Field(default=None)
     pricing_chain_id: int | None = Field(default=2651420, ge=1, description="Chain id used for quote signatures")
     pricing_verifying_contract: str = Field(

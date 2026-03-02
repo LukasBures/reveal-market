@@ -160,12 +160,13 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
 
         // Wrong user should fail because user is bound into the commitment leaf
         address impostor = makeAddr("impostor");
+        bytes32[] memory proof = _buildMerkleProof(leaves, 1, 0);
         vm.prank(relayer);
         vm.expectRevert(RevealMarket.CommitmentUserMismatch.selector);
-        market.claim(impostor, 0, outcome, netAmount, payoutAmount, salt, _buildMerkleProof(leaves, 1, 0));
+        market.claim(impostor, 0, outcome, netAmount, payoutAmount, salt, proof);
 
         vm.prank(relayer);
-        market.claim(user, 0, outcome, netAmount, payoutAmount, salt, _buildMerkleProof(leaves, 1, 0));
+        market.claim(user, 0, outcome, netAmount, payoutAmount, salt, proof);
 
         assertEq(uint8(market.phase()), uint8(IRevealMarket.Phase.Settled));
         assertEq(relayerEscrow.balances(user), depositAmount - ticketSize, "escrow debited once");
@@ -257,9 +258,10 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
         assertGt(deadline, 0, "claim deadline set");
         vm.warp(deadline + 1);
 
+        bytes32[] memory proof = _buildMerkleProof(leaves, 1, 0);
         vm.prank(relayer);
         vm.expectRevert(RevealMarket.ClaimWindowClosed.selector);
-        market.claim(user, 0, outcome, netAmount, payoutAmount, salt, _buildMerkleProof(leaves, 1, 0));
+        market.claim(user, 0, outcome, netAmount, payoutAmount, salt, proof);
 
         uint256 marketBalance = token.balanceOf(address(market));
         uint256 poolBefore = token.balanceOf(address(protocolPool));

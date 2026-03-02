@@ -98,10 +98,11 @@ contract RevealMarketTransferSafetyTest is Test, PoseidonTestUtils {
         vm.prank(oracle);
         market.verifyAndSettle("", signals);
 
+        bytes32[] memory proof = _buildMerkleProof(_wrapLeaf(leaf), 1, 0);
         token.setFeeBps(100);
         vm.expectRevert(RevealMarket.FeeOnTransferNotSupported.selector);
         vm.prank(relayer);
-        market.claim(user, 0, 1, netTicket, netTicket, salt, _buildMerkleProof(_wrapLeaf(leaf), 1, 0));
+        market.claim(user, 0, 1, netTicket, netTicket, salt, proof);
     }
 
     function testRefundRevertsIfTokenBecomesFeeOnTransfer() external {
@@ -151,12 +152,13 @@ contract RevealMarketTransferSafetyTest is Test, PoseidonTestUtils {
         vm.prank(oracle);
         market.verifyAndSettle("", signals);
 
+        bytes32[] memory proof = _buildMerkleProof(_wrapLeaf(leaf), 1, 0);
         token.mint(address(market), 1 ether);
         token.setFeeBps(100);
         token.setSenderSurchargeMode(true);
         vm.expectRevert(RevealMarket.FeeOnTransferNotSupported.selector);
         vm.prank(relayer);
-        market.claim(user, 0, 1, netTicket, netTicket, salt, _buildMerkleProof(_wrapLeaf(leaf), 1, 0));
+        market.claim(user, 0, 1, netTicket, netTicket, salt, proof);
     }
 
     function _depositAndCommit(bytes32 commitment, uint256 nonce) internal {
