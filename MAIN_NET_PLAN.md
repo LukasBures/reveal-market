@@ -111,7 +111,9 @@ python3 -c "import uuid; print(uuid.uuid4())"
 python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
-You need fresh values for: `RELAYER_BEARER_TOKEN`, `RM_INTERNAL_API_SECRET`, `RM_PROVER_SHARED_SECRET`, `RELAYER_API_INTERNAL_SECRET`, `REDIS_PASSWORD`, `HEDGER_ADMIN_INTERNAL_SECRET`, `HEDGER_PROVER_SHARED_SECRET`.
+You need fresh values for: `RELAYER_BEARER_TOKEN`, `RELAYER_API_BEARER_TOKEN`, `RM_INTERNAL_API_SECRET`, `RM_PROVER_SHARED_SECRET`, `RELAYER_API_INTERNAL_SECRET`, `REDIS_PASSWORD`, `HEDGER_ADMIN_INTERNAL_SECRET`, `HEDGER_PROVER_SHARED_SECRET`.
+
+> **`RELAYER_BEARER_TOKEN` vs `RELAYER_API_BEARER_TOKEN`**: These are two distinct tokens. `RELAYER_BEARER_TOKEN` authenticates external callers **to** the relayer (e.g., the API/worker calling the relayer to submit transactions). `RELAYER_API_BEARER_TOKEN` authenticates the relayer when it calls **out** to the backend API. Both should be set for mainnet.
 
 ---
 
@@ -321,6 +323,8 @@ forge verify-contract <ADDRESS> src/MarketFactory.sol:MarketFactory \
 
 ### Step 5: Seed Protocol Pool
 
+> **Note**: At this point, `scripts/send_erc20.py` still has testnet defaults (updated in Phase 7). Use explicit `--rpc-url` and `--token` flags as shown below.
+
 ```bash
 # Transfer initial ZEN to the Protocol Pool for liquidity:
 python scripts/send_erc20.py \
@@ -421,8 +425,15 @@ RM_WALLET_ADDRESS=0x<NEW_MAINNET_DEPLOYER_ADDRESS>
 RM_SETTLEMENT_SIGNER_PRIVATE_KEY=<REDACTED>
 DEPLOYER_KEY=0x<NEW_MAINNET_DEPLOYER_KEY>
 
+# ──── Database (fresh mainnet DB — see Phase 11) ────
+RM_DATABASE_URL=postgresql+psycopg2://market_admin_mainnet:<DB_PASSWORD>@postgres:5432/reveal_market_mainnet
+# RM_DATABASE_ASYNC_URL is auto-derived by converting psycopg2 → asyncpg driver.
+# Only set explicitly if you need a different host/port for async connections:
+# RM_DATABASE_ASYNC_URL=postgresql+asyncpg://market_admin_mainnet:<DB_PASSWORD>@postgres:5432/reveal_market_mainnet
+
 # ──── Secrets (regenerate for mainnet) ────
 RELAYER_BEARER_TOKEN=<generate-new-random-token>
+RELAYER_API_BEARER_TOKEN=<generate-new-random-token>
 RM_INTERNAL_API_SECRET=<generate-new-uuid>
 RM_PROVER_SHARED_SECRET=<generate-new-uuid>
 RELAYER_API_INTERNAL_SECRET=<generate-new-uuid>
@@ -751,14 +762,39 @@ CREATE DATABASE reveal_market_mainnet;
 CREATE USER market_admin_mainnet WITH PASSWORD '<strong-password>';
 GRANT ALL PRIVILEGES ON DATABASE reveal_market_mainnet TO market_admin_mainnet;
 ```
-3. Update `RM_DATABASE_URL` and `RM_DATABASE_ASYNC_URL` in `.env.production`
-4. Migrations run automatically on API startup (`RM_RUN_MIGRATIONS_ON_STARTUP=true`)
+3. Update `RM_DATABASE_URL` in `.env.production`:
+```bash
+RM_DATABASE_URL=postgresql+psycopg2://market_admin_mainnet:<password>@postgres:5432/reveal_market_mainnet
+```
+4. `RM_DATABASE_ASYNC_URL` is **auto-derived** — the API and worker convert `psycopg2` → `asyncpg` automatically. Only set it explicitly if you need a different host/port for async connections.
+5. Migrations run automatically on API startup (`RM_RUN_MIGRATIONS_ON_STARTUP=true`)
+
+### Shared Database Architecture
+
+All services sharing the database use `RM_DATABASE_URL`:
+
+| Service | How it reads DB URL | Notes |
+|---------|-------------------|-------|
+| API | `RM_DATABASE_URL` (sync for Alembic) + auto-derived async | Runs migrations on startup |
+| Worker | `RM_DATABASE_URL` + auto-derived async | Also runs migrations on startup |
+| Hedger | `RM_DATABASE_URL` (alias) or `HEDGER_DATABASE_URL` (override) | Stores hedger tables in same DB |
+| Relayer | `RM_DATABASE_URL` → `_queue_dsn()` strips `+psycopg2` | Uses it for PostgreSQL-backed queue |
+
+Since all services share the same `RM_DATABASE_URL`, pointing it to the fresh mainnet database gives every service a clean slate — including the relayer's queue tables.
+
+### Relayer Queue
+
+The relayer queue can run on **PostgreSQL** (shared via `RM_DATABASE_URL`) or **SQLite** (fallback to `relayer_queue.db`):
+- If `RM_DATABASE_URL` is set → relayer uses it for the queue (recommended for mainnet)
+- If not set → falls back to local SQLite at `RELAYER_QUEUE_DB_PATH` (default: `relayer_queue.db`)
+- If migrating and using SQLite: **delete the old `relayer_queue.db`** to avoid processing stale testnet transactions
 
 ### Redis
 
 Redis cache will be repopulated automatically. No migration needed.
 - Consider flushing Redis on mainnet launch to avoid stale testnet cache keys
 - Update `REDIS_PASSWORD` to a new strong password
+- Redis streams (e.g., `horizen_commits` used by hedger) will start empty after flush
 
 ---
 
@@ -814,6 +850,7 @@ Execute in this exact order:
 2. **Tag testnet commit**: `git tag testnet-final`
 3. **Stop all services**: `make down`
 4. **Flush Redis**: `docker exec reveal-market-redis redis-cli -a $REDIS_PASSWORD FLUSHALL`
+   - This clears all cache, streams (`horizen_commits`), and queue data
 5. **Update `.env.production`** with all mainnet values (including new secrets)
 6. **Pull latest code** (with all hardcoded updates merged to `main`)
 7. **Sync prover artifacts**: `git submodule update --init --recursive && git -C prover/artifacts lfs pull`
@@ -848,6 +885,10 @@ grep -c "horizen-testnet" .env.production && echo "FAIL: testnet RPC found!" || 
 [ "$NEXT_PUBLIC_CHAIN_ID" = "26514" ] && echo "OK: frontend chain ID" || echo "FAIL: frontend chain ID = $NEXT_PUBLIC_CHAIN_ID"
 [ "$CHAIN_ID" = "26514" ] && echo "OK: relayer chain ID" || echo "FAIL: relayer chain ID = $CHAIN_ID"
 [ "$RM_PRICING_CHAIN_ID" = "26514" ] && echo "OK: pricing chain ID" || echo "FAIL: pricing chain ID = $RM_PRICING_CHAIN_ID"
+
+# 3b. Verify database URL points to mainnet database
+echo "$RM_DATABASE_URL" | grep -q "reveal_market_mainnet" && \
+  echo "OK: database URL targets mainnet DB" || echo "WARN: database URL may point to testnet DB ($RM_DATABASE_URL)"
 
 echo ""
 echo "=== On-Chain Validation ==="
@@ -1024,7 +1065,7 @@ Adjust in `docker-compose.yml` and/or `docker-compose.prod.yml` `deploy.resource
 
 | File | What to Change |
 |------|---------------|
-| `.env.production` | All chain, address, key, and secret values |
+| `.env.production` | All chain, address, key, secret, and **database** values (`RM_DATABASE_URL`) |
 | `.env.example` | Default chain ID, RPC, explorer, contract addresses |
 | `.env.local` | All chain, address, key values (for local dev against mainnet) |
 | `contracts/zen/.env` | RPC, chain ID, deployer key, token address, oracle, signer |
@@ -1132,6 +1173,7 @@ Adjust in `docker-compose.yml` and/or `docker-compose.prod.yml` `deploy.resource
 | Gas settings untuned | **Medium** — settlement/lock txns fail or overpay | Review and set explicit gas prices in `.env.production` (Phase 6 gas tuning section) |
 | `send_eth.py` defaults to Base | **Low** — gas top-up script hits wrong chain | Pass `--rpc-url` explicitly or update defaults (Phase 7) |
 | Settlement RPC single-point-of-failure | **Medium** — one RPC outage blocks all settlements | Consider `RM_SETTLEMENT_RPC_URL` with a separate provider |
+| Stale relayer SQLite queue | **Low** — relayer replays testnet txns | Delete `relayer_queue.db` if using SQLite fallback (N/A if using PostgreSQL) |
 
 ---
 
