@@ -144,7 +144,7 @@ async def test_state_startup_requires_redis(monkeypatch):
     state.refresh_fx = fake_refresh  # type: ignore[assignment]
     await state.startup()
     assert calls["kwargs"]["socket_timeout"] == 5
-    assert calls["kwargs"]["socket_connect_timeout"] == 5
+    assert calls["kwargs"]["socket_connect_timeout"] == 3.0
 
 
 @pytest.mark.asyncio
