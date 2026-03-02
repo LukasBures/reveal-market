@@ -219,6 +219,57 @@ EOF
   fi
 }
 
+validate_required_vars() {
+  # Fail fast if critical secrets or deployment vars are missing from the env file.
+  # These are the bare minimum needed for services to start correctly.
+  local required_vars=(
+    # Infrastructure
+    REDIS_PASSWORD
+    RM_DATABASE_URL
+    RM_DATABASE_ASYNC_URL
+    # Signing keys
+    RM_PRICING_SIGNER_PRIVATE_KEY
+    RM_AUTHORIZATION_SIGNER_PRIVATE_KEY
+    RM_WALLET_PRIVATE_KEY
+    RM_SETTLEMENT_SIGNER_PRIVATE_KEY
+    RELAYER_PRIVATE_KEY
+    # Internal auth tokens
+    RELAYER_BEARER_TOKEN
+    RELAYER_API_INTERNAL_SECRET
+    RM_RELAYER_BEARER_TOKEN
+    RM_INTERNAL_API_SECRET
+    RM_PROVER_SHARED_SECRET
+    GRAFANA_ADMIN_PASSWORD
+    # Chain & contract addresses
+    RM_RPC_URL
+    CHAIN_ID
+    RM_FACTORY_ADDRESS
+    RM_PROTOCOL_POOL_ADDRESS
+    RM_RELAYER_ESCROW_ADDRESS
+    RM_MARKET_IMPLEMENTATION_ADDRESS
+    RM_VERIFIER_ADDRESS
+    RM_AUTHORIZATION_SIGNER
+    RM_ORACLE_ADDRESS
+    ZEN_TOKEN_ADDRESS
+    PROVER_CIRCUIT_HASH
+  )
+  local missing=()
+  for var in "${required_vars[@]}"; do
+    local val
+    val="$(read_env_file_value "$var" "${ENV_FILE}")"
+    if [[ -z "${val}" ]]; then
+      missing+=("$var")
+    fi
+  done
+  if (( ${#missing[@]} > 0 )); then
+    log_warn "Env file ${ENV_FILE} is missing required variables:"
+    printf '  - %s\n' "${missing[@]}" >&2
+    log_warn "Fill in the missing values or regenerate with: ./scripts/generate_env.sh"
+    exit 1
+  fi
+  log_info "All required env variables present in ${ENV_FILE}"
+}
+
 is_lfs_pointer() {
   local path="$1"
   if [[ ! -f "${path}" ]]; then
@@ -491,6 +542,7 @@ fi
 ensure_docker_running
 
 check_env_file
+validate_required_vars
 check_prover_artifacts
 check_caddyfile
 check_apk_mirror

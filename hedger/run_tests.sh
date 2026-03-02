@@ -17,7 +17,8 @@ log_error() {
 }
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export PYTHONPATH="${ROOT_DIR}:${PYTHONPATH:-}"
+REPO_ROOT="$(cd "${ROOT_DIR}/.." && pwd)"
+export PYTHONPATH="${ROOT_DIR}:${REPO_ROOT}/backend:${PYTHONPATH:-}"
 
 activate_venv() {
   local venv_path="${ROOT_DIR}/.venv"

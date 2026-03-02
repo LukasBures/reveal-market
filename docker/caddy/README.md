@@ -42,7 +42,7 @@ flowchart LR
 ## TLS and environment knobs
 
 - `CADDY_TLS_PROFILE` selects a snippet for TLS setup:
-  - `tls_prod`: Cloudflare DNS-01 with `CLOUDFLARE_API_TOKEN` and the Cloudflare resolvers.
+  - `tls_prod`: Cloudflare DNS-01 with `CF_API_TOKEN` and the Cloudflare resolvers.
   - `tls_local`: internal CA for local/dev use.
 - `CADDY_TLS_PROFILE` defaults to `tls_local` in the Dockerfile to keep build-time validation working.
 - `CADDY_LOG_LEVEL` and `CADDY_ACCESS_LOG_LEVEL` tune log verbosity for `log_common` and `access_log_json`.

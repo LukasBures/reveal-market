@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${ROOT_DIR}/.." && pwd)"
+export PYTHONPATH="${ROOT_DIR}:${REPO_ROOT}/backend:${PYTHONPATH:-}"
 
 cd "$ROOT_DIR"
 
@@ -35,7 +37,7 @@ CONFIG_PATH="${ROOT_DIR}/../pyproject.toml"
 TARGET_PATH="${ROOT_DIR}/app"
 
 echo "Running mypy (streamer)"
-"$PYTHON_BIN" -m mypy --config-file "${CONFIG_PATH}" "${TARGET_PATH}"
+MYPYPATH="${REPO_ROOT}/backend:${ROOT_DIR}:${MYPYPATH:-}" "$PYTHON_BIN" -m mypy --config-file "${CONFIG_PATH}" "${TARGET_PATH}"
 
 PYTEST_ARGS=()
 # When plugin autoloading is disabled (e.g., in CI), explicitly enable the plugins we rely on.

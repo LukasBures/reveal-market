@@ -394,19 +394,79 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         env:
           GITHUB_SHA: ${{ github.sha }}
+          # --- Secrets for generate_env.sh ---
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+          RM_DATABASE_URL: ${{ secrets.RM_DATABASE_URL }}
+          RM_DATABASE_ASYNC_URL: ${{ secrets.RM_DATABASE_ASYNC_URL }}
+          RM_PRICING_SIGNER_PRIVATE_KEY: ${{ secrets.RM_PRICING_SIGNER_PRIVATE_KEY }}
+          RM_AUTHORIZATION_SIGNER_PRIVATE_KEY: ${{ secrets.RM_AUTHORIZATION_SIGNER_PRIVATE_KEY }}
+          RM_WALLET_PRIVATE_KEY: ${{ secrets.RM_WALLET_PRIVATE_KEY }}
+          RM_SETTLEMENT_SIGNER_PRIVATE_KEY: ${{ secrets.RM_SETTLEMENT_SIGNER_PRIVATE_KEY }}
+          RELAYER_PRIVATE_KEY: ${{ secrets.RELAYER_PRIVATE_KEY }}
+          RELAYER_BEARER_TOKEN: ${{ secrets.RELAYER_BEARER_TOKEN }}
+          RELAYER_API_INTERNAL_SECRET: ${{ secrets.RELAYER_API_INTERNAL_SECRET }}
+          RM_RELAYER_BEARER_TOKEN: ${{ secrets.RM_RELAYER_BEARER_TOKEN }}
+          RM_INTERNAL_API_SECRET: ${{ secrets.RM_INTERNAL_API_SECRET }}
+          RM_PROVER_SHARED_SECRET: ${{ secrets.RM_PROVER_SHARED_SECRET }}
+          RM_HEDGER_INTERNAL_SECRET: ${{ secrets.RM_HEDGER_INTERNAL_SECRET }}
+          HEDGER_ADMIN_INTERNAL_SECRET: ${{ secrets.HEDGER_ADMIN_INTERNAL_SECRET }}
+          HEDGER_VAULT_PRIVATE_KEY: ${{ secrets.HEDGER_VAULT_PRIVATE_KEY }}
+          GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          DEPLOYER_KEY: ${{ secrets.DEPLOYER_KEY }}
+          CONTACT_TURNSTILE_SECRET: ${{ secrets.CONTACT_TURNSTILE_SECRET }}
+          CONTACT_DISCORD_WEBHOOK_URL: ${{ secrets.CONTACT_DISCORD_WEBHOOK_URL }}
+          # --- Variables (non-secret, deployment-specific) ---
+          RM_RPC_URL: ${{ vars.RM_RPC_URL }}
+          CHAIN_ID: ${{ vars.CHAIN_ID }}
+          RM_FACTORY_ADDRESS: ${{ vars.RM_FACTORY_ADDRESS }}
+          RM_PROTOCOL_POOL_ADDRESS: ${{ vars.RM_PROTOCOL_POOL_ADDRESS }}
+          RM_RELAYER_ESCROW_ADDRESS: ${{ vars.RM_RELAYER_ESCROW_ADDRESS }}
+          RM_MARKET_IMPLEMENTATION_ADDRESS: ${{ vars.RM_MARKET_IMPLEMENTATION_ADDRESS }}
+          RM_VERIFIER_ADDRESS: ${{ vars.RM_VERIFIER_ADDRESS }}
+          RM_AUTHORIZATION_SIGNER: ${{ vars.RM_AUTHORIZATION_SIGNER }}
+          RM_ORACLE_ADDRESS: ${{ vars.RM_ORACLE_ADDRESS }}
+          ZEN_TOKEN_ADDRESS: ${{ vars.ZEN_TOKEN_ADDRESS }}
+          RM_WALLET_ADDRESS: ${{ vars.RM_WALLET_ADDRESS }}
+          PROVER_CIRCUIT_HASH: ${{ vars.PROVER_CIRCUIT_HASH }}
+          NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ${{ vars.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID }}
+          NEXT_PUBLIC_GA_MEASUREMENT_ID: ${{ vars.NEXT_PUBLIC_GA_MEASUREMENT_ID }}
+          NEXT_PUBLIC_CHAIN_ID: ${{ vars.NEXT_PUBLIC_CHAIN_ID }}
+          NEXT_PUBLIC_RPC_URL: ${{ vars.NEXT_PUBLIC_RPC_URL }}
+          NEXT_PUBLIC_BLOCK_EXPLORER_URL: ${{ vars.NEXT_PUBLIC_BLOCK_EXPLORER_URL }}
+          CONTACT_TURNSTILE_SITE_KEY: ${{ vars.CONTACT_TURNSTILE_SITE_KEY }}
+          PROVER_ARTIFACTS_SSH_KEY_PATH: ${{ vars.PROVER_ARTIFACTS_SSH_KEY_PATH }}
+          PRICING_SIGNER_ADDRESS: ${{ vars.PRICING_SIGNER_ADDRESS }}
         with:
           host: 159.69.29.255
           username: reveal
           port: 2222
           key: ${{ secrets.PROD_SSH_KEY }}
-          envs: GITHUB_SHA
+          envs: >-
+            GITHUB_SHA,
+            REDIS_PASSWORD,RM_DATABASE_URL,RM_DATABASE_ASYNC_URL,
+            RM_PRICING_SIGNER_PRIVATE_KEY,RM_AUTHORIZATION_SIGNER_PRIVATE_KEY,
+            RM_WALLET_PRIVATE_KEY,RM_SETTLEMENT_SIGNER_PRIVATE_KEY,
+            RELAYER_PRIVATE_KEY,RELAYER_BEARER_TOKEN,RELAYER_API_INTERNAL_SECRET,
+            RM_RELAYER_BEARER_TOKEN,RM_INTERNAL_API_SECRET,RM_PROVER_SHARED_SECRET,
+            RM_HEDGER_INTERNAL_SECRET,HEDGER_ADMIN_INTERNAL_SECRET,
+            HEDGER_VAULT_PRIVATE_KEY,GRAFANA_ADMIN_PASSWORD,CF_API_TOKEN,
+            DEPLOYER_KEY,CONTACT_TURNSTILE_SECRET,CONTACT_DISCORD_WEBHOOK_URL,
+            RM_RPC_URL,CHAIN_ID,
+            RM_FACTORY_ADDRESS,RM_PROTOCOL_POOL_ADDRESS,RM_RELAYER_ESCROW_ADDRESS,
+            RM_MARKET_IMPLEMENTATION_ADDRESS,RM_VERIFIER_ADDRESS,
+            RM_AUTHORIZATION_SIGNER,RM_ORACLE_ADDRESS,ZEN_TOKEN_ADDRESS,
+            RM_WALLET_ADDRESS,PROVER_CIRCUIT_HASH,
+            NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID,NEXT_PUBLIC_GA_MEASUREMENT_ID,
+            NEXT_PUBLIC_CHAIN_ID,NEXT_PUBLIC_RPC_URL,NEXT_PUBLIC_BLOCK_EXPLORER_URL,
+            CONTACT_TURNSTILE_SITE_KEY,PROVER_ARTIFACTS_SSH_KEY_PATH,
+            PRICING_SIGNER_ADDRESS
           script: |
             set -euo pipefail
             echo ">>> Pull latest code"
             cd ~/apps/reveal-market
             export MAIN_REPO_SSH_KEY_PATH="${{ vars.MAIN_REPO_SSH_KEY_PATH }}"
-            export PROVER_ARTIFACTS_SSH_KEY_PATH="${{ vars.PROVER_ARTIFACTS_SSH_KEY_PATH }}"
-            # Expand leading ~ in key path if provided (quoted pattern prevents tilde expansion).
+            # Expand leading ~ in key paths if provided.
             if [ -n "${MAIN_REPO_SSH_KEY_PATH:-}" ]; then
               case "${MAIN_REPO_SSH_KEY_PATH}" in
                 "~/"*) MAIN_REPO_SSH_KEY_PATH="${HOME}/${MAIN_REPO_SSH_KEY_PATH#"~/"}" ;;
@@ -424,10 +484,10 @@ jobs:
               MAIN_GIT_SSH_COMMAND="ssh -i ${HOME}/.ssh/reveal-market-gh-deploy -o IdentitiesOnly=yes"
             fi
             SUBMODULE_GIT_SSH_COMMAND=""
-            if [ -f "${PROVER_ARTIFACTS_SSH_KEY_PATH}" ]; then
+            if [ -n "${PROVER_ARTIFACTS_SSH_KEY_PATH:-}" ] && [ -f "${PROVER_ARTIFACTS_SSH_KEY_PATH}" ]; then
               SUBMODULE_GIT_SSH_COMMAND="ssh -i ${PROVER_ARTIFACTS_SSH_KEY_PATH} -o IdentitiesOnly=yes"
             else
-              echo "Artifacts SSH key missing at ${PROVER_ARTIFACTS_SSH_KEY_PATH}; submodule fetch may fail." >&2
+              echo "Artifacts SSH key missing at ${PROVER_ARTIFACTS_SSH_KEY_PATH:-<unset>}; submodule fetch may fail." >&2
             fi
             git status --short
             if ! git diff --quiet; then
@@ -465,6 +525,10 @@ jobs:
             else
               git -C prover/artifacts lfs pull
             fi
+
+            echo ">>> Generate .env.production from CI secrets/variables"
+            chmod +x scripts/generate_env.sh
+            ./scripts/generate_env.sh .env.production
 
             echo ">>> Run production deployment script"
             chmod +x run_prod.sh

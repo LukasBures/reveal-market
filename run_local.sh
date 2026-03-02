@@ -458,38 +458,42 @@ if [[ "${RUN_BUILD}" == "true" ]]; then
 fi
 
 if [[ "${USE_BAKE}" == "true" ]]; then
-  # docker buildx bake has no --env-file flag; export env vars into the shell
-  # so bake can interpolate ${VAR} references in docker-compose.yml.
-  if [[ -f "${ENV_FILE}" ]]; then
-    while IFS= read -r _line || [[ -n "${_line}" ]]; do
-      [[ "${_line}" =~ ^[[:space:]]*# ]] && continue
-      [[ "${_line}" =~ ^[[:space:]]*$ ]] && continue
-      [[ "${_line}" == *=* ]] || continue
-      _key="${_line%%=*}"
-      _val="${_line#*=}"
-      # Strip surrounding quotes (Docker env-file compat).
-      if [[ "${_val}" =~ ^\"(.*)\"$ ]]; then
-        _val="${BASH_REMATCH[1]}"
-      elif [[ "${_val}" =~ ^\'(.*)\'$ ]]; then
-        _val="${BASH_REMATCH[1]}"
-      fi
-      export "${_key}=${_val}"
-    done < "${ENV_FILE}"
-    unset _line _key _val
-  fi
-  log_step "Building images with docker buildx bake (parallel, shared bases)"
-  BAKE_CMD=("docker" "buildx" "bake")
-  if [[ -n "${BUILD_FLAG}" ]]; then
-    BAKE_CMD+=("${BUILD_FLAG}")
-  fi
-  if [[ ${#BUILD_SERVICES[@]} -gt 0 ]]; then
-    BAKE_CMD+=("${BUILD_SERVICES[@]}")
-  fi
-  log_info "Running: ${BAKE_CMD[*]}"
-  if ! "${BAKE_CMD[@]}"; then
-    log_warn "docker buildx bake failed."
-    exit 1
-  fi
+  # Run bake in a subshell so the env exports don't leak into docker compose up
+  # (compose does its own env-file interpolation and raw ${VAR} literals would
+  # override the expanded values).
+  (
+    # docker buildx bake has no --env-file flag; export env vars into the shell
+    # so bake can interpolate ${VAR} references in docker-compose.yml.
+    if [[ -f "${ENV_FILE}" ]]; then
+      while IFS= read -r _line || [[ -n "${_line}" ]]; do
+        [[ "${_line}" =~ ^[[:space:]]*# ]] && continue
+        [[ "${_line}" =~ ^[[:space:]]*$ ]] && continue
+        [[ "${_line}" == *=* ]] || continue
+        _key="${_line%%=*}"
+        _val="${_line#*=}"
+        # Strip surrounding quotes (Docker env-file compat).
+        if [[ "${_val}" =~ ^\"(.*)\"$ ]]; then
+          _val="${BASH_REMATCH[1]}"
+        elif [[ "${_val}" =~ ^\'(.*)\'$ ]]; then
+          _val="${BASH_REMATCH[1]}"
+        fi
+        export "${_key}=${_val}"
+      done < "${ENV_FILE}"
+    fi
+    log_step "Building images with docker buildx bake (parallel, shared bases)"
+    BAKE_CMD=("docker" "buildx" "bake")
+    if [[ -n "${BUILD_FLAG}" ]]; then
+      BAKE_CMD+=("${BUILD_FLAG}")
+    fi
+    if [[ ${#BUILD_SERVICES[@]} -gt 0 ]]; then
+      BAKE_CMD+=("${BUILD_SERVICES[@]}")
+    fi
+    log_info "Running: ${BAKE_CMD[*]}"
+    if ! "${BAKE_CMD[@]}"; then
+      log_warn "docker buildx bake failed."
+      exit 1
+    fi
+  )
 else
 BUILD_DESC="${BUILD_FLAG:-cached layers}"
 log_step "Building images (${BUILD_DESC}, parallel=${COMPOSE_PARALLEL_LIMIT})"

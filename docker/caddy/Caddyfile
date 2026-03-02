@@ -134,7 +134,7 @@
 
 (tls_prod) {
   tls {
-    dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+    dns cloudflare {env.CF_API_TOKEN}
     resolvers {$CADDY_DNS_RESOLVERS:1.1.1.1 1.0.0.1 8.8.8.8 8.8.4.4 9.9.9.9 149.112.112.112}
   }
 }

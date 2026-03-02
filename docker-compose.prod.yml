@@ -22,7 +22,7 @@ services:
     environment:
       TZ: UTC
       CADDY_TLS_PROFILE: ${CADDY_TLS_PROFILE}
-      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
+      CF_API_TOKEN: ${CF_API_TOKEN:-}
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://127.0.0.1:2019/config/ >/dev/null"]
       interval: 30s

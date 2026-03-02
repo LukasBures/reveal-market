@@ -104,7 +104,7 @@ class Settings(BaseSettings):
     redis_url: str = Field(default="redis://redis:6379/0")
     polymarket_api_base: AnyHttpUrl = Field(default=cast(AnyHttpUrl, "https://gamma-api.polymarket.com"))
     polymarket_timeout_seconds: float = Field(default=10.0, gt=0)
-    polymarket_page_size: int = Field(default=100, ge=1, le=250)
+    polymarket_page_size: int = Field(default=200, ge=1, le=250)
     polymarket_commit_batch_size: int = Field(
         default=3000,
         ge=0,
@@ -115,11 +115,11 @@ class Settings(BaseSettings):
         description="Use Gamma /events pagination (false uses /markets to reduce payload size).",
     )
     worker_memory_log_enabled: bool = Field(
-        default=False,
+        default_factory=lambda: bool(PRESET.get("worker_memory_log_enabled", False)),
         description="Emit per-page memory snapshots in worker.sync.page logs.",
     )
     worker_memory_log_every_n_pages: int = Field(
-        default=25,
+        default_factory=lambda: int(PRESET.get("worker_memory_log_every_n_pages", 25)),
         ge=1,
         description="Log memory snapshots every N pages when enabled.",
     )
@@ -129,12 +129,12 @@ class Settings(BaseSettings):
         description="Minimum seconds between GC object scans for memory pressure diagnostics (0 disables scans).",
     )
     worker_memory_trim_threshold_mb: int = Field(
-        default=0,
+        default_factory=lambda: int(PRESET.get("worker_memory_trim_threshold_mb", 0)),
         ge=0,
         description="If >0, trigger GC/malloc_trim when RSS exceeds this threshold (MB).",
     )
     worker_memory_abort_threshold_mb: int = Field(
-        default=0,
+        default_factory=lambda: int(PRESET.get("worker_memory_abort_threshold_mb", 0)),
         ge=0,
         description="If >0, stop the sync tick when RSS exceeds this threshold (MB).",
     )
@@ -150,7 +150,7 @@ class Settings(BaseSettings):
         ge=0,
         description="Only include query hotspots with at least this cumulative time in a sync tick.",
     )
-    polymarket_order: str = Field(default="id")
+    polymarket_order: str = Field(default="updatedAt")
     polymarket_sort_ascending: bool = Field(default=False)
     polymarket_only_open_markets: bool | None = Field(default=None)
     polymarket_active_filter: bool | None = Field(default=None)
@@ -164,10 +164,12 @@ class Settings(BaseSettings):
     circuit_failure_threshold: int = Field(default=10, ge=1)
     circuit_window_seconds: int = Field(default=60, ge=1)
     circuit_cooldown_seconds: int = Field(default=90, ge=1)
-    polymarket_rate_limit_requests: int | None = Field(default=100, ge=1)
+    polymarket_rate_limit_requests: int | None = Field(default=500, ge=1)
     polymarket_rate_limit_window_seconds: float | None = Field(default=8.0, gt=0)
     polymarket_empty_page_tolerance: int = Field(default=2, ge=0)
-    polymarket_stream_persist: bool = Field(default=False)
+    polymarket_stream_persist: bool = Field(
+        default_factory=lambda: bool(PRESET.get("polymarket_stream_persist", False))
+    )
     polymarket_sync_lease_key: str = Field(default="reveal_market_worker:polymarket_sync_lease")
     polymarket_sync_lease_ttl_seconds: int = Field(default=120, ge=5)
     polymarket_sync_lease_jitter_seconds: float = Field(default=2.0, ge=0)
@@ -195,7 +197,7 @@ class Settings(BaseSettings):
         default="reveal_market_worker:polymarket_sync_cursor",
         description="Redis key storing last seen polymarket cursor tuple (timestamp/id).",
     )
-    poll_interval_seconds: int = Field(default=300, ge=1)
+    poll_interval_seconds: int = Field(default=600, ge=1)
     poll_interval_jitter_seconds: float = Field(default=3.0, ge=0)
     maintenance_poll_seconds: float = Field(
         default=300.0,
@@ -280,7 +282,9 @@ class Settings(BaseSettings):
     worsen_percent: float = Field(default=0.03, ge=0, lt=0.25)
     lp_share_percent: float = Field(default=0.18, ge=0, lt=0.5)
     commit_cutoff_seconds: int = Field(default=300, ge=0)
-    default_commit_lead_seconds: int = Field(default=86400, ge=60)
+    default_commit_lead_seconds: int = Field(
+        default_factory=lambda: int(PRESET.get("default_commit_lead_seconds", 86400)), ge=60
+    )
     default_reveal_lead_seconds: int = Field(default=172800, ge=120)
     max_web3_retries: int = Field(default=3, ge=1)
     resolution_refresh_interval_seconds: int = Field(default=300, ge=60)
@@ -290,14 +294,16 @@ class Settings(BaseSettings):
     resolution_backfill_limit: int = Field(default=50, ge=0)
     resolution_gap_warn_threshold: int = Field(default=5, ge=0)
     resolution_gap_warn_seconds: int = Field(default=1800, ge=0)
-    run_migrations_on_startup: bool = Field(default=True)
+    run_migrations_on_startup: bool = Field(
+        default_factory=lambda: bool(PRESET.get("run_migrations_on_startup", True))
+    )
     resolved_retention_seconds: int = Field(default=86400, ge=3600)
     resolved_retention_dry_run: bool = Field(default=False)
     featured_categories: list[str] = Field(default_factory=list)
     featured_suggest_queries: list[str] = Field(default_factory=list)
     container_heartbeat_seconds: int = Field(default=60, ge=10)
     prover_base_url: AnyHttpUrl | None = Field(default=None)
-    prover_timeout_seconds: float = Field(default=5.0, gt=0)
+    prover_timeout_seconds: float = Field(default=120.0, gt=0)
     prover_shared_secret: SecretStr | None = Field(default=None, alias="RM_PROVER_SHARED_SECRET")
     circuit_hash: str | None = Field(
         default=None,

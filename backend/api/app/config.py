@@ -132,26 +132,28 @@ class Settings(BaseSettings):
     pricing_edge_percent: float = Field(default=0.05, ge=0, lt=0.25)
     lp_share_percent: float = Field(default=0.18, ge=0, lt=0.5)
     cache_ttl_seconds: int = Field(default=300, ge=1)
-    cacheable_market_limit: int = Field(default=180, ge=1, le=1200)
+    cacheable_market_limit: int = Field(default=500, ge=1, le=1200)
     cacheable_market_offset_limit: int = Field(default=10000, ge=0)
     market_record_cache_ttl_seconds: int = Field(default=600, ge=30)
     cache_hydrate_on_startup: bool = Field(default=True)
-    cache_hydrate_limit: int = Field(default=180, ge=1, le=1200)
+    cache_hydrate_limit: int = Field(default=500, ge=1, le=1200)
     cache_hydrate_order_by: str | None = Field(default="volume")
     cache_refresh_enabled: bool = Field(default=True)
-    cache_refresh_interval_seconds: int = Field(default=180, ge=15)
-    cache_refresh_limit: int = Field(default=180, ge=1, le=1200)
+    cache_refresh_interval_seconds: int = Field(default=120, ge=15)
+    cache_refresh_limit: int = Field(default=500, ge=1, le=1200)
     cache_refresh_lock_key: str = Field(default="reveal_market:markets_cache_refresh:lock")
     cache_refresh_lock_ttl_seconds: int = Field(default=300, ge=15)
     cache_hydrate_page_size: int = Field(default=30, ge=1, le=250)
-    cache_connect_retries: int = Field(default=3, ge=1)
-    cache_connect_retry_delay_seconds: float = Field(default=1.0, ge=0)
+    cache_connect_retries: int = Field(default=5, ge=1)
+    cache_connect_retry_delay_seconds: float = Field(default=2.0, ge=0)
     claim_bundles_cache_ttl_seconds: int = Field(default=300, ge=5, description="Cache TTL for claim bundle responses")
-    rate_limit_enabled: bool = Field(default=False)
+    rate_limit_enabled: bool = Field(default_factory=lambda: bool(PRESET.get("rate_limit_enabled", False)))
     rate_limit_requests_per_window: int = Field(default=300, ge=1)
     rate_limit_window_seconds: int = Field(default=60, ge=1)
     rate_limit_whitelist: list[str] = Field(default_factory=list)
-    rate_limit_trusted_proxies: list[str] = Field(default_factory=list)
+    rate_limit_trusted_proxies: list[str] = Field(
+        default_factory=lambda: _preset_list("rate_limit_trusted_proxies")
+    )
     fx_feed_url: AnyHttpUrl = Field(default=AnyHttpUrl("http://streamer:8100/fx/zen-usd"))
     fx_timeout_seconds: float = Field(default=5.0, gt=0)
     fx_connect_timeout_seconds: float = Field(default=1.5, gt=0)
@@ -206,14 +208,16 @@ class Settings(BaseSettings):
     db_query_slowest_warn_ms: float = Field(default=250.0, ge=0)
     db_query_sample_slow_sql: bool = Field(default=False)
     db_query_sample_max_length: int = Field(default=2000, ge=256)
-    run_migrations_on_startup: bool = Field(default=True)
+    run_migrations_on_startup: bool = Field(
+        default_factory=lambda: bool(PRESET.get("run_migrations_on_startup", True))
+    )
     pricing_signer_private_key: SecretStr | None = Field(default=None)
     pricing_chain_id: int | None = Field(default=2651420, ge=1, description="Chain id used for quote signatures")
     pricing_verifying_contract: str = Field(
         default="0x0000000000000000000000000000000000000000",
         description="EIP-712 verifyingContract address for quote signatures",
     )
-    pricing_quote_ttl_seconds: int = Field(default=120, ge=15, le=600)
+    pricing_quote_ttl_seconds: int = Field(default=15, ge=15, le=600)
     pricing_quote_signature_required: bool = Field(
         default=True,
         description="Require wallet signature proof-of-possession on /pricing/quote unless an internal secret is used",
@@ -325,7 +329,9 @@ class Settings(BaseSettings):
         default=0, ge=0, description="Protocol liability cap per market (wei); 0 = unlimited"
     )
     market_commit_lead_seconds: int = Field(
-        default=86400, ge=60, description="Seconds from now to set commit deadline when auto-creating markets"
+        default_factory=lambda: int(PRESET.get("market_commit_lead_seconds", 86400)),
+        ge=60,
+        description="Seconds from now to set commit deadline when auto-creating markets",
     )
     market_reveal_lead_seconds: int = Field(
         default=172800,

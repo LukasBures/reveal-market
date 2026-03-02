@@ -199,7 +199,7 @@ wait_for_endpoint() {
   local endpoint="$1"
   local attempt
   for ((attempt = 1; attempt <= HTTP_RETRIES; attempt++)); do
-    if curl -fsS --max-time "${HTTP_TIMEOUT_SECONDS}" -o /dev/null "${endpoint}"; then
+    if curl -fsS --connect-timeout "${HTTP_TIMEOUT_SECONDS}" --max-time 30 -o /dev/null "${endpoint}"; then
       log_info "HTTP OK: ${endpoint}"
       return 0
     fi
@@ -234,7 +234,7 @@ wait_for_secret_endpoint() {
   local secret="$2"
   local attempt
   for ((attempt = 1; attempt <= HTTP_RETRIES; attempt++)); do
-    if curl -fsS --max-time "${HTTP_TIMEOUT_SECONDS}" -H "X-Internal-Secret: ${secret}" -o /dev/null "${endpoint}"; then
+    if curl -fsS --connect-timeout "${HTTP_TIMEOUT_SECONDS}" --max-time 30 -H "X-Internal-Secret: ${secret}" -o /dev/null "${endpoint}"; then
       log_info "HTTP OK (secret): ${endpoint}"
       return 0
     fi

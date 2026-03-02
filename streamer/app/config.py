@@ -1,10 +1,21 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import cast
 from urllib.parse import urlparse, urlunparse
 
 from pydantic import AnyHttpUrl, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from shared.env_presets import get_preset
+
+PRESET = get_preset()
+
+
+def _preset_list(key: str) -> list[str]:
+    preset_value = PRESET.get(key, [])
+    if isinstance(preset_value, Iterable) and not isinstance(preset_value, (str, bytes)):
+        return [str(item) for item in preset_value]
+    return []
 
 
 class Settings(BaseSettings):
@@ -103,7 +114,7 @@ class Settings(BaseSettings):
         default_factory=list,
         description="Optional CSV/list of FX websocket URLs used for failover (overrides fx_primary_ws_url).",
     )
-    fx_ws_stale_ttl_seconds: int = Field(default=5, ge=3, description="Seconds before FX WS is considered stale")
+    fx_ws_stale_ttl_seconds: int = Field(default=60, ge=3, description="Seconds before FX WS is considered stale")
     fx_max_age_seconds: int = Field(default=60, ge=5, description="Max acceptable age for FX quote before refresh")
     fx_max_jump_percent: float = Field(default=20.0, ge=0, description="Max allowed FX price jump percent")
     fx_jump_window_seconds: int = Field(default=10, ge=1, description="Window in seconds for FX jump detection")
@@ -196,14 +207,14 @@ class Settings(BaseSettings):
         "Checked via X-Ops-Secret header. Required in prod.",
     )
     cors_allow_origins: list[str] = Field(
-        default_factory=list,
+        default_factory=lambda: _preset_list("streamer_cors_origins"),
         description="CORS allow-origins list; must be set explicitly (wildcard disallowed in prod)",
     )
     cors_allow_methods: list[str] = Field(default_factory=lambda: ["*"], description="CORS allow-methods list")
     cors_allow_headers: list[str] = Field(default_factory=lambda: ["*"], description="CORS allow-headers list")
     cors_allow_credentials: bool = Field(default=False, description="CORS allow-credentials flag")
     public_base_url: AnyHttpUrl | None = Field(
-        default=cast(AnyHttpUrl, "https://stream.revealmarket.xyz"),
+        default_factory=lambda: cast(AnyHttpUrl, str(PRESET.get("streamer_public", "https://stream.revealmarket.xyz"))),
         description="Public HTTPS streamer host used by browsers.",
     )
     public_failover_urls: list[AnyHttpUrl] = Field(
