@@ -11,12 +11,43 @@ from app.state import FxQuote, StreamState
 from prometheus_client import CollectorRegistry
 
 
+class _DummyPipeline:
+    """Minimal pipeline that queues commands and replays them on execute."""
+
+    def __init__(self, redis: DummyRedis):
+        self._redis = redis
+        self._ops: list[tuple[str, tuple, dict]] = []
+
+    def hset(self, key: str, mapping: dict):
+        self._ops.append(("hset", (key,), {"mapping": mapping}))
+        return self
+
+    def lpush(self, key: str, value: str):
+        self._ops.append(("lpush", (key, value), {}))
+        return self
+
+    def ltrim(self, key: str, start: int, end: int):
+        self._ops.append(("ltrim", (key, start, end), {}))
+        return self
+
+    def expire(self, key: str, seconds: int):
+        self._ops.append(("expire", (key, seconds), {}))
+        return self
+
+    async def execute(self):
+        for method, args, kwargs in self._ops:
+            await getattr(self._redis, method)(*args, **kwargs)
+
+
 class DummyRedis:
     def __init__(self):
         self.data = {}
         self.published = []
         self.history = {}
         self.expires = {}
+
+    def pipeline(self, transaction: bool = True):  # noqa: FBT001,FBT002
+        return _DummyPipeline(self)
 
     async def hset(self, key: str, mapping: dict):
         self.data[key] = mapping
