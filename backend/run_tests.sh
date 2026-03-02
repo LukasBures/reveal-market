@@ -130,7 +130,7 @@ run_shared_tests() {
     fi
     pushd "${REPO_ROOT}" >/dev/null
     printf '[%s] pytest shared (args=%s)\n' "$(timestamp)" "${pytest_args[*]:-1}"
-    python -m pytest "${pytest_args[@]}" "${shared_tests_path}"
+    python -m pytest "${pytest_args[@]}" -m "not live" "${shared_tests_path}"
     popd >/dev/null
   )
 }
