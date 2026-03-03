@@ -269,7 +269,7 @@ class AsyncGoldskyClient:
         GOLDSKY_DEGRADED_GAUGE.set(1)
 
         now = time.monotonic()
-        last_emit, suppressed = self._failure_log_state.get(event, (0.0, 0))
+        last_emit, suppressed = self._failure_log_state.get(event, (float("-inf"), 0))
         if now - last_emit < self._failure_log_cooldown_seconds:
             self._failure_log_state[event] = (last_emit, suppressed + 1)
             GOLDSKY_FAILURE_SUPPRESSED_COUNTER.labels(event=event).inc()
