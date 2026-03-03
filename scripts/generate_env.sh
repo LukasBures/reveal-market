@@ -95,8 +95,8 @@ GRAFANA_ADMIN_USER="${GRAFANA_ADMIN_USER:-admin}"
 RM_RELAYER_BASE_URL="${RM_RELAYER_BASE_URL:-http://relayer:8088}"
 RM_PROVER_BASE_URL="${RM_PROVER_BASE_URL:-http://prover:8085}"
 RM_POLYMARKET_API_BASE="${RM_POLYMARKET_API_BASE:-https://clob.polymarket.com}"
-HEDGER_ALLOWED_HOSTS="${HEDGER_ALLOWED_HOSTS:-hedger,hedger:8090,localhost,127.0.0.1}"
-HEDGER_CORS_ALLOW_ORIGINS="${HEDGER_CORS_ALLOW_ORIGINS:-http://api:8000,http://hedger:8090}"
+HEDGER_ALLOWED_HOSTS="${HEDGER_ALLOWED_HOSTS:-[\"hedger\",\"hedger:8090\",\"localhost\",\"127.0.0.1\"]}"
+HEDGER_CORS_ALLOW_ORIGINS="${HEDGER_CORS_ALLOW_ORIGINS:-[\"http://api:8000\",\"http://hedger:8090\"]}"
 
 # ---- Write ----
 echo "Generating ${OUTPUT} ..."
