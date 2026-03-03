@@ -31,6 +31,7 @@ const DEFAULT_SUGGEST_REVALIDATE_SECONDS = 15;
 const DEFAULT_CLOSES_WITHIN_HOURS = 24;
 const DEFAULT_FETCH_TIMEOUT_MS = 8000;
 const EVENTS_FETCH_TIMEOUT_MS = 15000;
+const MARKET_DETAIL_FETCH_TIMEOUT_MS = 20000;
 const SUGGEST_FETCH_TIMEOUT_MS = 5000;
 const PROOF_FETCH_TIMEOUT_MS = 12000;
 const logOfflineAwareError = (scope: string, error: unknown, meta?: Record<string, unknown>) => {
@@ -864,7 +865,7 @@ export async function fetchMarketByEventId(eventId: string, eventKey?: string | 
       {
         next: { revalidate: 30 },
       },
-      DEFAULT_FETCH_TIMEOUT_MS,
+      MARKET_DETAIL_FETCH_TIMEOUT_MS,
     );
     if (response.status === 404) {
       logger.warn("fetchMarketByEventId:not_found", { eventId });

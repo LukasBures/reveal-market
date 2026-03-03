@@ -37,7 +37,12 @@ const SCHEMA_EVENT_STATUS_MAP: Record<string, string> = {
 };
 
 const loadEvent = cache(async (eventId: string) => {
-  const { data } = await fetchMarketByEventId(eventId);
+  const { data, error } = await fetchMarketByEventId(eventId);
+  // Only treat a confirmed "not_found" as a missing event. Transient errors
+  // (timeouts, API overload) should throw so Next.js does not cache a 404.
+  if (data === null && error !== "not_found") {
+    throw new Error(`event load failed: ${error ?? "unknown"}`);
+  }
   return data;
 });
 

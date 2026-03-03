@@ -46,6 +46,11 @@ def _observe_cache_op(operation: str, start: float) -> None:
 _TAG_PREFIX = "cache:tag:"
 _SCHEMA_UNKNOWN_TAG = "schema:unknown"
 
+# Maximum keys per MGET call. A single MGET with >500 keys can block Redis
+# (single-threaded) for 20-40ms, starving all other clients including BRPOP
+# queue operations. Chunk large key sets to keep each MGET under ~1ms.
+_MGET_CHUNK_SIZE = 500
+
 
 class _JsonLib(Protocol):
     def loads(self, payload: str | bytes) -> Any:
@@ -230,7 +235,12 @@ async def get_json(client: Redis | None, key: str) -> Any:
 
 
 async def get_json_many(client: Redis | None, keys: Sequence[str]) -> dict[str, Any]:
-    """Fetch and JSON-decode multiple keys from Redis."""
+    """Fetch and JSON-decode multiple keys from Redis.
+
+    Large key sets are automatically split into chunks of at most _MGET_CHUNK_SIZE
+    to prevent a single MGET from blocking Redis (single-threaded) for tens of
+    milliseconds and starving other clients such as BRPOP queue readers.
+    """
 
     results: dict[str, Any] = {}
     if not keys:
@@ -246,8 +256,17 @@ async def get_json_many(client: Redis | None, keys: Sequence[str]) -> dict[str, 
             if value is not None:
                 results[key] = value
         return results
+
+    # Split into chunks to avoid blocking Redis with a single huge MGET.
+    key_list = list(keys)
+    if len(key_list) > _MGET_CHUNK_SIZE:
+        for i in range(0, len(key_list), _MGET_CHUNK_SIZE):
+            chunk_results = await get_json_many(client, key_list[i : i + _MGET_CHUNK_SIZE])
+            results.update(chunk_results)
+        return results
+
     try:
-        payloads = await client.mget(list(keys))
+        payloads = await client.mget(key_list)
     except RedisError as exc:  # pragma: no cover - defensive
         shared_logging.log_event(
             logger,
@@ -259,19 +278,19 @@ async def get_json_many(client: Redis | None, keys: Sequence[str]) -> dict[str, 
         )
         get_stats_client().record_error()
         return results
-    if payloads is None or len(payloads) != len(keys):
+    if payloads is None or len(payloads) != len(key_list):
         shared_logging.log_event(
             logger,
             logging.WARNING,
             event="cache.mget.length_mismatch",
             message="redis MGET returned unexpected number of payloads",
-            expected=len(keys),
+            expected=len(key_list),
             actual=0 if payloads is None else len(payloads),
         )
         get_stats_client().record_error()
         return results
     stats = get_stats_client()
-    for key, payload_raw in zip(keys, payloads, strict=True):
+    for key, payload_raw in zip(key_list, payloads, strict=True):
         if payload_raw is None:
             stats.record_miss()
             continue

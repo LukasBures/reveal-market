@@ -530,3 +530,6 @@ Index("ix_markets_featured", Market.featured, postgresql_where=Market.featured.i
 # Phase 4: Normalized-column B-tree indexes & BRIN for append-only timestamps
 Index("ix_markets_category", Market.category)
 Index("ix_commitments_created_brin", Commitment.created_at, postgresql_using="brin")
+# Proof receipts are sorted by generated_at DESC, created_at DESC on every /proofs request.
+# Without an index the query requires a full-table sort; this composite covers the ORDER BY.
+Index("ix_settlement_receipts_generated_created", SettlementReceipt.generated_at, SettlementReceipt.created_at)

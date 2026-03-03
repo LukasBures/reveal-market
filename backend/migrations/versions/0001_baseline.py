@@ -448,6 +448,7 @@ def upgrade() -> None:
     op.create_index("ix_settlement_receipts_market_id", "settlement_receipts", ["market_id"])
     op.create_index("ix_settlement_receipts_market_address", "settlement_receipts", ["market_address"])
     op.create_index("ix_settlement_receipts_request", "settlement_receipts", ["request_id"])
+    op.create_index("ix_settlement_receipts_generated_created", "settlement_receipts", ["generated_at", "created_at"])
 
     # ────────────────────────────────────────
     # hedger_treasury_snapshots

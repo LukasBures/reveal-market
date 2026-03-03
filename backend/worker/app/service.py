@@ -1375,6 +1375,9 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
                             committed = True
                             commit_pending = 0
                             await _flush_sync_batch(summary)
+                            inter_commit_sleep = runtime.settings.sync_inter_commit_sleep_seconds
+                            if inter_commit_sleep > 0:
+                                await asyncio.sleep(inter_commit_sleep)
                         expunge_start = time.perf_counter()
                         session.expunge_all()  # keep identity map small between pages
                         expunge_ms = (time.perf_counter() - expunge_start) * 1000

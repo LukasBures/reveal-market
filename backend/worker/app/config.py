@@ -155,6 +155,22 @@ class Settings(BaseSettings):
     polymarket_only_open_markets: bool | None = Field(default=None)
     polymarket_active_filter: bool | None = Field(default=None)
     polymarket_archived_filter: bool | None = Field(default=None)
+    polymarket_end_date_min_days: int | None = Field(
+        default=-7,
+        description=(
+            "Only sync markets whose end date is at or after today+N days. "
+            "Negative values look back; e.g. -7 = 7 days ago. "
+            "Set to None (or blank env var) to disable and fetch all markets."
+        ),
+    )
+    polymarket_end_date_max_days: int | None = Field(
+        default=7,
+        description=(
+            "Only sync markets whose end date is at or before today+N days. "
+            "Positive values look forward; e.g. 7 = 7 days from now. "
+            "Set to None (or blank env var) to disable and fetch all markets."
+        ),
+    )
     polymarket_max_retries: int = Field(default=3, ge=1)
     polymarket_retry_backoff_seconds: float = Field(default=0.2, ge=0)
     polymarket_retry_backoff_max_seconds: float = Field(default=2.0, ge=0)
@@ -416,6 +432,15 @@ class Settings(BaseSettings):
     db_latency_pace_enabled: bool = Field(default=True)
     db_latency_pace_ms: float = Field(default=300.0, ge=0)
     db_latency_pace_sleep_seconds: float = Field(default=1.0, ge=0)
+    sync_inter_commit_sleep_seconds: float = Field(
+        default=0.05,
+        ge=0,
+        description=(
+            "Sleep this many seconds after each batch commit during Polymarket sync. "
+            "A small pause (50-200ms) lets the DB release row locks and lets the API "
+            "service requests without timeouts. 0 disables the pause."
+        ),
+    )
     settlement_queue_poll_seconds: float = Field(default=1.0, ge=0.1)
     settlement_queue_max_concurrency: int = Field(default=2, ge=1)
     settlement_submission_lock_key_prefix: str = Field(
@@ -541,6 +566,8 @@ class Settings(BaseSettings):
     @field_validator(
         "polymarket_active_filter",
         "polymarket_archived_filter",
+        "polymarket_end_date_min_days",
+        "polymarket_end_date_max_days",
         "settlement_gas_price_gwei",
         "settlement_max_priority_fee_gwei",
         "lock_batches_gas_price_gwei",

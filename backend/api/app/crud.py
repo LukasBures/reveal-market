@@ -246,7 +246,7 @@ def _apply_common_filters(stmt, *, status: str | None, category: str | None, ora
         stmt = stmt.where(models.Market.status == status)
     if category:
         normalized_category = category.lower()
-        stmt = stmt.where(models.Market.category == normalized_category)
+        stmt = stmt.where(func.lower(models.Market.category) == normalized_category)
     if oracle:
         stmt = stmt.where(models.Market.oracle == oracle)
     if featured:
