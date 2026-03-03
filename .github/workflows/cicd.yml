@@ -95,16 +95,6 @@ jobs:
 
       - uses: ./.github/actions/setup-foundry
 
-      - name: Install Foundry dependencies (polygon)
-        run: |
-          set -euo pipefail
-          cd contracts/polygon
-          if [ ! -d lib/forge-std ] || [ ! -d lib/openzeppelin-contracts ]; then
-            forge install --no-git --shallow \
-              foundry-rs/forge-std@v1.9.1 \
-              openzeppelin/openzeppelin-contracts@v5.0.0
-          fi
-
       - uses: ./.github/actions/setup-python-uv
 
       - name: Sync dependencies

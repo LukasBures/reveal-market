@@ -20,8 +20,6 @@ runs:
         path: |
           contracts/zen/out
           contracts/zen/cache
-          contracts/polygon/out
-          contracts/polygon/cache
-        key: foundry-${{ runner.os }}-${{ hashFiles('contracts/**/*.sol', 'contracts/zen/foundry.toml', 'contracts/polygon/foundry.toml') }}
+        key: foundry-${{ runner.os }}-${{ hashFiles('contracts/zen/**/*.sol', 'contracts/zen/foundry.toml') }}
         restore-keys: |
           foundry-${{ runner.os }}-
