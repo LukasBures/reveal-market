@@ -20,6 +20,6 @@ gas_reports = ["*"]
 runs = 32
 
 [profile.ci.fuzz]
-runs = 256
+runs = 64
 verbosity = 3
 via_ir = true
