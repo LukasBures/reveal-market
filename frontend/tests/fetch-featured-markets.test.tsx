@@ -19,7 +19,7 @@ describe("fetchFeaturedEvents", () => {
   it("calls /events by default", async () => {
     await fetchFeaturedEvents(6);
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining("/events?limit=6&status=active&order_by=volume&coalesce_groups=1"),
+      expect.stringContaining("/events?limit=6&status=active&order_by=volume"),
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     // closes_within_hours should not be present when closesWithinHours is not explicitly provided
@@ -31,7 +31,7 @@ describe("fetchFeaturedEvents", () => {
     await fetchFeaturedEvents(10, { category: "Sports" });
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining(
-        "/events?limit=10&status=active&order_by=volume&coalesce_groups=1&category=sports",
+        "/events?limit=10&status=active&order_by=volume&category=sports",
       ),
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );

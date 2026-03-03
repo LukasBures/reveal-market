@@ -1501,6 +1501,8 @@ async def hydrate_markets_cache(
         page_cache_keys: list[str] = []
         for start in range(0, total_to_cache, page_size):
             slice_items = market_models[start : start + page_size]
+            # Omit coalesce_groups so page keys match the runtime /events
+            # endpoint cache keys (which never include coalesce_groups).
             slice_key = markets_list_cache_key(
                 target_status,
                 None,
@@ -1509,7 +1511,6 @@ async def hydrate_markets_cache(
                 page_size,
                 start,
                 order_by=target_order_by,
-                coalesce_groups=coalesce_groups,
             )
             await write_market_list_cache(cache, slice_key, slice_items)
             page_cache_keys.append(slice_key)

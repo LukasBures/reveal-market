@@ -441,7 +441,6 @@ export async function fetchFeaturedEvents(limit = 6, options?: FetchFeaturedMark
     if (onlyFeatured) {
       params.set("only_featured", "1");
     }
-    params.set("coalesce_groups", "1");
     const effectiveStatus = statusParam ?? "active";
     if (typeof options?.offset === "number") {
       params.set("offset", String(options.offset));

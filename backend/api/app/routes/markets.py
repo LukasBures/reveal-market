@@ -173,7 +173,8 @@ async def list_markets(
                     reverse=True,
                 )
             cached_events = market_svc.build_event_responses(cached_models)
-            cached_events = cached_events[offset : offset + limit]
+            # Page caches (from hydration) are pre-sliced; trim to limit only.
+            cached_events = cached_events[:limit]
             log_event(
                 logger,
                 logging.INFO,
@@ -288,14 +289,20 @@ async def list_markets(
             order_by=normalized_order_by,
             trending=bool(trending),
         )
-    if cache_enabled and market_models:
+    events = market_svc.build_event_responses(market_models)
+    page_events = events[offset : offset + limit]
+    # Collect only the MarketResponse models for the final page slice so the
+    # cached entry is pre-sliced — consistent with hydrated page caches.
+    page_event_ids = {e.event_id for e in page_events}
+    page_models = [m for m in market_models if m.event_id in page_event_ids]
+    if cache_enabled and page_models:
         schema_tag = await get_schema_tag(cache, settings.schema_version_key)
-        await market_svc.write_market_list_cache(cache, cache_key, market_models)
+        await market_svc.write_market_list_cache(cache, cache_key, page_models)
         await add_tag(cache, schema_tag, cache_key)
         await add_tag(cache, "markets:list", cache_key)
         await add_tags(
             cache,
-            [f"market:{item.event_id}" for item in market_models if item.event_id],
+            [f"market:{item.event_id}" for item in page_models if item.event_id],
             cache_key,
         )
         duration = (time.perf_counter() - start) * 1000
@@ -339,8 +346,7 @@ async def list_markets(
             trending=bool(trending),
             closes_within_hours=closes_within_hours,
         )
-    events = market_svc.build_event_responses(market_models)
-    return events[offset : offset + limit]
+    return page_events
 
 
 @router.get("/categories/{category_slug}", response_model=list[schemas.MarketResponse], tags=["markets"])
