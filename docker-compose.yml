@@ -367,7 +367,10 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      # Next.js performs ISR pre-generation at startup (hundreds of fetchMarketByEventId
+      # calls). With start_period: 10s the health check failures counted before ISR was done,
+      # causing 3 SIGTERM restarts (ExitCode 0). 90s gives ample room even on cold starts.
+      start_period: 90s
     deploy:
       replicas: 1
       resources:
