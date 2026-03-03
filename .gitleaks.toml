@@ -1,0 +1,28 @@
+# Gitleaks configuration — allowlist patterns for CI scanning.
+# We scan the file tree (--no-git) so only current source is checked.
+
+[allowlist]
+
+# Environment example/template files use placeholder values
+paths = [
+  '''\.env\.example$''',
+  '''contracts/zen/\.env\.example$''',
+]
+
+# Test files commonly use dummy hex keys and bearer tokens
+regexTarget = "line"
+[[allowlist.regexes]]
+description = "Repeated-nibble dummy private keys in test fixtures (0x1111..., 0x0101...)"
+regex = '''0x(([0-9a-fA-F])\2{63}|([0-9a-fA-F]{2})\3{31})'''
+
+[[allowlist.regexes]]
+description = "Test-only placeholder secrets and tokens"
+regex = '''(?i)(test[_-]?secret|changeme|placeholder|dummy|example|PRIVATE_KEY=0xYOUR)'''
+
+[[allowlist.regexes]]
+description = "Foundry/Anvil well-known default private keys"
+regex = '''0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'''
+
+[[allowlist.regexes]]
+description = "Zero-filled keys used as defaults"
+regex = '''0x0{64}'''
