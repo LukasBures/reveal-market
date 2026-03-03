@@ -111,7 +111,7 @@ class Settings(BaseSettings):
         description="Commit after this many markets are processed (0 = commit every page).",
     )
     polymarket_use_events_endpoint: bool = Field(
-        default=True,
+        default=False,
         description="Use Gamma /events pagination (false uses /markets to reduce payload size).",
     )
     worker_memory_log_enabled: bool = Field(
