@@ -432,7 +432,7 @@ export async function fetchFeaturedEvents(limit = 6, options?: FetchFeaturedMark
     const orderBy = options?.orderBy ?? "volume";
     params.set("order_by", orderBy);
     const closesWithinHours = options?.closesWithinHours;
-    if (closesWithinHours !== null) {
+    if (closesWithinHours != null) {
       const effectiveWindow = closesWithinHours ?? DEFAULT_CLOSES_WITHIN_HOURS;
       if (Number.isFinite(effectiveWindow) && effectiveWindow > 0) {
         params.set("closes_within_hours", String(effectiveWindow));
@@ -481,14 +481,13 @@ export async function fetchFeaturedEvents(limit = 6, options?: FetchFeaturedMark
       orderBy,
       revalidate: options?.revalidate ?? DEFAULT_REVALIDATE_SECONDS,
     });
-    const response = await fetchWithTimeout(
-      url.toString(),
-      {
-        cache: "force-cache",
-        next: { revalidate: options?.revalidate ?? DEFAULT_REVALIDATE_SECONDS, tags: fetchTags },
-      },
-      DEFAULT_FETCH_TIMEOUT_MS,
-    );
+    const fetchOptions: NextFetchOptions = IS_BROWSER
+      ? {}
+      : {
+          cache: "force-cache",
+          next: { revalidate: options?.revalidate ?? DEFAULT_REVALIDATE_SECONDS, tags: fetchTags },
+        };
+    const response = await fetchWithTimeout(url.toString(), fetchOptions, DEFAULT_FETCH_TIMEOUT_MS);
 
     if (!response.ok) {
       logger.warn("fetchFeaturedEvents:failed", {

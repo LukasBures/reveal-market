@@ -113,7 +113,7 @@ export function FeaturedEventsClient({
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteQuery({
     queryKey,
     queryFn: async ({ pageParam = 0 }) => {
-      const { data } = await fetchFeaturedEvents(batchSize, {
+      const result = await fetchFeaturedEvents(batchSize, {
         searchQuery,
         category: normalizedCategory,
         offset: pageParam,
@@ -122,7 +122,10 @@ export function FeaturedEventsClient({
         orderBy,
         closesWithinHours,
       });
-      return data;
+      if (result.error) {
+        throw new Error(result.error);
+      }
+      return result.data;
     },
     initialPageParam: 0,
     initialData: {
