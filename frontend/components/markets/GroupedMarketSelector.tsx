@@ -4,10 +4,20 @@ import Link from "next/link";
 import type { Route } from "next";
 import type { UrlObject } from "url";
 import { useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import type { MarketDetail, MarketSibling } from "@/lib/api-types";
 import { formatDate, formatUsd } from "@/lib/formatters";
 import { resolvePriceStreamMarketId } from "@/lib/markets";
-import { MarketDetailChart } from "@/components/markets/MarketDetailChart";
+
+const MarketDetailChart = dynamic(
+  () => import("@/components/markets/MarketDetailChart").then((m) => ({ default: m.MarketDetailChart })),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-72 w-full animate-pulse rounded-xl bg-white/5" />
+    ),
+  }
+);
 
 type Props = {
   groupSlug?: string | null;

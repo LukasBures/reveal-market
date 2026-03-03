@@ -1,8 +1,9 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { Manrope } from "next/font/google";
 import localFont from "next/font/local";
 import Script from "next/script";
+import { Toaster } from "sonner";
 import "./globals.css";
 
 import "@/lib/suppressLocalStorageWarning";
@@ -80,6 +81,13 @@ const websiteJsonLd = {
     target: `${SEARCH_URL}?q={search_term_string}`,
     "query-input": "required name=search_term_string",
   },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  themeColor: "#2735d2",
 };
 
 export const metadata: Metadata = {
@@ -163,11 +171,17 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         className="text-white antialiased px-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]"
         suppressHydrationWarning
       >
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:absolute focus:z-[100] focus:top-4 focus:left-4 focus:rounded-lg focus:bg-white focus:px-4 focus:py-2 focus:text-black focus:font-semibold focus:shadow-lg"
+        >
+          Skip to main content
+        </a>
         <AppProviders>
           <HeartbeatClient />
           <div className="flex min-h-screen flex-col">
             <MainNav />
-            <main className="flex-1 flex flex-col">{children}</main>
+            <main id="main-content" className="flex-1 flex flex-col">{children}</main>
             <Footer />
           </div>
         </AppProviders>
@@ -190,6 +204,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             </Script>
           </>
         ) : null}
+        <Toaster theme="dark" position="bottom-right" richColors />
       </body>
     </html>
   );
