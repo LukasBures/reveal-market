@@ -4,12 +4,18 @@ import { afterEach, beforeEach, vi } from "vitest";
 import { AppProviders } from "@/components/providers/AppProviders";
 
 const pathnameState = vi.hoisted(() => ({ value: "/" }));
+const connectWalletButtonMock = vi.hoisted(() => () => <button type="button">Connect Wallet</button>);
 
 vi.mock("@/lib/env-presets", () => ({
   resolveUrlConfig: () => ({
     mode: "prod",
     siteUrl: "http://localhost:3000",
   }),
+}));
+
+vi.mock("next/dynamic", () => ({
+  __esModule: true,
+  default: () => connectWalletButtonMock,
 }));
 
 vi.mock("next/navigation", () => ({
