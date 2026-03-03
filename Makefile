@@ -103,7 +103,7 @@ gen-address:
 
 local:
 	./run_local.sh
-	$(MAKE) --no-print-directory smoke-local
+	SMOKE_MAX_RESTARTS=1 $(MAKE) --no-print-directory smoke-local
 
 smoke-local:
 	./scripts/smoke_local.sh
