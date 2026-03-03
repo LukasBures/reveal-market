@@ -3,12 +3,26 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import dynamic from "next/dynamic";
 import type { Route } from "next";
 import { usePathname, useSearchParams } from "next/navigation";
-import { ConnectWalletButton } from "@/components/wallet/ConnectWalletButton";
+
 import { HeroSearch } from "@/components/marketing/HeroSearch";
 import { resolveUrlConfig } from "@/lib/env-presets";
 import { categorySlugFromLabel, parseCategorySlug } from "@/lib/slugs";
+
+const ConnectWalletButton = dynamic(
+  () =>
+    import("@/components/wallet/ConnectWalletButton").then((m) => ({
+      default: m.ConnectWalletButton,
+    })),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-9 w-24 animate-pulse rounded-full bg-white/10" />
+    ),
+  }
+);
 
 const resolvedUrls = resolveUrlConfig();
 const resolvedSiteUrl = (resolvedUrls.siteUrl ?? "").trim();

@@ -1,6 +1,9 @@
+"use client";
+
 import type { ReactNode } from "react";
 import type { ProofReceipt } from "@/lib/api-types";
 import { formatDateTime, normalizeHex } from "@/lib/formatters";
+import { CopyButton } from "@/components/ui/CopyButton";
 
 type Props = {
   receipts: ProofReceipt[];
@@ -70,9 +73,14 @@ function ProofReceiptCard({ receipt }: CardProps) {
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div className="space-y-2">
           <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Proof receipt</p>
-          <p className="font-mono text-sm text-white" title={receipt.requestId ?? undefined}>
-            {shorten(receipt.requestId ?? receipt.proofHash ?? "—", 10)}
-          </p>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="font-mono text-sm text-white" title={receipt.requestId ?? undefined}>
+              {shorten(receipt.requestId ?? receipt.proofHash ?? "—", 10)}
+            </span>
+            {(receipt.requestId ?? receipt.proofHash) ? (
+              <CopyButton value={receipt.requestId ?? receipt.proofHash ?? ""} label="Copy request ID" />
+            ) : null}
+          </span>
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
             <span>{formatTimestamp(receipt.generatedAt)}</span>
             {batchLabel ? <span>{batchLabel}</span> : null}
@@ -95,13 +103,13 @@ function ProofReceiptCard({ receipt }: CardProps) {
           <ExplorerLink href={hrefFor("address", receipt.marketAddress)} label={receipt.marketAddress ?? "—"} />
         </DataCell>
         <DataCell label="Condition">
-          <TruncatedValue value={receipt.conditionId ?? receipt.eventId} visible={12} />
+          <TruncatedValue value={receipt.conditionId ?? receipt.eventId} visible={12} copyable />
         </DataCell>
         <DataCell label="Winning outcome">
           <span className="font-mono text-white">{receipt.winningOutcomeId ?? "—"}</span>
         </DataCell>
         <DataCell label="Proof hash">
-          <TruncatedValue value={receipt.proofHash} visible={14} />
+          <TruncatedValue value={receipt.proofHash} visible={14} copyable />
         </DataCell>
         <DataCell label="Circuit">
           <span className="font-mono text-white" title={receipt.circuitHash ?? undefined}>
@@ -109,10 +117,10 @@ function ProofReceiptCard({ receipt }: CardProps) {
           </span>
         </DataCell>
         <DataCell label="Prover build">
-          <TruncatedValue value={receipt.proverVersion} visible={12} />
+          <TruncatedValue value={receipt.proverVersion} visible={12} copyable />
         </DataCell>
         <DataCell label={rootLabel}>
-          <TruncatedValue value={receipt.merkleRoot} visible={14} />
+          <TruncatedValue value={receipt.merkleRoot} visible={14} copyable />
         </DataCell>
         {batchNumber !== null ? (
           <DataCell label="Batch">
@@ -197,17 +205,17 @@ type ExplorerLinkProps = {
 
 function ExplorerLink({ href, label, visible = 10 }: ExplorerLinkProps) {
   const text = shorten(label, visible);
-  if (!href) return <span>{text}</span>;
   return (
-    <a
-      className="text-brand-200 hover:text-brand-100 underline-offset-4 hover:underline"
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-      title={label ?? undefined}
-    >
-      {text}
-    </a>
+    <span className="inline-flex items-center gap-1">
+      {href ? (
+        <a className="text-brand-200 hover:text-brand-100 underline-offset-4 hover:underline" href={href} target="_blank" rel="noreferrer" title={label ?? undefined}>
+          {text}
+        </a>
+      ) : (
+        <span title={label ?? undefined}>{text}</span>
+      )}
+      {label ? <CopyButton value={label} label="Copy address" /> : null}
+    </span>
   );
 }
 
@@ -252,16 +260,18 @@ function shorten(value?: string | null, visible = 6): string {
 type TruncatedValueProps = {
   value?: string | null;
   visible?: number;
+  copyable?: boolean;
 };
 
-function TruncatedValue({ value, visible = 10 }: TruncatedValueProps) {
+function TruncatedValue({ value, visible = 10, copyable = false }: TruncatedValueProps) {
   const display = shorten(value, visible);
   if (display === "—") {
     return <span>—</span>;
   }
   return (
-    <span title={value ?? undefined} className="font-mono text-white">
-      {display}
+    <span className="inline-flex items-center gap-1">
+      <span title={value ?? undefined} className="font-mono text-white">{display}</span>
+      {copyable && value ? <CopyButton value={value} label="Copy value" /> : null}
     </span>
   );
 }

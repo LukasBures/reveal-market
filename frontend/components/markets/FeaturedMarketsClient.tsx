@@ -49,6 +49,7 @@ export function FeaturedEventsClient({
   const [autoLoadCount, setAutoLoadCount] = useState(0);
   const [showLoadingState, setShowLoadingState] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [fetchHint, setFetchHint] = useState<"auto" | "manual" | null>(null);
   const [intersectionSupported, setIntersectionSupported] = useState(false);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -173,12 +174,14 @@ export function FeaturedEventsClient({
       startTransition(() => {
         fetchNextPage()
           .then(() => {
+            setLoadMoreError(null);
             if (mode === "auto") {
               setAutoLoadCount((count) => count + 1);
             }
           })
           .catch((error) => {
             logger.clientError("FeaturedEventsClient:loadMore_failed", { error: (error as Error).message });
+            setLoadMoreError("Failed to load more events.");
           })
           .finally(() => {
             setShowLoadingState(false);
@@ -301,6 +304,18 @@ export function FeaturedEventsClient({
           </button>
         </div>
       )}
+      {loadMoreError ? (
+        <div className="flex flex-col items-center gap-2 py-4">
+          <p className="text-sm text-slate-400">{loadMoreError}</p>
+          <button
+            type="button"
+            onClick={() => { setLoadMoreError(null); handleLoadMore("manual"); }}
+            className="rounded-full border border-white/20 bg-white/5 px-4 py-2 text-sm text-white transition hover:border-white/40 hover:bg-white/10 cursor-pointer"
+          >
+            Try again
+          </button>
+        </div>
+      ) : null}
   </section>
 );
 }

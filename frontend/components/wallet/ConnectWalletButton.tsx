@@ -8,6 +8,7 @@ import type { Connector } from "wagmi";
 import { useConnect, useConnectors, useConnection, useDisconnect, useSwitchChain } from "wagmi";
 import { ensureEip6963Discovery, getEip6963Providers, type Eip6963ProviderDetail } from "@/lib/eip6963";
 import { defaultChain } from "@/lib/wagmi";
+import { CopyButton } from "@/components/ui/CopyButton";
 
 type ConnectorOption = {
   id: string;
@@ -673,7 +674,10 @@ export function ConnectWalletButton() {
                     <p className="text-[11px] uppercase tracking-[0.25em] text-white/50">Connected</p>
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <p className="font-mono text-sm">{formatAddress(address)}</p>
+                        <div className="flex items-center">
+                          <p className="font-mono text-sm">{formatAddress(address)}</p>
+                          <CopyButton value={address ?? ""} label="Copy wallet address" className="ml-1 text-slate-400" />
+                        </div>
                           <p className="text-[11px] text-white/60">{chain?.name ?? "Unknown network"}</p>
                         </div>
                         <div className="flex items-center gap-2">

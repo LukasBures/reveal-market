@@ -72,6 +72,7 @@ export function ProofsClient({ initialReceipts, pageSize = 24, filters }: Props)
   const [receipts, setReceipts] = useState(initialReceipts);
   const [hasMore, setHasMore] = useState(initialReceipts.length >= pageSize);
   const [isLoadingMore, startLoadMore] = useTransition();
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [isFiltering, startFilterTransition] = useTransition();
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const offsetRef = useRef(initialReceipts.length);
@@ -100,12 +101,13 @@ export function ProofsClient({ initialReceipts, pageSize = 24, filters }: Props)
         }
         offsetRef.current += next.length;
         setReceipts((prev) => [...prev, ...next]);
+        setLoadMoreError(null);
         if (next.length < pageSize) {
           setHasMore(false);
         }
       } catch (error) {
         logger.clientError("ProofsClient:loadMore_failed", { error: (error as Error).message });
-        setHasMore(false);
+        setLoadMoreError("Failed to load more receipts.");
       }
     });
   }, [hasMore, isLoadingMore, pageSize, startLoadMore]);
@@ -265,6 +267,18 @@ export function ProofsClient({ initialReceipts, pageSize = 24, filters }: Props)
           All available proof receipts are loaded. Check back soon for fresh attestations.
         </p>
       )}
+      {loadMoreError ? (
+        <div className="flex flex-col items-center gap-2 py-4">
+          <p className="text-sm text-slate-400">{loadMoreError}</p>
+          <button
+            type="button"
+            onClick={() => { setLoadMoreError(null); loadMore(); }}
+            className="rounded-full border border-white/20 bg-white/5 px-4 py-2 text-sm text-white transition hover:border-white/40 hover:bg-white/10 cursor-pointer"
+          >
+            Try again
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
