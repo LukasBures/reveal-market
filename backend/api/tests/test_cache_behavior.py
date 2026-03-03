@@ -106,11 +106,19 @@ def test_market_detail_cached(client, db_session, monkeypatch):
 
 def test_hydrate_markets_cache_populates_from_db(client, db_session):
     first = models.Market(
-        event_id="evt-hydrate-1", title="Hydrate Alpha", category="sports", oracle="0x1", status="commit",
+        event_id="evt-hydrate-1",
+        title="Hydrate Alpha",
+        category="sports",
+        oracle="0x1",
+        status="commit",
         closes_at=_FUTURE,
     )
     second = models.Market(
-        event_id="evt-hydrate-2", title="Hydrate Beta", category="crypto", oracle="0x2", status="commit",
+        event_id="evt-hydrate-2",
+        title="Hydrate Beta",
+        category="crypto",
+        oracle="0x2",
+        status="commit",
         closes_at=_FUTURE,
     )
     db_session.add_all([first, second])

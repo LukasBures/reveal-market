@@ -31,7 +31,14 @@ def test_hydrator_writes_tagged_cache_and_respects_lock(client, db_session, monk
 
     cache = asyncio.run(api_main.get_cache_client())
     cache_key = markets_list_cache_key(
-        "active", None, None, None, 2, 0, order_by=api_main.settings.cache_hydrate_order_by, coalesce_groups=True,
+        "active",
+        None,
+        None,
+        None,
+        2,
+        0,
+        order_by=api_main.settings.cache_hydrate_order_by,
+        coalesce_groups=True,
         closes_within_hours=24,
     )
     assert summary["cache_key"] == cache_key

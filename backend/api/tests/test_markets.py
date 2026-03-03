@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-_SENTINEL = object()
-
 import app.server as api_main
 from app import crud, models
 from app.services.markets import market_detail_cache_key
 from prometheus_client import REGISTRY
 from shared.cache_keys import markets_list_cache_key, suggest_cache_key
 from sqlalchemy import select
+
+_SENTINEL = object()
 
 
 def _make_market(
