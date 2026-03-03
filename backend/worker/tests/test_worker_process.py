@@ -763,7 +763,14 @@ async def test_fetch_markets_from_polymarket_counts_success(monkeypatch):
     monkeypatch.setattr(
         runtime_module,
         "polymarket_client",
-        type("Dummy", (), {"fetch_events_paginated": _fake_events_paginated})(),
+        type(
+            "Dummy",
+            (),
+            {
+                "fetch_events_paginated": _fake_events_paginated,
+                "fetch_markets_paginated": _fake_events_paginated,
+            },
+        )(),
         raising=False,
     )
     monkeypatch.setattr(runtime_module.settings, "polymarket_sync_max_attempts", 1, raising=False)
@@ -808,7 +815,14 @@ async def test_fetch_markets_stops_on_updated_at_cutoff(monkeypatch):
     monkeypatch.setattr(
         runtime_module,
         "polymarket_client",
-        type("Dummy", (), {"fetch_events_paginated": _fake_events_paginated})(),
+        type(
+            "Dummy",
+            (),
+            {
+                "fetch_events_paginated": _fake_events_paginated,
+                "fetch_markets_paginated": _fake_events_paginated,
+            },
+        )(),
         raising=False,
     )
     monkeypatch.setattr(runtime_module.settings, "polymarket_order", "updatedAt", raising=False)
@@ -851,7 +865,14 @@ async def test_fetch_markets_from_polymarket_counts_errors(monkeypatch):
     monkeypatch.setattr(
         runtime_module,
         "polymarket_client",
-        type("Dummy", (), {"fetch_events_paginated": always_fail})(),
+        type(
+            "Dummy",
+            (),
+            {
+                "fetch_events_paginated": always_fail,
+                "fetch_markets_paginated": always_fail,
+            },
+        )(),
         raising=False,
     )
     monkeypatch.setattr(runtime_module.settings, "polymarket_sync_max_attempts", 1, raising=False)
@@ -900,7 +921,14 @@ async def test_fetch_markets_from_polymarket_retries(monkeypatch):
     monkeypatch.setattr(
         runtime_module,
         "polymarket_client",
-        type("Dummy", (), {"fetch_events_paginated": flaky_fetch})(),
+        type(
+            "Dummy",
+            (),
+            {
+                "fetch_events_paginated": flaky_fetch,
+                "fetch_markets_paginated": flaky_fetch,
+            },
+        )(),
         raising=False,
     )
     monkeypatch.setattr(runtime_module.settings, "polymarket_sync_max_attempts", 2, raising=False)
