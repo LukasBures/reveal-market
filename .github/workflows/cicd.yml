@@ -611,7 +611,7 @@ jobs:
         run: |
           echo "Waiting for deployment to become healthy..."
           for i in $(seq 1 10); do
-            if curl -sf --max-time 10 https://api.revealmarket.xyz/health; then
+            if curl -sf --max-time 10 https://api.revealmarket.xyz/healthz; then
               echo ""
               echo "Health check passed on attempt $i"
               exit 0
