@@ -876,7 +876,7 @@ func validateStrictRequest(req settlementProofRequest) error {
 	if err != nil {
 		return newValidationError(err.Error())
 	}
-	totalLiability, err := parseNonNegativeDecimal(req.TotalLiability, "total_liability")
+	_, err = parseNonNegativeDecimal(req.TotalLiability, "total_liability")
 	if err != nil {
 		return newValidationError(err.Error())
 	}
@@ -901,16 +901,6 @@ func validateStrictRequest(req settlementProofRequest) error {
 	sumPools := new(big.Int).Add(poolYes, poolNo)
 	if sumPools.Cmp(totalEscrow) > 0 {
 		return newValidationError("pool_totals cannot exceed total_escrow")
-	}
-	if totalLiability.Cmp(totalEscrow) > 0 {
-		return newValidationError("total_liability cannot exceed total_escrow")
-	}
-	expectedRake := new(big.Int).Set(totalEscrow)
-	expectedRake.Mul(expectedRake, rakeBps)
-	expectedRake.Div(expectedRake, big.NewInt(10_000))
-	expectedLiability := new(big.Int).Sub(totalEscrow, expectedRake)
-	if totalLiability.Cmp(expectedLiability) != 0 {
-		return newValidationError("total_liability does not match total_escrow and rake_bps")
 	}
 	commitmentsCount, err := parseFlexibleNumber(req.CommitmentsCount, "commitments_count")
 	if err != nil {

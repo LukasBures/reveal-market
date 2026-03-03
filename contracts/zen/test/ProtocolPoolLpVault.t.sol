@@ -147,12 +147,12 @@ contract ProtocolPoolLpVaultTest is Test {
         _lpDeposit(lp1, 10 ether);
         (uint256 shares, uint256 unlockTime) = pool.depositAt(lp1, 0);
         assertEq(shares, 10 ether);
-        assertEq(unlockTime, t + 60 days);
+        assertEq(unlockTime, t + 30 days);
     }
 
     function testWithdrawBeforeLockReverts() external {
         _lpDeposit(lp1, 10 ether);
-        vm.warp(block.timestamp + 59 days);
+        vm.warp(block.timestamp + 29 days);
         vm.prank(lp1);
         vm.expectRevert(ProtocolPool.InsufficientUnlockedShares.selector);
         pool.lpWithdraw(10 ether, 0);
@@ -168,15 +168,15 @@ contract ProtocolPoolLpVaultTest is Test {
     }
 
     function testTwoDepositsOnlyOlderWithdrawableAtMidpoint() external {
-        // Deposit 1 at t=1, unlocks at t = 1 + 60 days = 5_184_001
+        // Deposit 1 at t=1, unlocks at t = 1 + 30 days = 2_592_001
         _lpDeposit(lp1, 10 ether);
 
-        // Deposit 2 at t = 30 days + 1, unlocks at t = 30 days + 1 + 60 days = 7_776_001
-        vm.warp(1 + 30 days);
+        // Deposit 2 at t = 15 days + 1, unlocks at t = 15 days + 1 + 30 days = 3_888_001
+        vm.warp(1 + 15 days);
         _lpDeposit(lp1, 5 ether);
 
-        // Warp to exactly 60 days + 1 — first deposit unlocked, second still locked
-        vm.warp(1 + 60 days);
+        // Warp to exactly 30 days + 1 — first deposit unlocked, second still locked
+        vm.warp(1 + 30 days);
         assertEq(pool.unlockedShares(lp1), 10 ether);
         assertEq(pool.depositCount(lp1), 2);
 
@@ -513,7 +513,7 @@ contract ProtocolPoolLpVaultTest is Test {
         emit ProtocolPool.FundsReceived(lp1, 10 ether);
 
         vm.expectEmit(true, false, false, true);
-        emit ProtocolPool.LpDeposited(lp1, 10 ether, 10 ether, block.timestamp + 60 days);
+        emit ProtocolPool.LpDeposited(lp1, 10 ether, 10 ether, block.timestamp + 30 days);
 
         vm.prank(lp1);
         pool.deposit(10 ether);
@@ -559,6 +559,179 @@ contract ProtocolPoolLpVaultTest is Test {
         vm.prank(lp1);
         pool.lpWithdraw(100 ether, 0);
         assertEq(token.balanceOf(lp1), 50 ether);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  Emergency unlock
+    // ═══════════════════════════════════════════════════════════════════
+
+    function testGrantEmergencyUnlockOnlyOwner() external {
+        vm.prank(lp1);
+        vm.expectRevert();
+        pool.grantEmergencyUnlock(lp1);
+    }
+
+    function testRevokeEmergencyUnlockOnlyOwner() external {
+        vm.prank(lp1);
+        vm.expectRevert();
+        pool.revokeEmergencyUnlock(lp1);
+    }
+
+    function testGrantEmergencyUnlockZeroAddressReverts() external {
+        vm.prank(owner);
+        vm.expectRevert(ProtocolPool.InvalidAddress.selector);
+        pool.grantEmergencyUnlock(address(0));
+    }
+
+    function testRevokeEmergencyUnlockZeroAddressReverts() external {
+        vm.prank(owner);
+        vm.expectRevert(ProtocolPool.InvalidAddress.selector);
+        pool.revokeEmergencyUnlock(address(0));
+    }
+
+    function testGrantEmergencyUnlockEmitsEvent() external {
+        vm.expectEmit(true, false, false, false);
+        emit ProtocolPool.EmergencyUnlockGranted(lp1);
+        vm.prank(owner);
+        pool.grantEmergencyUnlock(lp1);
+    }
+
+    function testRevokeEmergencyUnlockEmitsEvent() external {
+        vm.prank(owner);
+        pool.grantEmergencyUnlock(lp1);
+
+        vm.expectEmit(true, false, false, false);
+        emit ProtocolPool.EmergencyUnlockRevoked(lp1);
+        vm.prank(owner);
+        pool.revokeEmergencyUnlock(lp1);
+    }
+
+    function testEmergencyUnlockAllowsWithdrawBeforeLock() external {
+        _lpDeposit(lp1, 100 ether);
+
+        // Confirm withdrawal is blocked before lock expires.
+        vm.prank(lp1);
+        vm.expectRevert(ProtocolPool.InsufficientUnlockedShares.selector);
+        pool.lpWithdraw(100 ether, 0);
+
+        // Owner grants emergency unlock.
+        vm.prank(owner);
+        pool.grantEmergencyUnlock(lp1);
+
+        // LP can now withdraw immediately — no time travel needed.
+        vm.prank(lp1);
+        pool.lpWithdraw(100 ether, 0);
+        assertEq(token.balanceOf(lp1), 100 ether, "LP recovered full principal");
+        assertEq(pool.lpShareBalance(lp1), 0, "shares burned");
+    }
+
+    function testEmergencyUnlockReflectedInUnlockedShares() external {
+        _lpDeposit(lp1, 100 ether);
+        assertEq(pool.unlockedShares(lp1), 0, "locked before grant");
+
+        vm.prank(owner);
+        pool.grantEmergencyUnlock(lp1);
+        assertEq(pool.unlockedShares(lp1), 100 ether, "all shares unlocked after grant");
+    }
+
+    function testEmergencyUnlockReflectedInMaxRedeemable() external {
+        _lpDeposit(lp1, 100 ether);
+        assertEq(pool.maxRedeemable(lp1), 0, "none redeemable before grant");
+
+        vm.prank(owner);
+        pool.grantEmergencyUnlock(lp1);
+        assertEq(pool.maxRedeemable(lp1), 100 ether, "all redeemable after grant");
+    }
+
+    function testRevokeEmergencyUnlockPreventsWithdraw() external {
+        _lpDeposit(lp1, 100 ether);
+
+        vm.prank(owner);
+        pool.grantEmergencyUnlock(lp1);
+
+        // Revoke before LP acts.
+        vm.prank(owner);
+        pool.revokeEmergencyUnlock(lp1);
+
+        // Withdrawal blocked again.
+        vm.prank(lp1);
+        vm.expectRevert(ProtocolPool.InsufficientUnlockedShares.selector);
+        pool.lpWithdraw(100 ether, 0);
+        assertEq(pool.emergencyUnlocked(lp1), false);
+    }
+
+    function testEmergencyUnlockDoesNotBypassIdleLiquidity() external {
+        _lpDeposit(lp1, 100 ether);
+
+        // Market reserves 80 — only 20 idle.
+        vm.prank(factory);
+        pool.registerMarket(market, 100 ether);
+        vm.prank(market);
+        pool.reserveLiability(market, 80 ether);
+
+        vm.prank(owner);
+        pool.grantEmergencyUnlock(lp1);
+
+        // Cannot withdraw 100 — only 20 idle.
+        vm.prank(lp1);
+        vm.expectRevert(ProtocolPool.InsufficientIdleLiquidity.selector);
+        pool.lpWithdraw(100 ether, 0);
+
+        // Can withdraw only the 20 idle.
+        vm.prank(lp1);
+        pool.lpWithdraw(20 ether, 0);
+        assertEq(token.balanceOf(lp1), 20 ether);
+    }
+
+    function testEmergencyUnlockFlagPersistsAfterWithdraw() external {
+        _lpDeposit(lp1, 50 ether);
+
+        vm.prank(owner);
+        pool.grantEmergencyUnlock(lp1);
+
+        // LP withdraws.
+        vm.prank(lp1);
+        pool.lpWithdraw(50 ether, 0);
+        assertEq(pool.lpShareBalance(lp1), 0);
+
+        // Flag still set — new deposit immediately unlocked.
+        _lpDeposit(lp1, 30 ether);
+        assertEq(pool.unlockedShares(lp1), 30 ether, "new deposit unlocked while flag active");
+
+        // Owner revokes — the flag reverts to time-based locking for ALL deposits (even the 30 ether above,
+        // which still has a future unlockTime). Revoking is a global override, not per-deposit.
+        vm.prank(owner);
+        pool.revokeEmergencyUnlock(lp1);
+        assertEq(pool.unlockedShares(lp1), 0, "30 ether deposit locked again after revoke");
+
+        // Further deposits are also normally locked.
+        _lpDeposit(lp1, 10 ether);
+        assertEq(pool.unlockedShares(lp1), 0, "new deposit locked");
+
+        // LP cannot withdraw anything.
+        vm.prank(lp1);
+        vm.expectRevert(ProtocolPool.InsufficientUnlockedShares.selector);
+        pool.lpWithdraw(1 ether, 0);
+    }
+
+    function testEmergencyUnlockDoesNotAffectOtherLps() external {
+        _lpDeposit(lp1, 100 ether);
+        _lpDeposit(lp2, 50 ether);
+
+        // Only lp1 gets emergency unlock.
+        vm.prank(owner);
+        pool.grantEmergencyUnlock(lp1);
+
+        // lp2 still locked.
+        assertEq(pool.unlockedShares(lp2), 0, "lp2 unaffected");
+        vm.prank(lp2);
+        vm.expectRevert(ProtocolPool.InsufficientUnlockedShares.selector);
+        pool.lpWithdraw(50 ether, 0);
+
+        // lp1 can withdraw.
+        vm.prank(lp1);
+        pool.lpWithdraw(100 ether, 0);
+        assertEq(token.balanceOf(lp1), 100 ether);
     }
 
     // ═══════════════════════════════════════════════════════════════════

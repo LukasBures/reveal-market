@@ -24,7 +24,7 @@ from shared.merkle import build_merkle_path, build_merkle_root_and_paths
 from shared.onchain import OnChainConfigurationError, get_async_web3, load_account, to_checksum
 from shared.onchain.abi import ERC20_ABI, MARKET_FACTORY_ABI, PROTOCOL_POOL_ABI, RELAYER_ESCROW_ABI, REVEAL_MARKET_ABI
 from shared.onchain.logs import decode_known_logs
-from shared.poseidon import BATCH_SIZE, compute_leaf, int_to_bytes32, int_to_hex32, poseidon_t3
+from shared.poseidon import BATCH_SIZE, FIELD_MODULUS, compute_leaf, int_to_bytes32, int_to_hex32, poseidon_t3
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from web3 import Web3
@@ -1812,8 +1812,8 @@ async def trade_commit(
             reserved=reserved_ticket_id,
         )
     ticket_id = reserved_ticket_id
-    salt_bytes = secrets.token_bytes(32)
-    salt_hex = "0x" + salt_bytes.hex()
+    salt_int = secrets.randbelow(FIELD_MODULUS)
+    salt_hex = "0x" + salt_int.to_bytes(32, "big").hex()
     if not quote.wallet_address:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="wallet_required")
     _verify_commit_signature(quote.wallet_address, str(quote.quote_id or ""), wallet_signature)

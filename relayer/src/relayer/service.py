@@ -201,6 +201,7 @@ class RelayerService:
             allow_zero=False,
         )
         nonce = self._require_uint(self._require_field(payload, "nonce"), "nonce")
+        ticket_id = self._require_uint(self._require_field(payload, "ticket_id"), "ticket_id")
         expiry = self._require_uint(
             self._require_field(payload, "expiry"),
             "expiry",
@@ -230,6 +231,7 @@ class RelayerService:
             "ticket_value": ticket_value,
             "nonce": nonce,
             "expiry": expiry,
+            "ticket_id": ticket_id,
             "commitment_bytes": commitment_bytes,
             "signature_bytes": signature_bytes,
             "user_addr": user_addr,
@@ -584,6 +586,7 @@ class RelayerService:
         market_addr = validation["market_addr"]
         auth = (
             commitment,
+            validation["ticket_id"],
             user_addr,
             validation["nonce"],
             validation["expiry"],

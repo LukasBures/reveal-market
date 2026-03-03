@@ -78,6 +78,7 @@ def _valid_commit_payload():
         "expiry": int(time.time()) + 60,
         "chain_id": 1,
         "ticket_value_wei": 1,
+        "ticket_id": 0,
         "signature": "0x" + "1" * 130,
     }
 
@@ -131,6 +132,7 @@ async def test_commit_serializes_nonce_lock():
         "expiry": int(time.time()) + 60,
         "chain_id": 1,
         "ticket_value_wei": 1,
+        "ticket_id": 0,
         "signature": "0x" + "1" * 130,
     }
 

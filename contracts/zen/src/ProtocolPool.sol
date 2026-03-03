@@ -25,7 +25,7 @@ contract ProtocolPool is Ownable2Step, ReentrancyGuard {
     uint256 public reservedTotal;
 
     // ── LP vault state ──────────────────────────────────────────────────
-    uint256 public constant LOCK_DURATION = 60 days;
+    uint256 public constant LOCK_DURATION = 30 days;
     uint256 public totalShares;
 
     struct DepositRecord {
@@ -50,6 +50,8 @@ contract ProtocolPool is Ownable2Step, ReentrancyGuard {
     event MarketDrawPausedSet(address indexed market, bool paused);
     event LpDeposited(address indexed lp, uint256 assets, uint256 shares, uint256 unlockTime);
     event LpWithdrawn(address indexed lp, uint256 assets, uint256 shares);
+    event EmergencyUnlockGranted(address indexed lp);
+    event EmergencyUnlockRevoked(address indexed lp);
 
     // ── Errors ──────────────────────────────────────────────────────────
     error Unauthorized();
@@ -72,6 +74,7 @@ contract ProtocolPool is Ownable2Step, ReentrancyGuard {
     uint256 public capacityLimit;
     bool public capacityEnabled;
     bool public drawsPaused;
+    mapping(address => bool) public emergencyUnlocked;
 
     constructor(address owner_, IERC20 collateralToken_) Ownable(owner_) {
         COLLATERAL_TOKEN = collateralToken_;
@@ -230,6 +233,21 @@ contract ProtocolPool is Ownable2Step, ReentrancyGuard {
         emit MarketDrawPausedSet(market, paused);
     }
 
+    /// @notice Grant emergency unlock to an LP, allowing them to call lpWithdraw() before their lock expires.
+    ///         The existing idle-liquidity guard still applies — reserved market funds remain protected.
+    function grantEmergencyUnlock(address lp) external onlyOwner {
+        if (lp == address(0)) revert InvalidAddress();
+        emergencyUnlocked[lp] = true;
+        emit EmergencyUnlockGranted(lp);
+    }
+
+    /// @notice Revoke a previously granted emergency unlock.
+    function revokeEmergencyUnlock(address lp) external onlyOwner {
+        if (lp == address(0)) revert InvalidAddress();
+        emergencyUnlocked[lp] = false;
+        emit EmergencyUnlockRevoked(lp);
+    }
+
     // ── LP deposit ──────────────────────────────────────────────────────
 
     /// @notice Deposit collateral and receive LP shares (1:1). Shares are locked for LOCK_DURATION.
@@ -356,8 +374,9 @@ contract ProtocolPool is Ownable2Step, ReentrancyGuard {
     function _unlockedSharesOf(address lp) internal view returns (uint256 unlocked) {
         DepositRecord[] storage records = _deposits[lp];
         uint256 len = records.length;
+        bool emergency = emergencyUnlocked[lp];
         for (uint256 i; i < len;) {
-            if (records[i].unlockTime <= block.timestamp && records[i].shares > 0) {
+            if (records[i].shares > 0 && (emergency || records[i].unlockTime <= block.timestamp)) {
                 unlocked += records[i].shares;
             }
             unchecked {
@@ -406,8 +425,9 @@ contract ProtocolPool is Ownable2Step, ReentrancyGuard {
         DepositRecord[] storage records = _deposits[lp];
         uint256 len = records.length;
         uint256 remaining = sharesToBurn;
+        bool emergency = emergencyUnlocked[lp];
         for (uint256 i; i < len && remaining > 0;) {
-            if (records[i].unlockTime > block.timestamp || records[i].shares == 0) {
+            if (records[i].shares == 0 || (!emergency && records[i].unlockTime > block.timestamp)) {
                 unchecked {
                     ++i;
                 }

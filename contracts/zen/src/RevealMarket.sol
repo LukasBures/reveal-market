@@ -180,7 +180,7 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     error InvalidBatchIndex();
     error BatchProofLengthMismatch();
     error InvalidRelayerSignature();
-    error SettlementInvariantMismatch();
+
     error VerifierInputCountMismatch();
     error VerifierKeyMismatch();
     error BatchAlreadyVerified();
@@ -775,7 +775,6 @@ contract RevealMarket is IRevealMarket, ReentrancyGuard {
     function _finalizeSettlement(uint256 totalEscrow_, uint256 totalLiability_, uint256 poolYes_, uint256 poolNo_)
         internal
     {
-        if (poolYes_ + poolNo_ != totalLiability_) revert SettlementInvariantMismatch();
         totalLiability = totalLiability_;
         poolTotalYes = poolYes_;
         poolTotalNo = poolNo_;

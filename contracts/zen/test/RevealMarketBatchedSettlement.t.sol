@@ -168,7 +168,7 @@ contract RevealMarketBatchedSettlementTest is Test, PoseidonTestUtils {
         market.verifyAndSettleBatched(proofs, signals, batchIndexes);
 
         assertEq(market.totalEscrow(), netTicket * totalTickets, "totalEscrow matches");
-        assertEq(market.totalLiability(), poolYes0, "totalLiability matches winning pool");
+        assertEq(market.totalLiability(), poolYes0, "totalLiability matches sum of winning payouts");
         assertEq(market.poolTotalYes(), poolYes0, "poolYes matches");
         assertEq(market.poolTotalNo(), 0, "poolNo matches");
     }

@@ -6,6 +6,7 @@ COMMIT_ABI = [
             {
                 "components": [
                     {"internalType": "bytes32", "name": "commitment", "type": "bytes32"},
+                    {"internalType": "uint256", "name": "ticketId", "type": "uint256"},
                     {"internalType": "address", "name": "user", "type": "address"},
                     {"internalType": "uint256", "name": "nonce", "type": "uint256"},
                     {"internalType": "uint256", "name": "expiry", "type": "uint256"},

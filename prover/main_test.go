@@ -461,8 +461,7 @@ func TestProofHandlerStrictValidation(t *testing.T) {
 	cfg := newTestConfig(t)
 	cfg.StrictValidation = true
 	app := newApp(cfg, stub)
-	payload.TotalLiability = "9"
-	payload.RakeBps = "50"
+	payload.PoolTotals = []string{"11", "0"}
 	body, _ := json.Marshal(payload)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/proofs/settlement", bytes.NewReader(body))
