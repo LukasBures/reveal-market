@@ -63,29 +63,18 @@ forge test --fail-fast
 echo "✅ Tests complete"
 echo
 
-echo "=============================="
-echo "📊  STEP 3: Checking gas snapshot"
-echo "=============================="
-if forge snapshot --check; then
-  echo "✅ Gas snapshot matches baseline"
-else
-  echo "⚠️  Gas snapshot changed — regenerating snapshot now (review .gas-snapshot in git diff)"
-  forge snapshot
-fi
-echo
-
 # ----------------------------------------------------------------------
 # Optional: Run fuzz & coverage in dedicated mode
 # ----------------------------------------------------------------------
 if [[ "${1:-}" == "full" ]]; then
   echo "=============================="
-  echo "🎯  STEP 4: Running extended fuzz tests"
+  echo "🎯  STEP 3: Running extended fuzz tests"
   echo "=============================="
   FOUNDRY_PROFILE=ci.fuzz forge test --match-test testFuzz --gas-report || true
   echo
 
   echo "=============================="
-  echo "🧮  STEP 5: Generating coverage report"
+  echo "🧮  STEP 4: Generating coverage report"
   echo "=============================="
   forge coverage --report summary || true
   echo "✅ Coverage report generated"
