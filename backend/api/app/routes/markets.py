@@ -291,10 +291,10 @@ async def list_markets(
         )
     events = market_svc.build_event_responses(market_models)
     page_events = events[offset : offset + limit]
-    # Collect only the MarketResponse models for the final page slice so the
-    # cached entry is pre-sliced — consistent with hydrated page caches.
-    page_event_ids = {e.event_id for e in page_events}
-    page_models = [m for m in market_models if m.event_id in page_event_ids]
+    # Extract the actual MarketResponse models from the EventResponse objects.
+    # EventResponse.event_id is the *group key* (from derive_group_key), which
+    # may differ from MarketResponse.event_id — so we pull from .markets instead.
+    page_models = [m for event in page_events for m in event.markets]
     if cache_enabled and page_models:
         schema_tag = await get_schema_tag(cache, settings.schema_version_key)
         await market_svc.write_market_list_cache(cache, cache_key, page_models)
