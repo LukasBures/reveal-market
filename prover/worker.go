@@ -238,7 +238,7 @@ func readWorkerJobsFromFile(path string) ([]workerJob, error) {
 	return jobs, nil
 }
 
-func appendWorkerJobs(path string, jobs []workerJob) error {
+func appendWorkerJobs(path string, jobs []workerJob) (retErr error) {
 	if len(jobs) == 0 {
 		return nil
 	}
@@ -246,7 +246,11 @@ func appendWorkerJobs(path string, jobs []workerJob) error {
 	if err != nil {
 		return fmt.Errorf("failed to open queue file %s for append: %w", path, err)
 	}
-	defer file.Close()
+	defer func() {
+		if cerr := file.Close(); cerr != nil && retErr == nil {
+			retErr = fmt.Errorf("failed to close queue file %s: %w", path, cerr)
+		}
+	}()
 
 	encoder := json.NewEncoder(file)
 	for _, job := range jobs {
@@ -257,7 +261,7 @@ func appendWorkerJobs(path string, jobs []workerJob) error {
 	return nil
 }
 
-func appendWorkerDeadLetters(path string, entries []workerDeadLetter) error {
+func appendWorkerDeadLetters(path string, entries []workerDeadLetter) (retErr error) {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -265,7 +269,11 @@ func appendWorkerDeadLetters(path string, entries []workerDeadLetter) error {
 	if err != nil {
 		return fmt.Errorf("failed to open dead-letter file %s for append: %w", path, err)
 	}
-	defer file.Close()
+	defer func() {
+		if cerr := file.Close(); cerr != nil && retErr == nil {
+			retErr = fmt.Errorf("failed to close dead-letter file %s: %w", path, cerr)
+		}
+	}()
 
 	encoder := json.NewEncoder(file)
 	for _, entry := range entries {

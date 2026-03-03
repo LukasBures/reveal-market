@@ -370,7 +370,7 @@ class TxQueue:
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=interval)
             except TimeoutError:
-                pass
+                pass  # Expected: timeout means it's time to send the next heartbeat
             if stop_event.is_set():
                 break
             try:
