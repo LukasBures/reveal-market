@@ -72,6 +72,7 @@ def setup_logging(service_name: str) -> None:
     service_logger.setLevel(log_level)
     service_logger.propagate = True
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     service_logger.info(
         "logging initialized",
         extra={
