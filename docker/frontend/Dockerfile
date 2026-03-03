@@ -79,9 +79,9 @@ ARG APP_GROUP=nextjs
 RUN id -u "${APP_USER}" >/dev/null 2>&1 || (addgroup -S "${APP_GROUP}" && adduser -S -G "${APP_GROUP}" "${APP_USER}")
 
 # Copy only what the standalone server needs: server bundle, static assets, public assets.
-COPY --from=builder --link --chown=${APP_USER}:${APP_GROUP} /app/frontend/.next/standalone ./
-COPY --from=builder --link --chown=${APP_USER}:${APP_GROUP} /app/frontend/.next/static ./.next/static
-COPY --from=builder --link --chown=${APP_USER}:${APP_GROUP} /app/frontend/public ./public
+COPY --from=builder --chown=${APP_USER}:${APP_GROUP} /app/frontend/.next/standalone ./
+COPY --from=builder --chown=${APP_USER}:${APP_GROUP} /app/frontend/.next/static ./.next/static
+COPY --from=builder --chown=${APP_USER}:${APP_GROUP} /app/frontend/public ./public
 
 USER ${APP_USER}
 

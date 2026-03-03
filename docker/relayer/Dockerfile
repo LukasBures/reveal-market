@@ -35,8 +35,8 @@ WORKDIR /app
 
 RUN id -u "${APP_USER}" >/dev/null 2>&1 || (groupadd -r "${APP_GROUP}" && useradd --create-home -r -g "${APP_GROUP}" "${APP_USER}")
 
-COPY --from=builder --link --chown=${APP_USER}:${APP_GROUP} /app/.venv ./.venv
-COPY --from=builder --link --chown=${APP_USER}:${APP_GROUP} /app/src ./src
+COPY --from=builder --chown=${APP_USER}:${APP_GROUP} /app/.venv ./.venv
+COPY --from=builder --chown=${APP_USER}:${APP_GROUP} /app/src ./src
 
 USER ${APP_USER}
 
