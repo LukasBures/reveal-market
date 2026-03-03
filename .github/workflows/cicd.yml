@@ -351,6 +351,7 @@ jobs:
         with:
           artifacts-deploy-key: ${{ env.ARTIFACTS_DEPLOY_KEY }}
           skip-artifacts-submodule: ${{ env.ARTIFACTS_DEPLOY_KEY == '' || env.PROVER_ARTIFACTS_URL != '' }}
+          skip-zen-lib-submodules: "true"
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff  # v5.6.0
         with:

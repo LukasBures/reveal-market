@@ -8,6 +8,12 @@ inputs:
   skip-artifacts-submodule:
     description: Whether to skip prover/artifacts submodule initialization
     default: "true"
+  skip-zen-lib-submodules:
+    description: >
+      Skip contracts/zen Foundry library submodules (forge-std, openzeppelin-contracts, solmate).
+      Set to true for jobs that do not build Solidity (e.g. prover) to avoid fetching deeply
+      nested sub-submodules that are prone to transient GitHub 500 errors.
+    default: "false"
 
 runs:
   using: composite
@@ -23,6 +29,11 @@ runs:
         if [ "${{ inputs.skip-artifacts-submodule }}" = "true" ]; then
           git config submodule.prover/artifacts.update none
         fi
+        if [ "${{ inputs.skip-zen-lib-submodules }}" = "true" ]; then
+          git config submodule."contracts/zen/lib/forge-std".update none
+          git config submodule."contracts/zen/lib/openzeppelin-contracts".update none
+          git config submodule."contracts/zen/lib/solmate".update none
+        fi
         GIT_SSH_COMMAND="ssh -i ~/.ssh/id_artifacts -o IdentitiesOnly=yes" git submodule update --init --recursive
 
     - name: Init submodules (no key)
@@ -30,4 +41,9 @@ runs:
       shell: bash
       run: |
         git config submodule.prover/artifacts.update none
+        if [ "${{ inputs.skip-zen-lib-submodules }}" = "true" ]; then
+          git config submodule."contracts/zen/lib/forge-std".update none
+          git config submodule."contracts/zen/lib/openzeppelin-contracts".update none
+          git config submodule."contracts/zen/lib/solmate".update none
+        fi
         git submodule update --init --recursive
