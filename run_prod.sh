@@ -576,18 +576,35 @@ log_info "Running: ${COMPOSE_CMD[*]} ${COMPOSE_FILE_ARGS[*]} ${COMPOSE_ENV_ARGS[
 "${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" config >/dev/null
 
 if [[ "${RUN_BUILD}" == "true" ]]; then
-  log_step "Building Docker images (cached layers, pulling latest bases, parallel=${COMPOSE_PARALLEL_LIMIT})"
-  if ! run_compose_build true "${COMPOSE_PARALLEL_LIMIT}"; then
-    if [[ "${COMPOSE_PARALLEL_LIMIT}" -gt 1 ]]; then
-      log_warn "Parallel compose build failed (BuildKit flake). Retrying sequentially."
-      if ! run_compose_build false 1; then
-        log_warn "Sequential compose build also failed."
-        exit 1
-      fi
-    else
+  # Use docker buildx bake for builds — it resolves shared python-base and
+  # python-runtime targets via docker-bake.hcl, which docker compose build
+  # cannot do (it would try to pull them from Docker Hub).
+  (
+    # docker buildx bake has no --env-file flag; export env vars into the
+    # shell so bake can interpolate ${VAR} references in docker-bake.hcl.
+    if [[ -f "${ENV_FILE}" ]]; then
+      while IFS= read -r _line || [[ -n "${_line}" ]]; do
+        [[ "${_line}" =~ ^[[:space:]]*# ]] && continue
+        [[ "${_line}" =~ ^[[:space:]]*$ ]] && continue
+        [[ "${_line}" == *=* ]] || continue
+        _key="${_line%%=*}"
+        _val="${_line#*=}"
+        if [[ "${_val}" =~ ^\"(.*)\"$ ]]; then
+          _val="${BASH_REMATCH[1]}"
+        elif [[ "${_val}" =~ ^\'(.*)\'$ ]]; then
+          _val="${BASH_REMATCH[1]}"
+        fi
+        export "${_key}=${_val}"
+      done < "${ENV_FILE}"
+    fi
+    log_step "Building images with docker buildx bake (parallel, shared bases)"
+    BAKE_CMD=("docker" "buildx" "bake" "--pull")
+    log_info "Running: ${BAKE_CMD[*]}"
+    if ! "${BAKE_CMD[@]}"; then
+      log_warn "docker buildx bake failed."
       exit 1
     fi
-  fi
+  )
 else
   log_warn "Skipping docker compose build step (per --skip-build)."
 fi
