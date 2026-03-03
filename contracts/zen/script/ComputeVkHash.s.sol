@@ -7,7 +7,7 @@ import {Deploy} from "./Deploy.s.sol";
 /// @dev Helper to compute EXPECTED_VERIFIER_KEY_HASH from a VK JSON file.
 ///      Usage: SETTLEMENT_VK_JSON="$(cat path/to/vk.json)" forge script script/ComputeVkHash.s.sol --tc ComputeVkHash --sig "computeHash()" -v
 contract ComputeVkHash is Deploy {
-    function computeHash() external {
+    function computeHash() external view {
         string memory vkJson = vm.envString("SETTLEMENT_VK_JSON");
         VerifyingKeyConfig memory vkConfig = _loadVerifyingKeyJson(vkJson);
 
