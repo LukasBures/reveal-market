@@ -742,6 +742,8 @@ async def get_group_siblings(session: AsyncSession, group_slug: str) -> list[sch
         select(models.Market)
         .outerjoin(models.MarketGammaMetadata, models.MarketGammaMetadata.market_id == models.Market.id)
         .where(group_expr == normalized)
+        .order_by(models.Market.closes_at.asc().nullslast(), models.Market.id.asc())
+        .limit(200)
     )
     markets = result.unique().scalars().all()
     if not markets:
@@ -859,6 +861,7 @@ async def get_group_siblings(session: AsyncSession, group_slug: str) -> list[sch
         return primary, close_ts, slug_value or sibling.event_id
 
     siblings_raw.sort(key=_sort_key)
+    siblings_raw = siblings_raw[:50]  # cap response to avoid oversized payloads for high-volume groups
     siblings = [item[0] for item in siblings_raw]
     if cache is not None and siblings:
         try:
