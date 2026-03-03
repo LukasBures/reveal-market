@@ -30,6 +30,7 @@ const DEFAULT_REVALIDATE_SECONDS = 30;
 const DEFAULT_SUGGEST_REVALIDATE_SECONDS = 15;
 const DEFAULT_CLOSES_WITHIN_HOURS = 24;
 const DEFAULT_FETCH_TIMEOUT_MS = 8000;
+const EVENTS_FETCH_TIMEOUT_MS = 15000;
 const SUGGEST_FETCH_TIMEOUT_MS = 5000;
 const PROOF_FETCH_TIMEOUT_MS = 12000;
 const logOfflineAwareError = (scope: string, error: unknown, meta?: Record<string, unknown>) => {
@@ -486,7 +487,7 @@ export async function fetchFeaturedEvents(limit = 6, options?: FetchFeaturedMark
           cache: "force-cache",
           next: { revalidate: options?.revalidate ?? DEFAULT_REVALIDATE_SECONDS, tags: fetchTags },
         };
-    const response = await fetchWithTimeout(url.toString(), fetchOptions, DEFAULT_FETCH_TIMEOUT_MS);
+    const response = await fetchWithTimeout(url.toString(), fetchOptions, EVENTS_FETCH_TIMEOUT_MS);
 
     if (!response.ok) {
       logger.warn("fetchFeaturedEvents:failed", {

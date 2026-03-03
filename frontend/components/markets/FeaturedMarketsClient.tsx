@@ -133,23 +133,16 @@ export function FeaturedEventsClient({
       pageParams: [0],
     },
     getNextPageParam: (lastPage, allPages) => {
-      const total = allPages.reduce((acc, page) => acc + page.length, 0);
-      if (total >= maxItems) return undefined;
       if (lastPage.length === 0) return undefined;
-      const priorIds = new Set(
-        allPages
-          .slice(0, -1)
-          .flatMap((page) => page.map((event) => event.eventId ?? ""))
-          .filter(Boolean),
-      );
-      const hasNewEvent = lastPage.some((event) => {
-        const id = event.eventId ?? "";
-        return id && !priorIds.has(id);
-      });
-      if (!hasNewEvent) return undefined;
-      return total;
+      // Use page-aligned offsets so cache keys match hydrated pages.
+      const pageIndex = allPages.length;
+      const nextOffset = pageIndex * batchSize;
+      if (nextOffset >= maxItems) return undefined;
+      return nextOffset;
     },
     staleTime: 30_000,
+    retry: 2,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 5000),
     refetchOnWindowFocus: false,
   });
 

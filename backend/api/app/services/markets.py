@@ -1434,7 +1434,6 @@ async def hydrate_markets_cache(
     hydrated_limit = min(
         max(1, int(target_limit)),
         settings.cacheable_market_limit,
-        settings.max_page_size,
     )
     start_time = time.perf_counter()
     lock_key = "lock:markets_cache:hydrate"
