@@ -388,7 +388,7 @@ jobs:
             URL="https://github.com/iden3/rapidsnark/releases/download/${RAPIDSNARK_VERSION}/${ARCHIVE}"
             echo "Downloading ${URL}"
             curl -fSL --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/rapidsnark.zip "${URL}"
-            unzip -q /tmp/rapidsnark.zip -d /tmp/rapidsnark
+            unzip -oq /tmp/rapidsnark.zip -d /tmp/rapidsnark
             rm -f /tmp/rapidsnark.zip
           else
             echo "rapidsnark restored from cache"
