@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import app.server as api_main
@@ -11,6 +12,8 @@ from shared.cache_async import _json_loads_compressed
 from shared.cache_keys import markets_list_cache_key
 from sqlalchemy import select
 
+_FUTURE = datetime.now(tz=UTC) + timedelta(hours=12)
+
 
 def test_markets_endpoint_uses_cache(client, db_session, monkeypatch):
     market = models.Market(
@@ -19,6 +22,7 @@ def test_markets_endpoint_uses_cache(client, db_session, monkeypatch):
         category="sports",
         oracle="0xabc",
         status="commit",
+        closes_at=_FUTURE,
     )
     db_session.add(market)
     db_session.commit()
@@ -26,7 +30,7 @@ def test_markets_endpoint_uses_cache(client, db_session, monkeypatch):
     response = client.get("/events", params={"limit": 10})
     assert response.status_code == 200
 
-    cache_key = markets_list_cache_key(None, None, None, None, 10, 0)
+    cache_key = markets_list_cache_key(None, None, None, None, 10, 0, closes_within_hours=24)
     cache_store = getattr(api_main.cache_client, "store", None)
     assert cache_store is not None and cache_key in cache_store
 
@@ -46,6 +50,7 @@ def test_market_cache_stores_event_ids_and_records(client, db_session):
         category="sports",
         oracle="0xabc",
         status="commit",
+        closes_at=_FUTURE,
     )
     db_session.add(market)
     db_session.flush()
@@ -58,7 +63,7 @@ def test_market_cache_stores_event_ids_and_records(client, db_session):
     response = client.get("/events", params={"limit": 5})
     assert response.status_code == 200
 
-    cache_key = markets_list_cache_key(None, None, None, None, 5, 0)
+    cache_key = markets_list_cache_key(None, None, None, None, 5, 0, closes_within_hours=24)
     cache_store = getattr(api_main.cache_client, "store", {})
     assert cache_key in cache_store
     cached_raw = _json_loads_compressed(cache_store[cache_key])
@@ -79,6 +84,7 @@ def test_market_detail_cached(client, db_session, monkeypatch):
         category="news",
         oracle="0xdef",
         status="commit",
+        closes_at=_FUTURE,
     )
     db_session.add(market)
     db_session.commit()
@@ -100,10 +106,12 @@ def test_market_detail_cached(client, db_session, monkeypatch):
 
 def test_hydrate_markets_cache_populates_from_db(client, db_session):
     first = models.Market(
-        event_id="evt-hydrate-1", title="Hydrate Alpha", category="sports", oracle="0x1", status="commit"
+        event_id="evt-hydrate-1", title="Hydrate Alpha", category="sports", oracle="0x1", status="commit",
+        closes_at=_FUTURE,
     )
     second = models.Market(
-        event_id="evt-hydrate-2", title="Hydrate Beta", category="crypto", oracle="0x2", status="commit"
+        event_id="evt-hydrate-2", title="Hydrate Beta", category="crypto", oracle="0x2", status="commit",
+        closes_at=_FUTURE,
     )
     db_session.add_all([first, second])
     db_session.commit()

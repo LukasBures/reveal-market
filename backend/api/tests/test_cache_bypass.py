@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import app.server as api_main
 from app import models
+
+_FUTURE = datetime.now(tz=UTC) + timedelta(hours=12)
 
 
 def _disable_cache(monkeypatch):
@@ -22,6 +26,7 @@ def test_markets_endpoint_bypasses_cache_when_unavailable(client, db_session, mo
         category="sports",
         oracle="0xabc",
         status="commit",
+        closes_at=_FUTURE,
     )
     db_session.add(market)
     db_session.commit()

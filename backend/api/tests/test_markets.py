@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+_SENTINEL = object()
+
 import app.server as api_main
 from app import crud, models
 from app.services.markets import market_detail_cache_key
@@ -24,9 +26,10 @@ def _make_market(
     orderbook_volume_usd: float | None = None,
     liquidity_usd: float | None = None,
     event_key: str | None = None,
-    closes_at: datetime | None = None,
+    closes_at: datetime | None = _SENTINEL,
 ) -> models.Market:
     now = datetime.now(tz=UTC)
+    effective_closes_at = now + timedelta(hours=12) if closes_at is _SENTINEL else closes_at
     return models.Market(
         event_id=event_id,
         title=title,
@@ -40,7 +43,7 @@ def _make_market(
         volume_24h_usd=volume_24h_usd,
         orderbook_volume_usd=orderbook_volume_usd,
         liquidity_usd=liquidity_usd,
-        closes_at=closes_at,
+        closes_at=effective_closes_at,
         created_at=now,
         updated_at=now,
     )
@@ -881,7 +884,7 @@ def test_category_endpoint_caches_results(client, db_session):
     assert len(payload) == 1
     assert payload[0]["event_id"] == "evt-cat1"
 
-    cache_key = markets_list_cache_key("sports", None, None, None, 5, 0)
+    cache_key = markets_list_cache_key("sports", None, None, None, 5, 0, closes_within_hours=24)
     assert cache_key in api_main.cache_client.store
     db_session.query(models.Market).delete()
     db_session.commit()
@@ -930,7 +933,7 @@ def test_category_endpoint_orders_by_volume(client, db_session):
     assert resp.status_code == 200
     payload = resp.json()
     assert [item["event_id"] for item in payload] == ["evt-cat-high", "evt-cat-low"]
-    cache_key = markets_list_cache_key("sports", None, None, None, 5, 0, order_by="volume")
+    cache_key = markets_list_cache_key("sports", None, None, None, 5, 0, order_by="volume", closes_within_hours=24)
     assert cache_key in api_main.cache_client.store
 
 
@@ -967,7 +970,7 @@ def test_markets_volume_order_respects_offset_and_cache(client, db_session):
     payload = resp.json()
     assert len(payload) == 1
     assert payload[0]["event_id"] == "evt-vol-mid"
-    cache_key = markets_list_cache_key(None, None, None, None, 1, 1, order_by="volume")
+    cache_key = markets_list_cache_key(None, None, None, None, 1, 1, order_by="volume", closes_within_hours=24)
     assert cache_key in api_main.cache_client.store
 
 
@@ -1041,6 +1044,7 @@ def test_create_market_invalidates_list_cache(client, db_session):
         "category": "sports",
         "oracle": "0xbbb",
         "status": "commit",
+        "closes_at": (datetime.now(tz=UTC) + timedelta(hours=12)).isoformat(),
     }
     create_response = client.post("/events", json=payload)
     assert create_response.status_code == 201
@@ -1056,7 +1060,7 @@ def test_market_search_requests_not_cached(client, db_session):
 
     response = client.get("/events", params={"search": "AI", "limit": 5})
     assert response.status_code == 200
-    cache_key = markets_list_cache_key(None, None, None, "ai", 5, 0)
+    cache_key = markets_list_cache_key(None, None, None, "ai", 5, 0, closes_within_hours=24)
     assert cache_key not in api_main.cache_client.store
 
 

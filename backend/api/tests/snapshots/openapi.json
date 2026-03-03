@@ -799,6 +799,7 @@
                   "type": "null"
                 }
               ],
+              "default": 24,
               "description": "Only return markets closing within this many hours",
               "title": "Closes Within Hours"
             },
@@ -893,6 +894,7 @@
                   "type": "null"
                 }
               ],
+              "default": 24,
               "description": "Only return markets closing within this many hours",
               "title": "Closes Within Hours"
             },

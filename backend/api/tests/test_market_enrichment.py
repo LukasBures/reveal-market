@@ -20,6 +20,7 @@ def _make_market(event_id: str, title: str, **extra) -> models.Market:
         "status": "commit",
         "created_at": now,
         "updated_at": now,
+        "closes_at": now + timedelta(hours=12),
     }
     defaults.update(extra)
     return models.Market(event_id=event_id, title=title, **defaults)

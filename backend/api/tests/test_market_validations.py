@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from app import models
 from app.server import settings
+
+_FUTURE = datetime.now(tz=UTC) + timedelta(hours=12)
 
 
 def test_create_market_requires_event_id(client):
@@ -45,6 +49,7 @@ def test_default_page_size_respected(client, db_session):
                 category="sports",
                 oracle="0xaaa",
                 status="commit",
+                closes_at=_FUTURE,
             ),
         )
     db_session.commit()

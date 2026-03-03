@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import app.server as api_main
 from app import models
 from app.services.markets import market_detail_cache_key
 from shared.cache_keys import markets_list_cache_key, suggest_cache_key
+
+_FUTURE = datetime.now(tz=UTC) + timedelta(hours=12)
 
 
 def _create_market(idx: int) -> models.Market:
@@ -13,6 +17,7 @@ def _create_market(idx: int) -> models.Market:
         category="sports",
         oracle="0xcache",
         status="commit",
+        closes_at=_FUTURE,
     )
 
 
@@ -20,7 +25,7 @@ def test_post_market_invalidates_cached_list(client, db_session):
     db_session.add(_create_market(1))
     db_session.commit()
 
-    cache_key = markets_list_cache_key(None, None, None, None, 10, 0)
+    cache_key = markets_list_cache_key(None, None, None, None, 10, 0, closes_within_hours=24)
     first = client.get("/events", params={"limit": 10})
     assert first.status_code == 200
     assert cache_key in api_main.cache_client.store
@@ -33,6 +38,7 @@ def test_post_market_invalidates_cached_list(client, db_session):
         "category": "sports",
         "oracle": "0xcache",
         "status": "commit",
+        "closes_at": _FUTURE.isoformat(),
     }
     response = client.post("/events", json=payload)
     assert response.status_code == 201

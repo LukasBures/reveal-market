@@ -1408,6 +1408,7 @@ async def hydrate_markets_cache(
     order_by: str | None = None,
     status: str | None = "active",
     coalesce_groups: bool = True,
+    closes_within_hours: int | None = 24,
 ) -> dict[str, Any]:
     """Populate the hottest markets into Redis directly from Postgres."""
 
@@ -1449,6 +1450,12 @@ async def hydrate_markets_cache(
         summary["status"] = "skipped"
         summary["reason"] = "hydrate_in_progress"
         return summary
+    closes_after = None
+    closes_before = None
+    if closes_within_hours is not None:
+        now = datetime.now(UTC)
+        closes_after = now
+        closes_before = now + timedelta(hours=closes_within_hours)
     try:
         async with session_scope() as session:
             records = await crud.get_markets(
@@ -1458,6 +1465,8 @@ async def hydrate_markets_cache(
                 offset=0,
                 order_by=target_order_by,
                 coalesce_groups=coalesce_groups,
+                closes_after=closes_after,
+                closes_before=closes_before,
             )
             market_models = filter_markets_for_visibility(
                 await enrich_market_models(session, [schemas.MarketResponse.model_validate(m) for m in records])
@@ -1487,6 +1496,7 @@ async def hydrate_markets_cache(
             0,
             order_by=target_order_by,
             coalesce_groups=coalesce_groups,
+            closes_within_hours=closes_within_hours,
         )
         await write_market_list_cache(cache, cache_key, market_models)
 
@@ -1510,6 +1520,7 @@ async def hydrate_markets_cache(
                 page_size,
                 start,
                 order_by=target_order_by,
+                closes_within_hours=closes_within_hours,
             )
             await write_market_list_cache(cache, slice_key, slice_items)
             page_cache_keys.append(slice_key)

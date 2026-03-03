@@ -39,6 +39,8 @@ async def get_markets(
             featured=featured,
             limit=limit,
             offset=offset,
+            closes_after=closes_after,
+            closes_before=closes_before,
         )
     stmt = select(models.Market).options(
         selectinload(models.Market.outcomes_rel),
@@ -280,6 +282,8 @@ async def _get_markets_by_total_volume(
     featured: bool | None,
     limit: int,
     offset: int,
+    closes_after: datetime | None = None,
+    closes_before: datetime | None = None,
 ) -> list[models.Market]:
     group_expr = _volume_group_expression()
     volume_expr = _volume_value_expression()
@@ -297,6 +301,12 @@ async def _get_markets_by_total_volume(
     )
     group_stmt = _apply_common_filters(group_stmt, status=status, category=category, oracle=oracle, featured=featured)
     group_stmt = _apply_text_search(session, group_stmt, search, apply_default_order=False)
+    if closes_after or closes_before:
+        group_stmt = group_stmt.where(models.Market.closes_at.isnot(None))
+        if closes_after:
+            group_stmt = group_stmt.where(models.Market.closes_at >= closes_after)
+        if closes_before:
+            group_stmt = group_stmt.where(models.Market.closes_at <= closes_before)
     group_cte = (
         group_stmt.group_by(group_expr)
         .order_by(
@@ -316,6 +326,12 @@ async def _get_markets_by_total_volume(
     )
     id_stmt = _apply_common_filters(id_stmt, status=status, category=category, oracle=oracle, featured=featured)
     id_stmt = _apply_text_search(session, id_stmt, search, apply_default_order=False)
+    if closes_after or closes_before:
+        id_stmt = id_stmt.where(models.Market.closes_at.isnot(None))
+        if closes_after:
+            id_stmt = id_stmt.where(models.Market.closes_at >= closes_after)
+        if closes_before:
+            id_stmt = id_stmt.where(models.Market.closes_at <= closes_before)
     id_stmt = id_stmt.order_by(
         group_cte.c.total_volume.desc(),
         group_cte.c.last_updated_at.desc(),

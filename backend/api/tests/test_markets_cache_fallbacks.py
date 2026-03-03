@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import app.server as api_main
 from app import models
+
+_FUTURE = datetime.now(tz=UTC) + timedelta(hours=12)
 
 
 def _make_market(event_id: str):
@@ -14,6 +16,7 @@ def _make_market(event_id: str):
         oracle="0xabc",
         status=models.MarketStatusEnum.COMMIT.value,
         created_at=datetime.now(UTC),
+        closes_at=_FUTURE,
     )
 
 

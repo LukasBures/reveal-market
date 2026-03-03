@@ -92,7 +92,7 @@ async def list_markets(
     closes_within_hours: Annotated[
         int | None,
         Query(ge=1, le=168, description="Only return markets closing within this many hours"),
-    ] = None,
+    ] = 24,
     session: AsyncSession = Depends(get_session),
 ) -> list[schemas.EventResponse]:
     """List events with optional filters and heavy reliance on Redis caches."""
@@ -361,7 +361,7 @@ async def list_markets_by_category(
     closes_within_hours: Annotated[
         int | None,
         Query(ge=1, le=168, description="Only return markets closing within this many hours"),
-    ] = None,
+    ] = 24,
     session: AsyncSession = Depends(get_session),
 ) -> list[schemas.MarketResponse]:
     """List markets for a category, with fallbacks when slugs are unfamiliar."""
@@ -663,7 +663,8 @@ async def get_event_by_key(
                     active_closes = [
                         closes_at
                         for closes_at in (getattr(item, "closes_at", None) for item in items)
-                        if isinstance(closes_at, datetime) and closes_at >= now
+                        if isinstance(closes_at, datetime)
+                        and (closes_at.replace(tzinfo=UTC) if closes_at.tzinfo is None else closes_at) >= now
                     ]
                     next_close = min(active_closes).timestamp() if active_closes else float("inf")
                     return (len(items), -next_close)
