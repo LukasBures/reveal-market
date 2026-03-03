@@ -384,7 +384,7 @@ async def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, ca
     monkeypatch.setattr(
         runtime_module,
         "polymarket_client",
-        type("DummyClient", (), {"fetch_events_paginated": _fake_paginated})(),
+        type("DummyClient", (), {"fetch_events_paginated": _fake_paginated, "fetch_markets_paginated": _fake_paginated})(),
         raising=False,
     )
 
@@ -1391,7 +1391,7 @@ async def test_process_once_enqueues_and_worker_processes_proofs(monkeypatch, ca
     monkeypatch.setattr(
         runtime_module,
         "polymarket_client",
-        type("DummyClient", (), {"fetch_events_paginated": _fake_paginated})(),
+        type("DummyClient", (), {"fetch_events_paginated": _fake_paginated, "fetch_markets_paginated": _fake_paginated})(),
         raising=False,
     )
 
