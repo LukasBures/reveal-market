@@ -54,7 +54,7 @@ variable "NEXT_DISABLE_MINIFY" { default = "false" }
 group "default" {
   targets = [
     "api", "worker", "hedger", "streamer", "relayer",
-    "frontend", "prover",
+    "frontend", "prover", "caddy",
   ]
 }
 
@@ -167,4 +167,10 @@ target "prover" {
     NODE_IMAGE   = NODE_IMAGE
   }
   tags = ["reveal-market-prover:latest"]
+}
+
+target "caddy" {
+  dockerfile = "docker/caddy/Dockerfile"
+  context    = "./docker/caddy"
+  tags = ["reveal-market-caddy:latest"]
 }
