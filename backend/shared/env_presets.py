@@ -86,6 +86,8 @@ PRESETS: dict[str, dict[str, Any]] = {
             "stream.revealmarket.xyz",
             "api",
             "api:8000",
+            "localhost",
+            "127.0.0.1",
         ],
         "api_cors_origins": [
             "https://revealmarket.xyz",
