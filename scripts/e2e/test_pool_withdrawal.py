@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from eth_account import Account
 from utils import (
@@ -107,17 +107,13 @@ def main() -> int:
     current_block = web3.eth.get_block("latest")
     current_time = current_block["timestamp"]
     unlock_time = current_time + lock_duration
-    current_dt = datetime.fromtimestamp(current_time, tz=timezone.utc)
-    unlock_dt = datetime.fromtimestamp(unlock_time, tz=timezone.utc)
+    current_dt = datetime.fromtimestamp(current_time, tz=UTC)
+    unlock_dt = datetime.fromtimestamp(unlock_time, tz=UTC)
 
     log.info("Current block time:    %s", current_dt.isoformat())
     log.info("Earliest unlock at:    %s", unlock_dt.isoformat())
-    log.info(
-        "NOTE: This is from NOW. Actual unlock depends on original deposit time."
-    )
-    log.info(
-        "Shares deposited during setup_funding.py are locked from that timestamp."
-    )
+    log.info("NOTE: This is from NOW. Actual unlock depends on original deposit time.")
+    log.info("Shares deposited during setup_funding.py are locked from that timestamp.")
 
     # -----------------------------------------------------------------------
     # Save state

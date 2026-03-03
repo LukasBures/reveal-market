@@ -5,15 +5,16 @@ from __future__ import annotations
 
 import sys
 
+from eth_account import Account
 from utils import (
+    ERC20_ABI,
+    ESCROW_ABI,
     MARKET_ABI,
     POOL_ABI,
     PROTOCOL_POOL,
     RELAYER_ESCROW,
     TEST_ACCOUNT_KEY,
     ZEN_TOKEN,
-    ERC20_ABI,
-    ESCROW_ABI,
     build_web3,
     check,
     contract,
@@ -26,7 +27,6 @@ from utils import (
     wait_for_relayer_job,
     wei_to_zen,
 )
-from eth_account import Account
 
 
 def main() -> int:
@@ -78,8 +78,12 @@ def main() -> int:
     # -----------------------------------------------------------------------
     log.info("")
     log.info("--- 8.1 Winner Claims ---")
-    log.info("Claiming ticket_id=%s (outcome=%s, payout=%s)",
-             winner["ticket_id"], winner["outcome_id"], wei_to_zen(int(winner["payout"])))
+    log.info(
+        "Claiming ticket_id=%s (outcome=%s, payout=%s)",
+        winner["ticket_id"],
+        winner["outcome_id"],
+        wei_to_zen(int(winner["payout"])),
+    )
 
     # Check if already claimed (idempotent re-run)
     already_claimed = market.functions.claimedTickets(winner["ticket_id"]).call()

@@ -13,8 +13,9 @@ import json
 import sys
 import time
 
-from poseidon import BATCH_SIZE, MERKLE_DEPTH, build_batch_root, compute_leaf, int_to_hex32, poseidon_t3
-
+from eth_account import Account
+from eth_account.messages import encode_defunct
+from poseidon import BATCH_SIZE, MERKLE_DEPTH, build_batch_root, int_to_hex32, poseidon_t3
 from utils import (
     CHAIN_ID,
     CIRCUIT_HASH,
@@ -22,7 +23,6 @@ from utils import (
     FACTORY,
     MARKET_ABI,
     ORACLE_KEY,
-    RELAYER_KEY,
     build_web3,
     check,
     contract,
@@ -31,15 +31,11 @@ from utils import (
     log,
     phase_name,
     prover_post,
-    relayer_post,
     send_tx,
     setup_logging,
     update_state,
-    wait_for_relayer_job,
     wei_to_zen,
 )
-from eth_account import Account
-from eth_account.messages import encode_defunct
 from web3 import Web3
 
 WINNING_OUTCOME = 0  # YES wins
@@ -112,7 +108,6 @@ def main() -> int:
     state = load_state()
     market_address = state["market_address"]
     market_id = state["market_id"]
-    event_id = state["event_id"]
     tickets = state["tickets"]
     rake_bps = state.get("rake_bps", 0)
     commit_deadline = state.get("commit_deadline", 0)
@@ -269,25 +264,29 @@ def main() -> int:
     # Build prover request with exactly 256 tickets (pad with zeros)
     prover_tickets = []
     for t in tickets:
-        prover_tickets.append({
-            "ticketId": str(t["ticket_id"]),
-            "outcomeId": str(t["outcome_id"]),
-            "amount": str(t["amount"]),
-            "payout": str(t["payout"]),
-            "user": str(int(t["user"], 16)),
-            "salt": str(int(t["salt"], 16)),
-        })
+        prover_tickets.append(
+            {
+                "ticketId": str(t["ticket_id"]),
+                "outcomeId": str(t["outcome_id"]),
+                "amount": str(t["amount"]),
+                "payout": str(t["payout"]),
+                "user": str(int(t["user"], 16)),
+                "salt": str(int(t["salt"], 16)),
+            }
+        )
 
     # Pad to 256 with zero tickets
     while len(prover_tickets) < BATCH_SIZE:
-        prover_tickets.append({
-            "ticketId": str(len(prover_tickets)),
-            "outcomeId": "0",
-            "amount": "0",
-            "payout": "0",
-            "user": "0",
-            "salt": "0",
-        })
+        prover_tickets.append(
+            {
+                "ticketId": str(len(prover_tickets)),
+                "outcomeId": "0",
+                "amount": "0",
+                "payout": "0",
+                "user": "0",
+                "salt": "0",
+            }
+        )
 
     # Pool totals: sum of amounts by outcome (amounts are already net of rake)
     pool_yes = sum(int(t["amount"]) for t in tickets if t["outcome_id"] == 0)
@@ -300,10 +299,12 @@ def main() -> int:
     # Cross-validate against on-chain state
     on_chain_escrow = market_contract.functions.totalEscrow().call()
     on_chain_rake = market_contract.functions.rakeBps().call()
-    check("totalEscrow matches on-chain", total_escrow == on_chain_escrow,
-          f"computed={wei_to_zen(total_escrow)}, on-chain={wei_to_zen(on_chain_escrow)}")
-    check("rakeBps matches on-chain", rake_bps == on_chain_rake,
-          f"state={rake_bps}, on-chain={on_chain_rake}")
+    check(
+        "totalEscrow matches on-chain",
+        total_escrow == on_chain_escrow,
+        f"computed={wei_to_zen(total_escrow)}, on-chain={wei_to_zen(on_chain_escrow)}",
+    )
+    check("rakeBps matches on-chain", rake_bps == on_chain_rake, f"state={rake_bps}, on-chain={on_chain_rake}")
 
     prover_request = {
         "marketId": str(market_id),
@@ -369,11 +370,6 @@ def main() -> int:
 
     # Build calldata from proof_calldata
     if proof_calldata and len(proof_calldata) >= 2:
-        # proof_calldata[0] = proof coordinates as hex strings
-        # proof_calldata[1] = public signals as hex strings
-        proof_coords = proof_calldata[0]
-        pub_sigs_hex = proof_calldata[1]
-
         # The proof needs to be ABI-encoded as bytes
         # Parse the proof JSON to get a, b, c points
         if isinstance(proof_json, str):

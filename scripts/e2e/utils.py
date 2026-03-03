@@ -49,9 +49,7 @@ FUNDING_WALLET_KEY = os.getenv(
     "FUNDING_WALLET_KEY", "REDACTED"
 )
 DEPLOYER_KEY = os.getenv("DEPLOYER_KEY", "REDACTED")
-TEST_ACCOUNT_KEY = os.getenv(
-    "TEST_ACCOUNT_KEY", "REDACTED"
-)
+TEST_ACCOUNT_KEY = os.getenv("TEST_ACCOUNT_KEY", "REDACTED")
 ORACLE_KEY = os.getenv("ORACLE_KEY", "REDACTED")
 AUTH_SIGNER_KEY = os.getenv(
     "RM_AUTHORIZATION_SIGNER_PRIVATE_KEY", "REDACTED"
@@ -583,13 +581,15 @@ def send_tx(web3: Web3, private_key: str, tx_func, *, label: str = "tx") -> dict
     gas_price = web3.eth.gas_price
 
     est = tx_func.estimate_gas({"from": sender})
-    tx = tx_func.build_transaction({
-        "from": sender,
-        "nonce": nonce,
-        "gas": int(est * 1.3),
-        "gasPrice": gas_price,
-        "chainId": web3.eth.chain_id,
-    })
+    tx = tx_func.build_transaction(
+        {
+            "from": sender,
+            "nonce": nonce,
+            "gas": int(est * 1.3),
+            "gasPrice": gas_price,
+            "chainId": web3.eth.chain_id,
+        }
+    )
 
     signed = account.sign_transaction(tx)
     raw = getattr(signed, "raw_transaction", None) or getattr(signed, "rawTransaction", None)

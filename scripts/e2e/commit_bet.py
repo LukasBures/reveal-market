@@ -7,16 +7,13 @@ import secrets
 import sys
 import time
 
-from poseidon import build_batch_root, compute_leaf, int_to_hex32, FIELD_MODULUS
-
+from eth_account import Account
+from poseidon import FIELD_MODULUS, compute_leaf, int_to_hex32
 from utils import (
-    AUTH_SIGNER_KEY,
-    CHAIN_ID,
+    ESCROW_ABI,
     MARKET_ABI,
     RELAYER_ESCROW,
-    RELAYER_KEY,
     TEST_ACCOUNT_KEY,
-    ESCROW_ABI,
     build_web3,
     check,
     contract,
@@ -30,7 +27,6 @@ from utils import (
     update_state,
     wei_to_zen,
 )
-from eth_account import Account
 from web3 import Web3
 
 # Number of bets per side in this E2E test (1 YES + 1 NO)
@@ -113,12 +109,12 @@ def place_bet(
 
     # Build the CommitAuth tuple (with ticketId)
     auth_tuple = (
-        commitment_bytes,                            # commitment (bytes32)
-        ticket_id,                                    # ticketId (uint256)
-        Web3.to_checksum_address(user_address),      # user (address)
-        nonce,                                        # nonce (uint256)
-        expiry,                                       # expiry (uint256)
-        ticket_size,                                  # ticketValue (uint256)
+        commitment_bytes,  # commitment (bytes32)
+        ticket_id,  # ticketId (uint256)
+        Web3.to_checksum_address(user_address),  # user (address)
+        nonce,  # nonce (uint256)
+        expiry,  # expiry (uint256)
+        ticket_size,  # ticketValue (uint256)
     )
 
     # Step 1: User pre-approves on the RelayerEscrow
@@ -137,6 +133,7 @@ def place_bet(
     # Step 2: Escrow owner calls commitOnBehalf directly (bypassing relayer HTTP API)
     # Note: escrow owner is the deployer, not the relayer address
     from utils import DEPLOYER_KEY
+
     escrow_direct = web3.eth.contract(
         address=Web3.to_checksum_address(RELAYER_ESCROW),
         abi=COMMIT_ON_BEHALF_ABI,
@@ -213,8 +210,12 @@ def main() -> int:
     escrow_bal = escrow.functions.balanceOf(test_account.address).call()
     log.info("Escrow balance:       %s", wei_to_zen(escrow_bal))
     if escrow_bal < ticket_size * NUM_TICKETS:
-        log.error("Insufficient escrow balance for %d bets: have %s, need %s",
-                  NUM_TICKETS, wei_to_zen(escrow_bal), wei_to_zen(ticket_size * NUM_TICKETS))
+        log.error(
+            "Insufficient escrow balance for %d bets: have %s, need %s",
+            NUM_TICKETS,
+            wei_to_zen(escrow_bal),
+            wei_to_zen(ticket_size * NUM_TICKETS),
+        )
         return 1
 
     # -----------------------------------------------------------------------
@@ -223,7 +224,9 @@ def main() -> int:
     log.info("")
     log.info("--- 3.1 Commit YES ---")
     yes_ticket = place_bet(
-        web3, market_address, market_id,
+        web3,
+        market_address,
+        market_id,
         ticket_id=next_ticket,
         outcome_id=0,  # YES
         user_address=test_account.address,
@@ -240,7 +243,9 @@ def main() -> int:
     log.info("")
     log.info("--- 3.2 Commit NO ---")
     no_ticket = place_bet(
-        web3, market_address, market_id,
+        web3,
+        market_address,
+        market_id,
         ticket_id=next_ticket + 1,
         outcome_id=1,  # NO
         user_address=test_account.address,
@@ -272,8 +277,11 @@ def main() -> int:
     log.info("NO  expected commitment: %s", no_ticket["leaf"])
 
     all_ok = True
-    all_ok &= check("nextTicketId incremented", new_next_ticket == next_ticket + 2,
-                     f"expected {next_ticket + 2}, got {new_next_ticket}")
+    all_ok &= check(
+        "nextTicketId incremented",
+        new_next_ticket == next_ticket + 2,
+        f"expected {next_ticket + 2}, got {new_next_ticket}",
+    )
     all_ok &= check("YES leaf matches on-chain", yes_stored_hex == yes_ticket["leaf"])
     all_ok &= check("NO leaf matches on-chain", no_stored_hex == no_ticket["leaf"])
 

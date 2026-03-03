@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 
+import httpx
 from utils import (
     API_URL,
     HEDGER_URL,
@@ -17,8 +18,6 @@ from utils import (
     log,
     setup_logging,
 )
-
-import httpx
 
 PHASES = [
     ("Phase 1: Funding & Setup", "setup_funding"),
@@ -52,21 +51,29 @@ def check_service_health() -> dict[str, bool]:
 
 def check_docker_logs() -> dict[str, list[str]]:
     """Scan docker logs for ERROR entries."""
-    containers = ["reveal-market-api", "reveal-market-worker", "reveal-market-relayer",
-                   "reveal-market-hedger", "reveal-market-prover"]
+    containers = [
+        "reveal-market-api",
+        "reveal-market-worker",
+        "reveal-market-relayer",
+        "reveal-market-hedger",
+        "reveal-market-prover",
+    ]
     errors = {}
     for c in containers:
         try:
-            result = subprocess.run(
-                ["docker", "logs", c, "--tail", "50"],
-                capture_output=True, text=True, timeout=10,
+            result = subprocess.run(  # noqa: S603
+                ["docker", "logs", c, "--tail", "50"],  # noqa: S607
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             combined = result.stdout + result.stderr
-            error_lines = [line for line in combined.split("\n")
-                           if "ERROR" in line or "CRITICAL" in line or "FATAL" in line]
+            error_lines = [
+                line for line in combined.split("\n") if "ERROR" in line or "CRITICAL" in line or "FATAL" in line
+            ]
             if error_lines:
                 errors[c] = error_lines[-5:]  # last 5 errors
-        except Exception:
+        except Exception:  # noqa: S110
             pass
     return errors
 
@@ -191,8 +198,9 @@ def main() -> int:
 
     log.info("")
     log.info("Total time: %.1fs", total_elapsed)
-    log.info("Services healthy: %d/%d (before) -> %d/%d (after)",
-             healthy_count, len(health), post_healthy, len(post_health))
+    log.info(
+        "Services healthy: %d/%d (before) -> %d/%d (after)", healthy_count, len(health), post_healthy, len(post_health)
+    )
 
     if docker_errors:
         log.info("Docker errors: %d containers with errors", len(docker_errors))

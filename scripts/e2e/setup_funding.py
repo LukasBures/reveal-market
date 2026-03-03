@@ -5,16 +5,17 @@ from __future__ import annotations
 
 import sys
 
+from eth_account import Account
 from utils import (
     DEPLOYER_KEY,
+    ERC20_ABI,
+    ESCROW_ABI,
     FUNDING_WALLET_KEY,
+    POOL_ABI,
     PROTOCOL_POOL,
     RELAYER_ESCROW,
     TEST_ACCOUNT_KEY,
     ZEN_TOKEN,
-    ERC20_ABI,
-    ESCROW_ABI,
-    POOL_ABI,
     build_web3,
     check,
     contract,
@@ -25,13 +26,12 @@ from utils import (
     update_state,
     wei_to_zen,
 )
-from eth_account import Account
 
 # Amounts in wei (18 decimals)
-ZEN_TO_DEPLOYER = 100 * 10**18    # 100 ZEN for pool deposit
-ZEN_TO_TEST = 50 * 10**18         # 50 ZEN for betting via escrow
-POOL_DEPOSIT = 100 * 10**18       # 100 ZEN LP deposit
-ESCROW_DEPOSIT = 50 * 10**18      # 50 ZEN escrow deposit
+ZEN_TO_DEPLOYER = 100 * 10**18  # 100 ZEN for pool deposit
+ZEN_TO_TEST = 50 * 10**18  # 50 ZEN for betting via escrow
+POOL_DEPOSIT = 100 * 10**18  # 100 ZEN LP deposit
+ESCROW_DEPOSIT = 50 * 10**18  # 50 ZEN escrow deposit
 
 
 def main() -> int:

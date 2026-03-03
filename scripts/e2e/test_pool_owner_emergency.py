@@ -165,9 +165,7 @@ def main() -> int:
 
     if market_address:
         log.info("Market from state: %s", market_address)
-        market_reserved = pool.functions.reservedLiability(
-            web3.to_checksum_address(market_address)
-        ).call()
+        market_reserved = pool.functions.reservedLiability(web3.to_checksum_address(market_address)).call()
         log.info("reservedLiability for market: %s", wei_to_zen(market_reserved))
 
         if market_reserved > 0:
@@ -175,9 +173,7 @@ def main() -> int:
             send_tx(
                 web3,
                 DEPLOYER_KEY,
-                pool.functions.forceReleaseLiability(
-                    web3.to_checksum_address(market_address)
-                ),
+                pool.functions.forceReleaseLiability(web3.to_checksum_address(market_address)),
                 label="force-release",
             )
             reserved_after = pool.functions.reservedTotal().call()
@@ -195,9 +191,7 @@ def main() -> int:
                 send_tx(
                     web3,
                     DEPLOYER_KEY,
-                    pool.functions.forceReleaseLiability(
-                        web3.to_checksum_address(market_address)
-                    ),
+                    pool.functions.forceReleaseLiability(web3.to_checksum_address(market_address)),
                     label="force-release-zero",
                 )
                 log.warning("forceReleaseLiability unexpectedly succeeded!")
@@ -221,9 +215,7 @@ def main() -> int:
             send_tx(
                 web3,
                 DEPLOYER_KEY,
-                pool.functions.forceReleaseLiability(
-                    web3.to_checksum_address(dummy)
-                ),
+                pool.functions.forceReleaseLiability(web3.to_checksum_address(dummy)),
                 label="force-release-dummy",
             )
             log.warning("forceReleaseLiability unexpectedly succeeded!")

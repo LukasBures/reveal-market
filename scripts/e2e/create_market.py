@@ -5,19 +5,18 @@ from __future__ import annotations
 
 import sys
 import time
+from datetime import UTC
 
+from eth_account import Account
 from utils import (
-    API_URL,
     AUTH_SIGNER_ADDRESS,
-    CHAIN_ID,
     CIRCUIT_HASH,
     DEPLOYER_KEY,
     FACTORY,
-    ORACLE_ADDRESS,
-    VERIFIER,
     FACTORY_ABI,
     MARKET_ABI,
-    ZEN_TOKEN,
+    ORACLE_ADDRESS,
+    VERIFIER,
     api_post,
     build_web3,
     check,
@@ -30,14 +29,12 @@ from utils import (
     update_state,
     wei_to_zen,
 )
-from eth_account import Account
-
 
 # Market parameters
 COMMIT_DEADLINE_OFFSET = 300  # 5 minutes from now (short for E2E test)
-TICKET_SIZE = 1 * 10**18      # 1 ZEN
-MAX_COMMITMENTS = 256          # 1 batch
-LIABILITY_CAP = 50 * 10**18    # 50 ZEN
+TICKET_SIZE = 1 * 10**18  # 1 ZEN
+MAX_COMMITMENTS = 256  # 1 batch
+LIABILITY_CAP = 50 * 10**18  # 50 ZEN
 
 
 def main() -> int:
@@ -87,14 +84,14 @@ def main() -> int:
     circuit_hash_bytes = bytes.fromhex(CIRCUIT_HASH[2:] if CIRCUIT_HASH.startswith("0x") else CIRCUIT_HASH)
 
     create_params = (
-        web3.to_checksum_address(ORACLE_ADDRESS),       # oracle
-        web3.to_checksum_address(VERIFIER),              # verifier
-        circuit_hash_bytes,                               # circuitHash
-        commit_deadline,                                  # commitDeadline
-        TICKET_SIZE,                                      # fixedTicketSize
-        MAX_COMMITMENTS,                                  # maxCommitments
-        web3.to_checksum_address(AUTH_SIGNER_ADDRESS),   # authorizationSigner
-        LIABILITY_CAP,                                    # protocolLiabilityCap
+        web3.to_checksum_address(ORACLE_ADDRESS),  # oracle
+        web3.to_checksum_address(VERIFIER),  # verifier
+        circuit_hash_bytes,  # circuitHash
+        commit_deadline,  # commitDeadline
+        TICKET_SIZE,  # fixedTicketSize
+        MAX_COMMITMENTS,  # maxCommitments
+        web3.to_checksum_address(AUTH_SIGNER_ADDRESS),  # authorizationSigner
+        LIABILITY_CAP,  # protocolLiabilityCap
     )
 
     log.info("CreateMarket params:")
@@ -107,7 +104,7 @@ def main() -> int:
     log.info("  authorizationSigner:%s", AUTH_SIGNER_ADDRESS)
     log.info("  liabilityCap:       %s", wei_to_zen(LIABILITY_CAP))
 
-    receipt = send_tx(
+    send_tx(
         web3,
         DEPLOYER_KEY,
         factory.functions.createMarket(create_params),
@@ -133,9 +130,9 @@ def main() -> int:
     log.info("")
     log.info("--- 2.2 Register Market in Database ---")
 
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    closes_at = datetime.fromtimestamp(commit_deadline, tz=timezone.utc).isoformat()
+    closes_at = datetime.fromtimestamp(commit_deadline, tz=UTC).isoformat()
     event_id = f"e2e-test-{market_id}-{int(time.time())}"
 
     market_data = {
