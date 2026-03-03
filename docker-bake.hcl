@@ -170,7 +170,7 @@ target "prover" {
 }
 
 target "caddy" {
-  dockerfile = "docker/caddy/Dockerfile"
+  dockerfile = "Dockerfile"
   context    = "./docker/caddy"
   tags = ["reveal-market-caddy:latest"]
 }
