@@ -202,10 +202,15 @@ read_env_file_value() {
   local line
   line="$(grep -E "^${key}=" "${file}" | tail -n 1)" || return 0
   local value="${line#"$key"=}"
-  value="${value%\"}"
-  value="${value#\"}"
-  value="${value%\'}"
-  value="${value#\'}"
+  # Strip surrounding quotes first, then inline comments.
+  if [[ "${value}" =~ ^\"([^\"]*)\" ]]; then
+    value="${BASH_REMATCH[1]}"
+  elif [[ "${value}" =~ ^\'([^\']*)\' ]]; then
+    value="${BASH_REMATCH[1]}"
+  else
+    # Unquoted value: strip inline comment (space + #).
+    value="${value%%[[:space:]]#*}"
+  fi
   printf "%s" "${value}"
 }
 
@@ -588,7 +593,7 @@ else
 fi
 
 log_step "Starting services in detached mode"
-UP_CMD=("${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" up "-d" "--remove-orphans" "${WAIT_FLAG[@]}" postgres redis api worker streamer prover frontend relayer caddy)
+UP_CMD=("${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" up "-d" "--remove-orphans" "${WAIT_FLAG[@]}" postgres redis api worker streamer prover frontend relayer hedger caddy)
 if [[ ${#UP_ARGS[@]} -gt 0 ]]; then
   UP_CMD+=("${UP_ARGS[@]}")
 fi

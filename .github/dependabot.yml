@@ -1,0 +1,85 @@
+version: 2
+
+updates:
+  # GitHub Actions
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"
+
+  # Python — root (pre-commit, shared tooling)
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps"
+
+  # Python — backend/api
+  - package-ecosystem: pip
+    directory: /backend/api
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps(api)"
+
+  # Python — backend/worker
+  - package-ecosystem: pip
+    directory: /backend/worker
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps(worker)"
+
+  # Python — streamer
+  - package-ecosystem: pip
+    directory: /streamer
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps(streamer)"
+
+  # Python — relayer
+  - package-ecosystem: pip
+    directory: /relayer
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps(relayer)"
+
+  # Python — hedger
+  - package-ecosystem: pip
+    directory: /hedger
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps(hedger)"
+
+  # Node.js — frontend
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps(frontend)"
+    groups:
+      next:
+        patterns:
+          - "next"
+          - "next-*"
+          - "@next/*"
+      wagmi:
+        patterns:
+          - "wagmi"
+          - "@wagmi/*"
+          - "viem"
+
+  # Go — prover
+  - package-ecosystem: gomod
+    directory: /prover
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps(prover)"

@@ -69,11 +69,11 @@ if [[ "${USE_STUB_VERIFIER}" != "1" ]]; then
         VK_PATH="${FALLBACK_VK_PATH}"
       fi
     fi
-    if [[ -f "${VK_PATH}" ]]; then
+    if [[ -n "${VK_PATH}" && -f "${VK_PATH}" ]]; then
       echo "SETTLEMENT_VK_JSON not set; loading from ${VK_PATH}"
       SETTLEMENT_VK_JSON="$(cat "${VK_PATH}")"
     else
-      echo "SETTLEMENT_VK_JSON is required when USE_STUB_VERIFIER!=1 (fallback file not found at ${VK_PATH})" >&2
+      echo "SETTLEMENT_VK_JSON is required when USE_STUB_VERIFIER!=1 (searched ${DEFAULT_VK_PATH} and ${FALLBACK_VK_PATH})" >&2
       exit 1
     fi
   fi
@@ -83,11 +83,11 @@ export DEPLOYER_KEY="${PRIVATE_KEY}"
 export RPC_URL
 export ORACLE_ADDRESS
 export AUTHORIZATION_SIGNER
-export ZEN_TOKEN_ADDRESS
-export COLLATERAL_TOKEN
+export ZEN_TOKEN_ADDRESS="${ZEN_TOKEN_ADDRESS:-}"
+export COLLATERAL_TOKEN="${COLLATERAL_TOKEN:-}"
 export USE_STUB_VERIFIER
-export SETTLEMENT_VK_JSON
-export CHAIN_ID
+export SETTLEMENT_VK_JSON="${SETTLEMENT_VK_JSON:-}"
+export CHAIN_ID="${CHAIN_ID:-}"
 expected_chain_id="${EXPECTED_CHAIN_ID:-${CHAIN_ID:-}}"
 if [[ -n "${expected_chain_id}" ]]; then
   actual_chain_id="$(cast chain-id --rpc-url "${RPC_URL}" 2>/dev/null || true)"
@@ -108,9 +108,29 @@ if [[ -n "${FORGE_BROADCAST_ARGS:-}" ]]; then
   FOUNDRY_ARGS+=("${EXTRA_ARGS[@]}")
 fi
 
+# Print command with private key redacted to avoid leaking secrets in logs.
 echo "Running forge script with args:"
-printf '  %q' forge "${FOUNDRY_ARGS[@]}"
+SKIP_NEXT=false
+for arg in forge "${FOUNDRY_ARGS[@]}"; do
+  if $SKIP_NEXT; then
+    SKIP_NEXT=false
+    continue
+  fi
+  if [[ "${arg}" == "--private-key" ]]; then
+    printf '  --private-key [REDACTED]'
+    SKIP_NEXT=true
+  else
+    printf '  %q' "${arg}"
+  fi
+done
 echo
 
 export FOUNDRY_SIG_PROVIDER=none
 forge "${FOUNDRY_ARGS[@]}"
+
+# Point to the latest broadcast artifact for downstream consumption.
+BROADCAST_DIR="${ROOT_DIR}/broadcast/Deploy.s.sol"
+if [[ -n "${CHAIN_ID:-}" && -f "${BROADCAST_DIR}/${CHAIN_ID}/run-latest.json" ]]; then
+  echo ""
+  echo "Broadcast artifact: ${BROADCAST_DIR}/${CHAIN_ID}/run-latest.json"
+fi

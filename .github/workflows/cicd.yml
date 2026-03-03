@@ -2,11 +2,19 @@ name: Tests + Deploy
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
-    branches:
-      - main
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: "Skip test jobs and deploy directly"
+        type: boolean
+        default: false
+      deploy_ref:
+        description: "Git ref to deploy (default: triggering ref)"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -18,35 +26,77 @@ concurrency:
 
 jobs:
 
+  # ──────────────────────────────────────────────
+  # Path filtering — PRs only run affected suites
+  # ──────────────────────────────────────────────
+
+  detect-changes:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      streamer: ${{ steps.filter.outputs.streamer }}
+      relayer: ${{ steps.filter.outputs.relayer }}
+      hedger: ${{ steps.filter.outputs.hedger }}
+      contracts-zen: ${{ steps.filter.outputs.contracts-zen }}
+      contracts-polygon: ${{ steps.filter.outputs.contracts-polygon }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      prover: ${{ steps.filter.outputs.prover }}
+      ci: ${{ steps.filter.outputs.ci }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36  # v3.0.2
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - 'uv.lock'
+            streamer:
+              - 'streamer/**'
+              - 'backend/shared/**'
+              - 'uv.lock'
+            relayer:
+              - 'relayer/**'
+              - 'backend/shared/**'
+              - 'uv.lock'
+            hedger:
+              - 'hedger/**'
+              - 'backend/shared/**'
+              - 'uv.lock'
+            contracts-zen:
+              - 'contracts/zen/**'
+            contracts-polygon:
+              - 'contracts/polygon/**'
+            frontend:
+              - 'frontend/**'
+            prover:
+              - 'prover/**'
+            ci:
+              - '.github/**'
+
+  # ──────────────────────────────────────────────
+  # Lint & format gate
+  # ──────────────────────────────────────────────
+
   precommit:
+    if: github.event.inputs.skip_tests != 'true'
     runs-on: ubuntu-latest
     env:
       ARTIFACTS_DEPLOY_KEY: ${{ secrets.ARTIFACTS_DEPLOY_KEY || '' }}
     steps:
-      - name: Checkout (main only)
-        uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
         with:
           submodules: false
 
-      - name: Checkout submodules (with artifacts key)
-        if: ${{ env.ARTIFACTS_DEPLOY_KEY != '' }}
-        run: |
-          mkdir -p ~/.ssh
-          echo "${ARTIFACTS_DEPLOY_KEY}" > ~/.ssh/id_artifacts
-          chmod 600 ~/.ssh/id_artifacts
-          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts
-          git config submodule.prover/artifacts.update none
-          GIT_SSH_COMMAND="ssh -i ~/.ssh/id_artifacts -o IdentitiesOnly=yes" git submodule update --init --recursive
-
-      - name: Checkout submodules (skip artifacts if no key)
-        if: ${{ env.ARTIFACTS_DEPLOY_KEY == '' }}
-        run: |
-          git config submodule.prover/artifacts.update none
-          git submodule update --init --recursive
-      - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+      - uses: ./.github/actions/checkout-submodules
         with:
-          version: v1.4.4
+          artifacts-deploy-key: ${{ env.ARTIFACTS_DEPLOY_KEY }}
+          skip-artifacts-submodule: "true"
+
+      - uses: ./.github/actions/setup-foundry
+
       - name: Install Foundry dependencies (polygon)
         run: |
           set -euo pipefail
@@ -56,18 +106,9 @@ jobs:
               foundry-rs/forge-std@v1.9.1 \
               openzeppelin/openzeppelin-contracts@v5.0.0
           fi
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v4
-      - name: Cache uv
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/uv
-          key: uv-${{ runner.os }}-${{ hashFiles('uv.lock', 'backend/api/uv.lock', 'backend/worker/uv.lock', 'streamer/uv.lock', 'relayer/uv.lock', 'hedger/uv.lock') }}
-          restore-keys: |
-            uv-${{ runner.os }}-
+
+      - uses: ./.github/actions/setup-python-uv
+
       - name: Sync dependencies
         run: |
           uv sync --frozen --no-install-project
@@ -76,50 +117,53 @@ jobs:
           uv sync --project streamer --extra dev --no-install-project --frozen
           uv sync --project relayer --group dev --no-install-project --frozen
           uv sync --project hedger --extra dev --no-install-project --frozen
+
       - name: Pre-commit checks
         run: make format
 
+  # ──────────────────────────────────────────────
+  # Security scanning (independent of precommit)
+  # ──────────────────────────────────────────────
+
   security:
-    needs: precommit
+    if: github.event.inputs.skip_tests != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
       - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7  # v2.3.9
+
       - name: Trivy FS scan
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@97e0b3872f55f89b95b2f65b3dbab56962816478  # 0.34.2
         with:
           scan-type: fs
           scan-ref: .
           format: sarif
           output: trivy.sarif
+
       - name: Upload Trivy SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@ae9ef3a1d2e3413523c3741725c30064970cc0d4  # v3.32.5
         with:
           sarif_file: trivy.sarif
 
+  # ──────────────────────────────────────────────
+  # Backend (API + Worker + Shared + mypy)
+  # ──────────────────────────────────────────────
+
   backend:
-    needs: precommit
+    needs: [precommit, detect-changes]
+    if: |
+      github.event.inputs.skip_tests != 'true' &&
+      (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' ||
+       needs.detect-changes.outputs.backend == 'true' || needs.detect-changes.outputs.ci == 'true')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v4
-
-      - name: Cache uv
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/uv
-          key: uv-${{ runner.os }}-${{ hashFiles('uv.lock', 'backend/api/uv.lock', 'backend/worker/uv.lock', 'streamer/uv.lock', 'relayer/uv.lock', 'hedger/uv.lock') }}
-          restore-keys: |
-            uv-${{ runner.os }}-
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: ./.github/actions/setup-python-uv
 
       - name: Sync backend dependencies
         run: |
@@ -127,28 +171,32 @@ jobs:
           uv sync --project backend/worker --extra dev --no-install-project --frozen
 
       - name: Backend tests, OpenAPI, and mypy
+        env:
+          PYTEST_ADDOPTS: "--junitxml=${{ github.workspace }}/test-results/junit.xml"
         run: ./backend/run_tests.sh
 
+      - name: Upload test results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        if: always()
+        with:
+          name: test-results-backend
+          path: test-results/
+          retention-days: 14
+
+  # ──────────────────────────────────────────────
+  # Streamer
+  # ──────────────────────────────────────────────
 
   streamer:
-    needs: precommit
+    needs: [precommit, detect-changes]
+    if: |
+      github.event.inputs.skip_tests != 'true' &&
+      (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' ||
+       needs.detect-changes.outputs.streamer == 'true' || needs.detect-changes.outputs.ci == 'true')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v4
-
-      - name: Cache uv
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/uv
-          key: uv-${{ runner.os }}-${{ hashFiles('uv.lock', 'backend/api/uv.lock', 'backend/worker/uv.lock', 'streamer/uv.lock', 'relayer/uv.lock', 'hedger/uv.lock') }}
-          restore-keys: |
-            uv-${{ runner.os }}-
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: ./.github/actions/setup-python-uv
 
       - name: Sync streamer dependencies
         run: |
@@ -157,54 +205,63 @@ jobs:
       - name: Run streamer tests
         env:
           PYTEST_WORKER_COUNT: 4
+          PYTEST_ADDOPTS: "--junitxml=${{ github.workspace }}/test-results/junit.xml"
         run: ./streamer/run_tests.sh
 
+      - name: Upload test results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        if: always()
+        with:
+          name: test-results-streamer
+          path: test-results/
+          retention-days: 14
+
+  # ──────────────────────────────────────────────
+  # Relayer
+  # ──────────────────────────────────────────────
+
   relayer:
-    needs: precommit
+    needs: [precommit, detect-changes]
+    if: |
+      github.event.inputs.skip_tests != 'true' &&
+      (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' ||
+       needs.detect-changes.outputs.relayer == 'true' || needs.detect-changes.outputs.ci == 'true')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v4
-
-      - name: Cache uv
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/uv
-          key: uv-${{ runner.os }}-${{ hashFiles('uv.lock', 'backend/api/uv.lock', 'backend/worker/uv.lock', 'streamer/uv.lock', 'relayer/uv.lock', 'hedger/uv.lock') }}
-          restore-keys: |
-            uv-${{ runner.os }}-
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: ./.github/actions/setup-python-uv
 
       - name: Sync relayer dependencies
         run: |
           uv sync --project relayer --group dev --no-install-project --frozen
 
       - name: Relayer tests
+        env:
+          PYTEST_ADDOPTS: "--junitxml=${{ github.workspace }}/test-results/junit.xml"
         run: ./relayer/run_tests.sh
 
+      - name: Upload test results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        if: always()
+        with:
+          name: test-results-relayer
+          path: test-results/
+          retention-days: 14
+
+  # ──────────────────────────────────────────────
+  # Hedger
+  # ──────────────────────────────────────────────
+
   hedger:
-    needs: precommit
+    needs: [precommit, detect-changes]
+    if: |
+      github.event.inputs.skip_tests != 'true' &&
+      (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' ||
+       needs.detect-changes.outputs.hedger == 'true' || needs.detect-changes.outputs.ci == 'true')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v4
-
-      - name: Cache uv
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/uv
-          key: uv-${{ runner.os }}-${{ hashFiles('uv.lock', 'backend/api/uv.lock', 'backend/worker/uv.lock', 'streamer/uv.lock', 'relayer/uv.lock', 'hedger/uv.lock') }}
-          restore-keys: |
-            uv-${{ runner.os }}-
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: ./.github/actions/setup-python-uv
 
       - name: Sync hedger dependencies
         run: uv sync --project hedger --extra dev --no-install-project --frozen
@@ -212,52 +269,78 @@ jobs:
       - name: Hedger tests
         env:
           PYTEST_WORKER_COUNT: 4
+          PYTEST_ADDOPTS: "--junitxml=${{ github.workspace }}/test-results/junit.xml"
         working-directory: hedger
         run: ./run_tests.sh
 
-  contracts-zen:
-    needs: precommit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+      - name: Upload test results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        if: always()
         with:
-          version: v1.4.4
+          name: test-results-hedger
+          path: test-results/
+          retention-days: 14
+
+  # ──────────────────────────────────────────────
+  # Contracts — Zen (with CI fuzz profile)
+  # ──────────────────────────────────────────────
+
+  contracts-zen:
+    needs: [precommit, detect-changes]
+    if: |
+      github.event.inputs.skip_tests != 'true' &&
+      (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' ||
+       needs.detect-changes.outputs.contracts-zen == 'true' || needs.detect-changes.outputs.ci == 'true')
+    runs-on: ubuntu-latest
+    env:
+      FOUNDRY_PROFILE: ci
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: ./.github/actions/setup-foundry
 
       - name: Run Zen contracts suite
         working-directory: contracts/zen
         run: ./run_local.sh
 
+  # ──────────────────────────────────────────────
+  # Contracts — Polygon
+  # ──────────────────────────────────────────────
+
   contracts-polygon:
-    needs: precommit
+    needs: [precommit, detect-changes]
+    if: |
+      github.event.inputs.skip_tests != 'true' &&
+      (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' ||
+       needs.detect-changes.outputs.contracts-polygon == 'true' || needs.detect-changes.outputs.ci == 'true')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: v1.4.4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: ./.github/actions/setup-foundry
 
       - name: Run Polygon contracts suite
         working-directory: contracts/polygon
         run: ./run_local.sh
 
+  # ──────────────────────────────────────────────
+  # Frontend
+  # ──────────────────────────────────────────────
+
   frontend:
-    needs: precommit
+    needs: [precommit, detect-changes]
+    if: |
+      github.event.inputs.skip_tests != 'true' &&
+      (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' ||
+       needs.detect-changes.outputs.frontend == 'true' || needs.detect-changes.outputs.ci == 'true')
     runs-on: ubuntu-latest
-
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
         with:
           node-version: "20"
 
       - name: Cache npm
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
           path: ~/.npm
           key: npm-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
@@ -275,60 +358,64 @@ jobs:
 
       - name: Lighthouse CI
         working-directory: frontend
-        run: |
-          npm run lighthouse:ci
+        run: npm run lighthouse:ci
 
+  # ──────────────────────────────────────────────
+  # Prover (Go + ZK circuits)
+  # ──────────────────────────────────────────────
 
   prover:
-    needs: precommit
+    needs: [precommit, detect-changes]
+    if: |
+      github.event.inputs.skip_tests != 'true' &&
+      (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' ||
+       needs.detect-changes.outputs.prover == 'true' || needs.detect-changes.outputs.ci == 'true')
     runs-on: ubuntu-latest
     env:
       ARTIFACTS_DEPLOY_KEY: ${{ secrets.ARTIFACTS_DEPLOY_KEY || '' }}
       PROVER_ARTIFACTS_URL: ${{ secrets.PROVER_ARTIFACTS_URL || vars.PROVER_ARTIFACTS_URL || '' }}
       PROVER_ARTIFACTS_SHA256: ${{ secrets.PROVER_ARTIFACTS_SHA256 || vars.PROVER_ARTIFACTS_SHA256 || '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
         with:
           submodules: false
 
-      - name: Checkout submodules (with artifacts key)
-        if: ${{ env.ARTIFACTS_DEPLOY_KEY != '' }}
-        run: |
-          mkdir -p ~/.ssh
-          echo "${ARTIFACTS_DEPLOY_KEY}" > ~/.ssh/id_artifacts
-          chmod 600 ~/.ssh/id_artifacts
-          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts
-          if [ -n "${PROVER_ARTIFACTS_URL}" ]; then
-            git config submodule.prover/artifacts.update none
-          fi
-          GIT_SSH_COMMAND="ssh -i ~/.ssh/id_artifacts -o IdentitiesOnly=yes" git submodule update --init --recursive
-
-      - name: Checkout submodules (skip artifacts if no key)
-        if: ${{ env.ARTIFACTS_DEPLOY_KEY == '' }}
-        run: |
-          git config submodule.prover/artifacts.update none
-          git submodule update --init --recursive
-
-      - uses: actions/setup-go@v5
+      - uses: ./.github/actions/checkout-submodules
         with:
-          go-version: "1.22"
+          artifacts-deploy-key: ${{ env.ARTIFACTS_DEPLOY_KEY }}
+          skip-artifacts-submodule: ${{ env.ARTIFACTS_DEPLOY_KEY == '' || env.PROVER_ARTIFACTS_URL != '' }}
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff  # v5.6.0
+        with:
+          go-version: "1.24.0"
           cache-dependency-path: prover/go.mod
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
         with:
           node-version: "20"
+
+      - name: Cache rapidsnark
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        with:
+          path: /tmp/rapidsnark
+          key: rapidsnark-linux-x86_64-v0.0.7
 
       - name: Install rapidsnark binary
         env:
           RAPIDSNARK_VERSION: v0.0.7
         run: |
           set -euo pipefail
-          ARCHIVE="rapidsnark-linux-x86_64-${RAPIDSNARK_VERSION}.zip"
-          URL="https://github.com/iden3/rapidsnark/releases/download/${RAPIDSNARK_VERSION}/${ARCHIVE}"
-          echo "Downloading ${URL}"
-          curl -fSL --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/rapidsnark.zip "${URL}"
-          unzip -q /tmp/rapidsnark.zip -d /tmp/rapidsnark
           RS_DIR="/tmp/rapidsnark/rapidsnark-linux-x86_64-${RAPIDSNARK_VERSION}"
+          if [ ! -f "${RS_DIR}/bin/rapidsnark" ]; then
+            ARCHIVE="rapidsnark-linux-x86_64-${RAPIDSNARK_VERSION}.zip"
+            URL="https://github.com/iden3/rapidsnark/releases/download/${RAPIDSNARK_VERSION}/${ARCHIVE}"
+            echo "Downloading ${URL}"
+            curl -fSL --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/rapidsnark.zip "${URL}"
+            unzip -q /tmp/rapidsnark.zip -d /tmp/rapidsnark
+            rm -f /tmp/rapidsnark.zip
+          else
+            echo "rapidsnark restored from cache"
+          fi
           echo "${RS_DIR}/bin" >> $GITHUB_PATH
           echo "LD_LIBRARY_PATH=${RS_DIR}/lib:${LD_LIBRARY_PATH:-}" >> $GITHUB_ENV
 
@@ -367,9 +454,11 @@ jobs:
         working-directory: prover
         run: ./run_tests.sh -v
 
+  # ──────────────────────────────────────────────
+  # Deploy to production
+  # ──────────────────────────────────────────────
 
   deploy:
-    # Only run deploy if ALL tests passed
     needs:
       - security
       - backend
@@ -381,17 +470,22 @@ jobs:
       - frontend
       - prover
 
-    # Only deploy on main branch
-    if: github.ref == 'refs/heads/main'
+    # Deploy on main push, or manual trigger. Skipped jobs (path filtering,
+    # skip_tests) are allowed; failures and cancellations block.
+    if: |
+      always() &&
+      (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled')
 
     runs-on: ubuntu-latest
     environment: production
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
 
       - name: Deploy to Reveal Market production server
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2  # v1.2.5
         env:
           GITHUB_SHA: ${{ github.sha }}
           # --- Secrets for generate_env.sh ---
@@ -438,9 +532,9 @@ jobs:
           PROVER_ARTIFACTS_SSH_KEY_PATH: ${{ vars.PROVER_ARTIFACTS_SSH_KEY_PATH }}
           PRICING_SIGNER_ADDRESS: ${{ vars.PRICING_SIGNER_ADDRESS }}
         with:
-          host: 159.69.29.255
-          username: reveal
-          port: 2222
+          host: ${{ secrets.PROD_SERVER_HOST }}
+          username: ${{ secrets.PROD_SSH_USER }}
+          port: ${{ secrets.PROD_SSH_PORT }}
           key: ${{ secrets.PROD_SSH_KEY }}
           envs: >-
             GITHUB_SHA,
@@ -536,8 +630,24 @@ jobs:
 
             echo ">>> Deployment complete"
 
+      - name: Post-deploy health check
+        id: health_check
+        run: |
+          echo "Waiting for deployment to become healthy..."
+          for i in $(seq 1 10); do
+            if curl -sf --max-time 10 https://api.revealmarket.xyz/health; then
+              echo ""
+              echo "Health check passed on attempt $i"
+              exit 0
+            fi
+            echo "Attempt $i/10 failed, retrying in 15s..."
+            sleep 15
+          done
+          echo "Health check failed after 10 attempts"
+          exit 1
+
       - name: Purge Cloudflare cache
-        if: success()
+        if: steps.health_check.outcome == 'success'
         env:
           CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
@@ -546,3 +656,25 @@ jobs:
             -H "Authorization: Bearer ${CF_API_TOKEN}" \
             -H "Content-Type: application/json" \
             --data '{"purge_everything":true}'
+
+      - name: Notify deploy success
+        if: success()
+        env:
+          WEBHOOK_URL: ${{ secrets.DEPLOY_DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ -n "${WEBHOOK_URL:-}" ]; then
+            curl -sS -H "Content-Type: application/json" \
+              -d "{\"content\": \"Deploy succeeded \u2014 \`${{ github.sha }}\` on \`${{ github.ref_name }}\` by \`${{ github.actor }}\`\"}" \
+              "${WEBHOOK_URL}"
+          fi
+
+      - name: Notify deploy failure
+        if: failure()
+        env:
+          WEBHOOK_URL: ${{ secrets.DEPLOY_DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ -n "${WEBHOOK_URL:-}" ]; then
+            curl -sS -H "Content-Type: application/json" \
+              -d "{\"content\": \"Deploy failed \u2014 \`${{ github.sha }}\` on \`${{ github.ref_name }}\` by \`${{ github.actor }}\`\nRun: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+              "${WEBHOOK_URL}"
+          fi

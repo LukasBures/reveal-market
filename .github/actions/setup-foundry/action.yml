@@ -1,0 +1,27 @@
+name: Setup Foundry
+description: Install Foundry toolchain and restore Solidity build cache
+
+inputs:
+  version:
+    description: Foundry version to install
+    default: "v1.4.4"
+
+runs:
+  using: composite
+  steps:
+    - name: Install Foundry
+      uses: foundry-rs/foundry-toolchain@8789b3e21e6c11b2697f5eb56eddae542f746c10  # v1.7.0
+      with:
+        version: ${{ inputs.version }}
+
+    - name: Cache Foundry builds
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+      with:
+        path: |
+          contracts/zen/out
+          contracts/zen/cache
+          contracts/polygon/out
+          contracts/polygon/cache
+        key: foundry-${{ runner.os }}-${{ hashFiles('contracts/**/*.sol', 'contracts/zen/foundry.toml', 'contracts/polygon/foundry.toml') }}
+        restore-keys: |
+          foundry-${{ runner.os }}-

@@ -1,0 +1,33 @@
+name: Checkout Submodules
+description: Initialize git submodules with optional artifacts deploy key
+
+inputs:
+  artifacts-deploy-key:
+    description: SSH deploy key for the prover/artifacts submodule
+    default: ""
+  skip-artifacts-submodule:
+    description: Whether to skip prover/artifacts submodule initialization
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Init submodules (with artifacts key)
+      if: inputs.artifacts-deploy-key != ''
+      shell: bash
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ inputs.artifacts-deploy-key }}" > ~/.ssh/id_artifacts
+        chmod 600 ~/.ssh/id_artifacts
+        ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts
+        if [ "${{ inputs.skip-artifacts-submodule }}" = "true" ]; then
+          git config submodule.prover/artifacts.update none
+        fi
+        GIT_SSH_COMMAND="ssh -i ~/.ssh/id_artifacts -o IdentitiesOnly=yes" git submodule update --init --recursive
+
+    - name: Init submodules (no key)
+      if: inputs.artifacts-deploy-key == ''
+      shell: bash
+      run: |
+        git config submodule.prover/artifacts.update none
+        git submodule update --init --recursive

@@ -1,0 +1,20 @@
+# Default owner
+* @lukasbures
+
+# Smart contracts — extra scrutiny
+contracts/ @lukasbures
+
+# ZK prover
+prover/ @lukasbures
+
+# On-chain utilities (shared across services)
+backend/shared/onchain/ @lukasbures
+
+# Relayer (on-chain tx queue)
+relayer/ @lukasbures
+
+# CI/CD pipeline
+.github/ @lukasbures
+
+# Frontend
+frontend/ @lukasbures

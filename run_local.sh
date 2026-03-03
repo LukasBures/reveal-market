@@ -454,8 +454,8 @@ if [[ "${RUN_BUILD}" == "true" ]]; then
   # If the user requested specific services to run and did not pass --build-services,
   # limit the build to those services to avoid rebuilding the entire stack.
   if [[ ${#BUILD_SERVICES[@]} -eq 0 && ${#UP_ARGS[@]} -gt 0 ]]; then
-  BUILD_SERVICES=("${UP_ARGS[@]}")
-fi
+    BUILD_SERVICES=("${UP_ARGS[@]}")
+  fi
 
 if [[ "${USE_BAKE}" == "true" ]]; then
   # Run bake in a subshell so the env exports don't leak into docker compose up
@@ -670,7 +670,7 @@ for svc in items:
     print(f"{svc.get('Name', ''):30s} state={svc.get('State')} health={svc.get('Health')}")
 PY
 )"
-  "${COMPOSE_CMD[@]}" "${COMPOSE_ENV_ARGS[@]}" ps --format json | python3 -c "${HEALTH_SUMMARY_SCRIPT}"
+  "${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" ps --format json | python3 -c "${HEALTH_SUMMARY_SCRIPT}"
 fi
 
 cat <<EOF

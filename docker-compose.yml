@@ -233,8 +233,8 @@ services:
     healthcheck:
       test: ["CMD", "python", "-m", "app.healthcheck"]
       interval: 20s
-      timeout: 5s
-      retries: 3
+      timeout: 15s
+      retries: 5
       start_period: 30s
     deploy:
       replicas: 1
