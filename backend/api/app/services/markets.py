@@ -120,33 +120,64 @@ def _choose_group_slug(
 
 
 def _normalize_group_slug(slug: str) -> str:
-    """Strip digit-only tokens and range keywords when the slug contains a
-    range pattern, so that range variants share one key.
+    """Strip *embedded* range tokens from a group slug so range variants share
+    one key, while preserving trailing date tokens.
 
-    Only triggers when consecutive digit tokens (``40-64``) or a range keyword
-    adjacent to a digit (``lt-40``) are detected — single numbers like ``326``
-    in ``ufc-326-oliveira`` are left intact.
+    A "range span" is a maximal contiguous run of digit-only tokens and range
+    keywords (lt, gt, …) that is both preceded AND followed by at least one
+    alphabetic token.  Only those spans are removed.
+
+    Examples::
+
+        will-elon-musk-post-40-64-tweets-from-march-2-to-march-4-2026
+        → will-elon-musk-post-tweets-from-march-2-to-march-4-2026
+
+        will-elon-musk-post-lt-40-tweets-from-march-2-to-march-4-2026
+        → will-elon-musk-post-tweets-from-march-2-to-march-4-2026
+
+        ufc-326-oliveira-vs-holloway  (no consecutive digits / no kw+digit)
+        → unchanged
     """
     parts = slug.split("-")
     if len(parts) < 3:
         return slug
-    # Detect range patterns before stripping anything.
-    has_range = False
-    for i in range(len(parts) - 1):
-        a, b = parts[i], parts[i + 1]
-        if a.isdigit() and b.isdigit():
-            has_range = True
-            break
-        if (a in _RANGE_KEYWORDS and b.isdigit()) or (a.isdigit() and b in _RANGE_KEYWORDS):
-            has_range = True
-            break
-    if not has_range:
+
+    def _is_range_token(t: str) -> bool:
+        return t.isdigit() or t in _RANGE_KEYWORDS
+
+    # Identify contiguous spans of range tokens that are *embedded* (preceded
+    # and followed by non-range tokens).
+    remove: set[int] = set()
+    i = 0
+    while i < len(parts):
+        if not _is_range_token(parts[i]):
+            i += 1
+            continue
+        # Found start of a potential range span.
+        j = i
+        while j < len(parts) and _is_range_token(parts[j]):
+            j += 1
+        span = parts[i:j]
+        # Check the span qualifies as range-like: ≥2 tokens, or a single kw
+        # adjacent to a digit, and must be embedded (non-range tokens on both
+        # sides).
+        has_range_pattern = (
+            len(span) >= 2
+            or (len(span) == 1 and span[0] in _RANGE_KEYWORDS)
+        )
+        is_embedded = i > 0 and j < len(parts)
+        if has_range_pattern and is_embedded:
+            # Verify at least one digit is present (pure keyword-only spans
+            # like "over-under" shouldn't be stripped).
+            if any(t.isdigit() for t in span) or any(t in _RANGE_KEYWORDS for t in span):
+                for k in range(i, j):
+                    remove.add(k)
+        i = j
+
+    if not remove:
         return slug
-    stripped = [p for p in parts if not p.isdigit() and p not in _RANGE_KEYWORDS]
-    if len(stripped) >= 2:
-        result = "-".join(stripped)
-        return result if result else slug
-    return slug
+    result = "-".join(p for idx, p in enumerate(parts) if idx not in remove)
+    return result if result else slug
 
 
 def derive_group_key(market: schemas.MarketResponse) -> tuple[str, str | None]:
