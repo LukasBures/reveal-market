@@ -605,29 +605,33 @@ async def get_event_by_key(
         if cached is not None:
             model = schemas.MarketResponse.model_validate(cached)
             raw_group_slug = getattr(model, "group_slug", None) or ""
-            if market_svc._is_temporal_series_slug(raw_group_slug):
-                closes_at = getattr(model, "closes_at", None)
-                if isinstance(closes_at, datetime):
-                    group_markets = await crud.get_markets_by_group_slug(session, raw_group_slug, limit=200)
-                    ref_date = closes_at.date()
-                    group_markets = [
-                        m for m in group_markets if m.closes_at is not None and m.closes_at.date() == ref_date
-                    ]
-                    if group_markets:
-                        market_models_cached = await market_svc.enrich_market_models(
-                            session,
-                            [schemas.MarketResponse.model_validate(m) for m in group_markets],
-                            include_siblings=True,
-                        )
-                        event = market_svc.build_event_responses(market_models_cached)[0]
-                        if len(event.markets) > _MAX_DETAIL_MARKETS:
-                            event.markets = event.markets[:_MAX_DETAIL_MARKETS]
-                        return event
+            if raw_group_slug:
+                group_markets = await crud.get_markets_by_group_slug(session, raw_group_slug, limit=500)
+                if market_svc._is_temporal_series_slug(raw_group_slug):
+                    closes_at = getattr(model, "closes_at", None)
+                    if isinstance(closes_at, datetime):
+                        ref_date = closes_at.date()
+                        group_markets = [
+                            m for m in group_markets if m.closes_at is not None and m.closes_at.date() == ref_date
+                        ]
+                if group_markets:
+                    market_models_cached = await market_svc.enrich_market_models(
+                        session,
+                        [schemas.MarketResponse.model_validate(m) for m in group_markets],
+                        include_siblings=True,
+                    )
+                    event = market_svc.build_event_responses(market_models_cached)[0]
+                    if len(event.markets) > _MAX_DETAIL_MARKETS:
+                        event.markets = event.markets[:_MAX_DETAIL_MARKETS]
+                    return event
             await market_svc.enrich_market_models(session, [model], include_siblings=True)
             return market_svc.build_event_responses([model])[0]
     markets = []
     market_models: list[schemas.MarketResponse] | None = None
+    # Try public_event_id lookup first (8-char hex IDs)
     if normalized_key:
+        markets = await crud.get_markets_by_public_event_id(session, normalized_key)
+    if not markets and normalized_key:
         markets = await crud.get_markets_by_group_slug(session, normalized_key, limit=500)
         if markets and market_svc._is_temporal_series_slug(normalized_key):
             ref_closes = getattr(markets[0], "closes_at", None)
@@ -731,6 +735,11 @@ async def get_event_by_key(
                     await add_tag(cache, f"group:{str(market_model.group_slug)}", cache_key)
                 if getattr(market_model, "event_key", None):
                     await add_tag(cache, f"group:{str(market_model.event_key)}", cache_key)
+                public_eid = getattr(market_model, "public_event_id", None)
+                if public_eid:
+                    alias_key = market_svc.market_detail_cache_key(public_eid)
+                    await set_json(cache, alias_key, payload, ttl_seconds)
+                    await add_tag(cache, f"market:{market_model.event_id}", alias_key)
     events = market_svc.build_event_responses(market_models)
     event = events[0]
     if len(event.markets) > _MAX_DETAIL_MARKETS:
@@ -917,7 +926,10 @@ async def suggest_markets(
     raw_limit = min(limit * 4, 100)
     results = await crud.search_markets(session, normalized_query, raw_limit)
     market_models = [schemas.MarketResponse.model_validate(m) for m in results]
-    filtered = market_svc.filter_markets_for_visibility(await market_svc.enrich_market_models(session, market_models))
+    filtered = market_svc.filter_markets_for_visibility(
+        await market_svc.enrich_market_models(session, market_models),
+        dedup_by_group_key=True,
+    )
     filtered = filtered[:limit]
     if not filtered:
         log_event(

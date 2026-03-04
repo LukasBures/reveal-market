@@ -405,6 +405,35 @@ async def test_polymarket_client_derives_group_slug_from_embedded_range():
     assert market.group_item_title == "0.2%"
 
 
+def test_derive_group_slug_normalizes_range_variants():
+    """Range-variant markets (e.g. Elon tweet buckets) must produce the same group slug."""
+    from app.polymarket import _derive_group_slug
+
+    slugs = [
+        "will-elon-musk-post-40-64-tweets-from-march-2-to-march-4-2026",
+        "will-elon-musk-post-115-139-tweets-from-march-2-to-march-4-2026",
+        "will-elon-musk-post-240-tweets-from-march-2-to-march-4-2026",
+        "will-elon-musk-post-190-214-tweets-from-march-2-to-march-4-2026",
+    ]
+    derived = [_derive_group_slug(s, None, None) for s in slugs]
+    assert len(set(derived)) == 1, f"Expected all slugs to match, got: {derived}"
+    # Ensure the common slug is meaningful (no leftover digits).
+    assert derived[0] is not None
+    assert "40" not in derived[0]
+    assert "240" not in derived[0]
+
+
+def test_derive_group_slug_preserves_non_range_slugs():
+    """Non-range slugs like sports matchups should not lose meaningful tokens."""
+    from app.polymarket import _derive_group_slug
+
+    result = _derive_group_slug("manchester-city-fc-vs-arsenal-epl", None, None)
+    assert result is not None
+    assert "manchester" in result
+    assert "city" in result
+    assert "arsenal" in result
+
+
 @pytest.mark.asyncio
 async def test_polymarket_client_fetches_events_and_flattens_markets():
     events_payload = [

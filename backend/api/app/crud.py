@@ -181,6 +181,25 @@ async def get_markets_by_group_slug(session: AsyncSession, group_slug: str, *, l
     return rows
 
 
+async def get_markets_by_public_event_id(session: AsyncSession, public_id: str) -> list[models.Market]:
+    normalized = (public_id or "").strip().lower()
+    if not normalized:
+        return []
+    stmt = (
+        select(models.Market)
+        .options(
+            selectinload(models.Market.outcomes_rel),
+            selectinload(models.Market.tags_rel),
+            selectinload(models.Market.clob_tokens_rel),
+            selectinload(models.Market.gamma_metadata_rel),
+        )
+        .where(models.Market.public_event_id == normalized)
+        .order_by(models.Market.created_at.desc())
+    )
+    result = await session.execute(stmt)
+    return list(result.unique().scalars().all())
+
+
 async def get_markets_by_event_key(session: AsyncSession, event_key: str) -> list[models.Market]:
     normalized_key = (event_key or "").strip().lower()
     if not normalized_key:

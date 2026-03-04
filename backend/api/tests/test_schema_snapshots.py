@@ -51,6 +51,7 @@ EXPECTED_SCHEMAS = {
             "proof_hash",
             "proof_request_id",
             "proof_status",
+            "public_event_id",
             "question_id",
             "rake_bps",
             "resolution",

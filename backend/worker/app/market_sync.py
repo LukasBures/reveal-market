@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -1018,6 +1019,27 @@ async def _sync_market(
     clob_token_ids = payload.pop("clob_token_ids", None)
     gamma_metadata = payload.pop("gamma_metadata", None)
     gamma_counts = {"metadata": 0, "events": 0}
+
+    # Assign public_event_id: all markets in the same group share one 8-char hex ID.
+    if not payload.get("public_event_id") and not getattr(existing, "public_event_id", None):
+        group_key = payload.get("group_slug") or payload.get("event_key") or payload.get("event_id")
+        sibling_id: str | None = None
+        if group_key:
+            row = (
+                await session.execute(
+                    select(shared_models.Market.public_event_id)
+                    .where(
+                        or_(
+                            shared_models.Market.group_slug == group_key,
+                            shared_models.Market.event_key == group_key,
+                        ),
+                        shared_models.Market.public_event_id.isnot(None),
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            sibling_id = row
+        payload["public_event_id"] = sibling_id or uuid.uuid4().hex[:8]
 
     if existing is None:
         upsert_start = time.perf_counter()

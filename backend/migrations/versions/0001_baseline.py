@@ -47,6 +47,7 @@ def upgrade() -> None:
         sa.Column("onchain_market_id", sa.Integer(), nullable=True),
         sa.Column("market_address", sa.String(length=64), nullable=True),
         sa.Column("status", sa.String(length=32), nullable=False),
+        sa.Column("public_event_id", sa.String(length=8), nullable=True),
         sa.Column("group_slug", sa.String(length=256), nullable=True),
         sa.Column("event_key", sa.String(length=256), nullable=True),
         sa.Column("group_position", sa.Integer(), nullable=True),
@@ -93,6 +94,7 @@ def upgrade() -> None:
     op.create_index("ix_markets_resolution_status", "markets", ["resolution_status"])
     op.create_index("ix_markets_event_key", "markets", ["event_key"])
     op.create_index("ix_markets_group_slug", "markets", ["group_slug"])
+    op.create_index("ix_markets_public_event_id", "markets", ["public_event_id"])
     op.create_index("ix_markets_closes_at", "markets", ["closes_at"])
     op.create_index("ix_markets_category", "markets", ["category"])
 

@@ -218,7 +218,10 @@ def build_market_caps() -> schemas.MarketCaps:
 
 
 def filter_markets_for_visibility(
-    markets: list[schemas.MarketResponse], *, hide_settled: bool = False
+    markets: list[schemas.MarketResponse],
+    *,
+    hide_settled: bool = False,
+    dedup_by_group_key: bool = False,
 ) -> list[schemas.MarketResponse]:
     """Apply visibility rules (category allowlist, skip closed, de-dupe by event_id).
 
@@ -261,10 +264,15 @@ def filter_markets_for_visibility(
             continue
 
         event_id = getattr(market, "event_id", None)
-        if isinstance(event_id, str):
-            if event_id in seen_events:
+        if dedup_by_group_key:
+            group_key, _ = derive_group_key(market)
+            dedup_key = group_key if group_key != "unknown" else event_id
+        else:
+            dedup_key = event_id
+        if isinstance(dedup_key, str):
+            if dedup_key in seen_events:
                 continue
-            seen_events.add(event_id)
+            seen_events.add(dedup_key)
 
         filtered.append(market)
 
@@ -443,9 +451,11 @@ def build_event_responses(
             event_id = (getattr(market, "event_id", None) or "unknown").strip()
             group_key, _ = derive_group_key(market)
             group_slug = group_key if group_key and group_key != "unknown" else event_id
+            public_id = getattr(market, "public_event_id", None)
+            event_id_value = public_id if public_id else event_id
             events.append(
                 schemas.EventResponse(
-                    event_id=event_id,
+                    event_id=event_id_value,
                     title=market.title,
                     category=market.category,
                     group_slug=group_slug,
@@ -510,9 +520,11 @@ def build_event_responses(
         if aggregate_volume_total is not None and aggregate_volume is None:
             aggregate_volume = aggregate_volume_total
         title_value = group_titles.get(key) or primary.title
+        public_id = getattr(primary, "public_event_id", None)
+        event_id_value = public_id if public_id else key
         grouped_events.append(
             schemas.EventResponse(
-                event_id=key,
+                event_id=event_id_value,
                 title=title_value,
                 category=primary.category,
                 group_slug=key,

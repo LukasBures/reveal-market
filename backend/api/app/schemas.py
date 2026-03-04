@@ -101,6 +101,7 @@ class MarketBase(BaseModel):
     clob_token_ids: list[str] | None = None
     image_variants: list[str] | None = None
     featured: bool | None = None
+    public_event_id: str | None = None
     group_slug: str | None = None
     event_key: str | None = None
     group_item_title: str | None = None

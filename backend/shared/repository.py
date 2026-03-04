@@ -70,7 +70,7 @@ def upsert_market(
         session.add(market)
     else:
         # Preserve on-chain identifiers already stored; Polymarket feeds must never override these.
-        for protected in ("market_address", "onchain_market_id", "factory"):
+        for protected in ("market_address", "onchain_market_id", "factory", "public_event_id"):
             existing_value = getattr(market, protected, None)
             if existing_value not in (None, ""):
                 payload.pop(protected, None)

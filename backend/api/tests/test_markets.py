@@ -1167,6 +1167,29 @@ def test_suggest_capped_at_limit_without_duplicates(client, db_session):
     assert len({item["event_id"] for item in payload}) == 5
 
 
+def test_suggest_deduplicates_by_group_key(client, db_session):
+    """Range-variant markets sharing a group_slug should appear as one suggestion."""
+    group = "elon-musk-tweets-march"
+    markets = [
+        _make_market(
+            f"evt-elon-{idx}",
+            f"Will Elon Musk post {lo}-{lo + 24} tweets?",
+            category="politics",
+            oracle="0xelon",
+            status="commit",
+            group_slug=group,
+        )
+        for idx, lo in enumerate([40, 65, 90, 115, 140])
+    ]
+    db_session.add_all(markets)
+    db_session.commit()
+
+    resp = client.get("/events/suggest", params={"q": "elon", "limit": 5})
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert len(payload) == 1, f"Expected 1 grouped result, got {len(payload)}"
+
+
 def test_market_allowlists_filter_results(client, db_session):
     market_allowed = _make_market(
         "evt-allowed",
