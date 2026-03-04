@@ -22,6 +22,7 @@ from shared.cache_keys import (
     resolution_cache_key,
     suggest_cache_key,
 )
+from shared.categories import canonical_category_from_slug
 from shared.logging import log_event
 from shared.onchain import OnChainConfigurationError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,6 +40,7 @@ router = APIRouter()
 
 CLOB_HISTORY_DEFAULT_HOST = "https://clob.polymarket.com"
 CLOB_HISTORY_MAX_RANGE_SECONDS = 30 * 24 * 60 * 60
+_MAX_DETAIL_MARKETS = 100
 HistoryInterval = Literal["1m", "1h", "6h", "1d", "1w", "max"]
 
 
@@ -91,11 +93,16 @@ async def list_markets(
     featured: Annotated[bool | None, Query(description="Return only featured markets", alias="only_featured")] = None,
     closes_within_hours: Annotated[
         int | None,
-        Query(ge=1, le=168, description="Only return markets closing within this many hours"),
-    ] = 24,
+        Query(ge=1, le=720, description="Only return markets closing within this many hours"),
+    ] = None,
     session: AsyncSession = Depends(get_session),
 ) -> list[schemas.EventResponse]:
     """List events with optional filters and heavy reliance on Redis caches."""
+
+    if category:
+        resolved = canonical_category_from_slug(category)
+        if resolved:
+            category = resolved[1]
 
     normalized_order_by = "volume" if order_by == "volume_24h_usd" else order_by
     popularity_mode = normalized_order_by == "popularity" or bool(trending)
@@ -360,8 +367,8 @@ async def list_markets_by_category(
     offset: Annotated[int, Query(ge=0, description="Offset into the result set")] = 0,
     closes_within_hours: Annotated[
         int | None,
-        Query(ge=1, le=168, description="Only return markets closing within this many hours"),
-    ] = 24,
+        Query(ge=1, le=720, description="Only return markets closing within this many hours"),
+    ] = None,
     session: AsyncSession = Depends(get_session),
 ) -> list[schemas.MarketResponse]:
     """List markets for a category, with fallbacks when slugs are unfamiliar."""
@@ -597,12 +604,36 @@ async def get_event_by_key(
             cached = await get_json(cache, market_svc.market_detail_cache_key(normalized_key))
         if cached is not None:
             model = schemas.MarketResponse.model_validate(cached)
+            raw_group_slug = getattr(model, "group_slug", None) or ""
+            if market_svc._is_temporal_series_slug(raw_group_slug):
+                closes_at = getattr(model, "closes_at", None)
+                if isinstance(closes_at, datetime):
+                    group_markets = await crud.get_markets_by_group_slug(session, raw_group_slug, limit=200)
+                    ref_date = closes_at.date()
+                    group_markets = [
+                        m for m in group_markets if m.closes_at is not None and m.closes_at.date() == ref_date
+                    ]
+                    if group_markets:
+                        market_models_cached = await market_svc.enrich_market_models(
+                            session,
+                            [schemas.MarketResponse.model_validate(m) for m in group_markets],
+                            include_siblings=True,
+                        )
+                        event = market_svc.build_event_responses(market_models_cached)[0]
+                        if len(event.markets) > _MAX_DETAIL_MARKETS:
+                            event.markets = event.markets[:_MAX_DETAIL_MARKETS]
+                        return event
             await market_svc.enrich_market_models(session, [model], include_siblings=True)
             return market_svc.build_event_responses([model])[0]
     markets = []
     market_models: list[schemas.MarketResponse] | None = None
     if normalized_key:
-        markets = await crud.get_markets_by_group_slug(session, normalized_key)
+        markets = await crud.get_markets_by_group_slug(session, normalized_key, limit=500)
+        if markets and market_svc._is_temporal_series_slug(normalized_key):
+            ref_closes = getattr(markets[0], "closes_at", None)
+            if ref_closes is not None:
+                ref_date = ref_closes.date()
+                markets = [m for m in markets if m.closes_at is not None and m.closes_at.date() == ref_date]
     if not markets:
         market = await crud.get_market_by_event_id(session, event_key)
         if market is None:
@@ -621,7 +652,12 @@ async def get_event_by_key(
             group_slug = getattr(market, "group_slug", None)
             event_group_key = getattr(market, "event_key", None)
             if group_slug:
-                markets = await crud.get_markets_by_group_slug(session, str(group_slug))
+                markets = await crud.get_markets_by_group_slug(session, str(group_slug), limit=500)
+                if markets and market_svc._is_temporal_series_slug(str(group_slug)):
+                    ref_closes = getattr(market, "closes_at", None)
+                    if ref_closes is not None:
+                        ref_date = ref_closes.date()
+                        markets = [m for m in markets if m.closes_at is not None and m.closes_at.date() == ref_date]
             if not markets and event_group_key:
                 markets = await crud.get_markets_by_event_key(session, str(event_group_key))
             if not markets:
@@ -696,7 +732,10 @@ async def get_event_by_key(
                 if getattr(market_model, "event_key", None):
                     await add_tag(cache, f"group:{str(market_model.event_key)}", cache_key)
     events = market_svc.build_event_responses(market_models)
-    return events[0]
+    event = events[0]
+    if len(event.markets) > _MAX_DETAIL_MARKETS:
+        event.markets = event.markets[:_MAX_DETAIL_MARKETS]
+    return event
 
 
 @router.get("/events/onchain", tags=["events"], include_in_schema=False)
@@ -872,9 +911,14 @@ async def suggest_markets(
         )
         return models_from_cache
 
-    results = await crud.search_markets(session, normalized_query, limit)
+    # Over-fetch to compensate for multi-outcome events sharing the same event_id.
+    # filter_markets_for_visibility de-duplicates by event_id, so fetching 4x
+    # ensures we still return `limit` distinct events after dedup.
+    raw_limit = min(limit * 4, 100)
+    results = await crud.search_markets(session, normalized_query, raw_limit)
     market_models = [schemas.MarketResponse.model_validate(m) for m in results]
     filtered = market_svc.filter_markets_for_visibility(await market_svc.enrich_market_models(session, market_models))
+    filtered = filtered[:limit]
     if not filtered:
         log_event(
             logger,

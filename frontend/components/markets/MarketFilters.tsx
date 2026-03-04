@@ -21,8 +21,8 @@ type Props = {
 
 const SUGGESTION_CACHE_LIMIT = 50;
 const SUGGESTION_CACHE_TTL_MS = 60_000;
-const SUGGEST_TIMEOUT_MS = 8000;
-const SUGGEST_RETRY_DELAY_MS = 400;
+const SUGGEST_TIMEOUT_MS = 5000;
+const SUGGEST_RETRY_DELAY_MS = 250;
 const buildEventPath = (eventId: string) => `/events/${encodeURIComponent(eventId.trim())}` as Route;
 const windowSuggestionCache = new Map<
   string,
@@ -165,7 +165,7 @@ export function MarketFilters({ initialSearch, liveMarketsCount, endedMarketsCou
           fetchAbortRef.current = null;
         }
       }
-    }, 200);
+    }, 150);
     return () => {
       clearTimeout(debounce);
       controller.abort();
@@ -222,7 +222,7 @@ export function MarketFilters({ initialSearch, liveMarketsCount, endedMarketsCou
     MARKET_CATEGORY_FILTERS.slice(0, 4).forEach((category) => {
       const slug = categorySlugFromLabel(category);
       if (!slug) return;
-      const path = `/?category=${encodeURIComponent(slug)}` as Route;
+      const path = `/${encodeURIComponent(slug)}` as Route;
       router.prefetch(path);
     });
   }, [router]);
@@ -331,7 +331,7 @@ export function MarketFilters({ initialSearch, liveMarketsCount, endedMarketsCou
           return (
             <Link
               key={category}
-              href={`/?category=${encodeURIComponent(slug)}`}
+              href={`/${encodeURIComponent(slug)}` as Route}
               prefetch
               className="group rounded-full border border-white/10 bg-slate-900/30 px-4 py-2 text-sm text-slate-100 transition hover:border-brand-400/60 hover:text-white"
             >

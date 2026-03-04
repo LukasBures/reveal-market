@@ -30,7 +30,7 @@ def test_markets_endpoint_uses_cache(client, db_session, monkeypatch):
     response = client.get("/events", params={"limit": 10})
     assert response.status_code == 200
 
-    cache_key = markets_list_cache_key(None, None, None, None, 10, 0, closes_within_hours=24)
+    cache_key = markets_list_cache_key(None, None, None, None, 10, 0, closes_within_hours=None)
     cache_store = getattr(api_main.cache_client, "store", None)
     assert cache_store is not None and cache_key in cache_store
 
@@ -63,7 +63,7 @@ def test_market_cache_stores_event_ids_and_records(client, db_session):
     response = client.get("/events", params={"limit": 5})
     assert response.status_code == 200
 
-    cache_key = markets_list_cache_key(None, None, None, None, 5, 0, closes_within_hours=24)
+    cache_key = markets_list_cache_key(None, None, None, None, 5, 0, closes_within_hours=None)
     cache_store = getattr(api_main.cache_client, "store", {})
     assert cache_key in cache_store
     cached_raw = _json_loads_compressed(cache_store[cache_key])

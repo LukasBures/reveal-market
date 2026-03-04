@@ -884,7 +884,7 @@ def test_category_endpoint_caches_results(client, db_session):
     assert len(payload) == 1
     assert payload[0]["event_id"] == "evt-cat1"
 
-    cache_key = markets_list_cache_key("sports", None, None, None, 5, 0, closes_within_hours=24)
+    cache_key = markets_list_cache_key("sports", None, None, None, 5, 0, closes_within_hours=None)
     assert cache_key in api_main.cache_client.store
     db_session.query(models.Market).delete()
     db_session.commit()
@@ -933,7 +933,7 @@ def test_category_endpoint_orders_by_volume(client, db_session):
     assert resp.status_code == 200
     payload = resp.json()
     assert [item["event_id"] for item in payload] == ["evt-cat-high", "evt-cat-low"]
-    cache_key = markets_list_cache_key("sports", None, None, None, 5, 0, order_by="volume", closes_within_hours=24)
+    cache_key = markets_list_cache_key("sports", None, None, None, 5, 0, order_by="volume", closes_within_hours=None)
     assert cache_key in api_main.cache_client.store
 
 
@@ -970,7 +970,7 @@ def test_markets_volume_order_respects_offset_and_cache(client, db_session):
     payload = resp.json()
     assert len(payload) == 1
     assert payload[0]["event_id"] == "evt-vol-mid"
-    cache_key = markets_list_cache_key(None, None, None, None, 1, 1, order_by="volume", closes_within_hours=24)
+    cache_key = markets_list_cache_key(None, None, None, None, 1, 1, order_by="volume", closes_within_hours=None)
     assert cache_key in api_main.cache_client.store
 
 
@@ -1060,7 +1060,7 @@ def test_market_search_requests_not_cached(client, db_session):
 
     response = client.get("/events", params={"search": "AI", "limit": 5})
     assert response.status_code == 200
-    cache_key = markets_list_cache_key(None, None, None, "ai", 5, 0, closes_within_hours=24)
+    cache_key = markets_list_cache_key(None, None, None, "ai", 5, 0, closes_within_hours=None)
     assert cache_key not in api_main.cache_client.store
 
 

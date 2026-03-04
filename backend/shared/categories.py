@@ -94,28 +94,38 @@ _CATEGORY_DEFINITIONS: tuple[CategoryDefinition, ...] = (
     CategoryDefinition(
         slug="finance",
         label="Finance",
-        aliases=("markets", "macro", "economy", "equities", "stocks", "rates"),
+        aliases=("equities", "stocks"),
         keywords=(
             "finance",
+            "stock",
+            "equity",
+            "equities",
+            "bond",
+            "treasury",
+            "market",
+            "markets",
+            "earnings",
+            "stocks",
+        ),
+    ),
+    CategoryDefinition(
+        slug="economy",
+        label="Economy",
+        aliases=("macro", "macroeconomics"),
+        keywords=(
             "economy",
             "macro",
             "inflation",
             "cpi",
             "ppi",
+            "gdp",
             "jobs",
             "employment",
             "labor",
-            "market",
-            "markets",
-            "equity",
-            "stock",
-            "bond",
-            "treasury",
             "fed",
             "interest",
             "rate",
             "rates",
-            "gdp",
             "recession",
         ),
     ),
@@ -266,4 +276,41 @@ def _match_keywords(slug: str) -> str | None:
         for keyword in keywords:
             if keyword and keyword in slug:
                 return category_slug
+    return None
+
+
+_GEOPOLITICS_TITLE_KEYWORDS = frozenset(
+    {
+        "ukraine",
+        "russia",
+        "china",
+        "taiwan",
+        "iran",
+        "gaza",
+        "israel",
+        "palestine",
+        "nato",
+        "military",
+        "missile",
+        "invasion",
+        "conflict",
+        "war",
+        "army",
+        "border",
+        "geopolit",
+        "sanction",
+        "tariff",
+        "trade-war",
+    }
+)
+
+
+def refine_category(slug: str, title: str | None) -> tuple[str, str] | None:
+    """Re-check a market initially categorised as *politics* for geopolitics signals in its title."""
+    if slug != "politics" or not title:
+        return None
+    lowered = _slugify(title)
+    for kw in _GEOPOLITICS_TITLE_KEYWORDS:
+        if kw in lowered:
+            return "geopolitics", CANONICAL_CATEGORIES["geopolitics"]
     return None

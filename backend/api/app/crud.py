@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from shared import repository_async as shared_repository
-from sqlalchemy import and_, case, func, literal_column, or_, over, select
+from sqlalchemy import and_, case, exists, func, literal_column, or_, over, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -154,7 +154,7 @@ async def get_market_by_condition_id(session: AsyncSession, condition_id: str) -
     return (await session.scalars(stmt)).first()
 
 
-async def get_markets_by_group_slug(session: AsyncSession, group_slug: str) -> list[models.Market]:
+async def get_markets_by_group_slug(session: AsyncSession, group_slug: str, *, limit: int = 500) -> list[models.Market]:
     normalized_slug = (group_slug or "").strip().lower()
     if not normalized_slug:
         return []
@@ -174,6 +174,7 @@ async def get_markets_by_group_slug(session: AsyncSession, group_slug: str) -> l
             )
         )
         .order_by(models.Market.created_at.desc())
+        .limit(limit)
     )
     result = await session.execute(stmt)
     rows: list[models.Market] = list(result.unique().scalars().all())
@@ -445,13 +446,24 @@ async def get_grouped_events(
     return rows
 
 
-async def search_markets(session: AsyncSession, query: str, limit: int) -> list[models.Market]:
+async def search_markets(
+    session: AsyncSession, query: str, limit: int, *, active_only: bool = True
+) -> list[models.Market]:
     stmt = select(models.Market).options(
         selectinload(models.Market.outcomes_rel),
         selectinload(models.Market.tags_rel),
         selectinload(models.Market.clob_tokens_rel),
         selectinload(models.Market.gamma_metadata_rel),
     )
+    if active_only:
+        stmt = stmt.where(
+            models.Market.status.in_(
+                [
+                    models.MarketStatusEnum.COMMIT.value,
+                    models.MarketStatusEnum.LOCKED.value,
+                ]
+            )
+        )
     stmt = _apply_text_search(session, stmt, query or "")
     stmt = stmt.limit(limit)
     result = await session.scalars(stmt)
@@ -464,11 +476,16 @@ def _apply_text_search(session: AsyncSession, stmt, search: str | None, apply_de
         return stmt.order_by(models.Market.created_at.desc()) if apply_default_order else stmt
 
     pattern = f"%{search_value}%"
+    gamma_title_match = exists().where(
+        models.MarketGammaMetadata.market_id == models.Market.id,
+        models.MarketGammaMetadata.group_item_title.ilike(pattern),
+    )
     fallback_clause = or_(
         models.Market.title.ilike(pattern),
         models.Market.slug.ilike(pattern),
         models.Market.category.ilike(pattern),
         models.Market.oracle.ilike(pattern),
+        gamma_title_match,
     )
 
     if _supports_full_text(session):

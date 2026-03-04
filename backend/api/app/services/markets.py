@@ -80,6 +80,12 @@ GENERIC_GROUP_SLUGS = {
     "news",
 }
 _EVENT_CONTEXT_RE = re.compile(r"\bat\s+([^,]+),\s*scheduled\b", flags=re.IGNORECASE)
+_TEMPORAL_SERIES_RE = re.compile(r"(?:^|-)updown$|up-or-down", flags=re.IGNORECASE)
+
+
+def _is_temporal_series_slug(slug: str) -> bool:
+    """Return True for slugs representing recurring daily series (e.g. eth-updown)."""
+    return bool(_TEMPORAL_SERIES_RE.search(slug))
 
 
 def _infer_group_slug_from_description(description: str | None) -> str | None:
@@ -121,6 +127,10 @@ def derive_group_key(market: schemas.MarketResponse) -> tuple[str, str | None]:
         description=getattr(market, "description", None),
     )
     if slug:
+        if _is_temporal_series_slug(slug):
+            closes_at = getattr(market, "closes_at", None)
+            if isinstance(closes_at, datetime):
+                return f"{slug}-{closes_at.strftime('%Y-%m-%d')}", None
         return slug, None
     event_id = (getattr(market, "event_id", None) or "").strip()
     if event_id:

@@ -8,7 +8,7 @@ import { DEFAULT_PAGE_SIZE, DEFAULT_MAX_ITEMS } from "./constants";
 import { logger } from "@/lib/logging";
 import { fetchFeaturedEvents } from "@/lib/api";
 import { categorySlugFromLabel } from "@/lib/slugs";
-import type { MarketSortOption } from "@/lib/markets";
+import { MARKET_CATEGORY_FILTERS, type MarketSortOption } from "@/lib/markets";
 
 /**
  * We auto-load up to five batches via IntersectionObserver to give users a lazy-loading feel
@@ -251,7 +251,7 @@ export function FeaturedEventsClient({
         </div>
       );
     }
-    const suggestions = ["Crypto", "Finance", "Sports", "Politics"];
+    const suggestions = MARKET_CATEGORY_FILTERS.slice(0, 4);
     return (
       <div className="rounded-3xl border border-white/10 bg-slate-950/40 p-6 text-center text-sm text-slate-300">
         <p className="text-base font-semibold text-white">No markets match that yet.</p>
@@ -262,7 +262,7 @@ export function FeaturedEventsClient({
             return (
               <a
                 key={category}
-                href={`/?category=${encodeURIComponent(slug)}`}
+                href={`/${encodeURIComponent(slug)}`}
                 className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.25em] text-white/70 transition hover:border-brand-400/60 hover:text-white sm:py-1"
               >
                 {category}

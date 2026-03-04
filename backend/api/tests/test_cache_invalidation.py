@@ -25,7 +25,7 @@ def test_post_market_invalidates_cached_list(client, db_session):
     db_session.add(_create_market(1))
     db_session.commit()
 
-    cache_key = markets_list_cache_key(None, None, None, None, 10, 0, closes_within_hours=24)
+    cache_key = markets_list_cache_key(None, None, None, None, 10, 0, closes_within_hours=None)
     first = client.get("/events", params={"limit": 10})
     assert first.status_code == 200
     assert cache_key in api_main.cache_client.store

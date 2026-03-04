@@ -15,6 +15,7 @@ type Props = {
   sortBy?: MarketSortOption;
   status?: string;
   onlyActive?: boolean;
+  closesWithinHours?: number | null;
 };
 
 export async function FeaturedEventsSection({
@@ -26,6 +27,7 @@ export async function FeaturedEventsSection({
   sortBy = "totalVolume",
   status = "active",
   onlyActive = true,
+  closesWithinHours,
 }: Props = {}) {
   const orderBy = sortBy === "recent" ? "recent" : sortBy === "popularity" ? "popularity" : "volume";
   const { data: initialMarkets } = await fetchFeaturedEvents(pageSize, {
@@ -34,6 +36,7 @@ export async function FeaturedEventsSection({
     status,
     trending: false,
     orderBy,
+    closesWithinHours,
   });
 
   if (initialMarkets.length === 0) {
@@ -64,6 +67,7 @@ export async function FeaturedEventsSection({
       onlyActive={onlyActive}
       trending={false}
       sortBy={sortBy}
+      closesWithinHours={closesWithinHours}
     />
   );
 }

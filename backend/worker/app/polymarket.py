@@ -21,7 +21,7 @@ import httpx
 from py_clob_client.client import ClobClient
 from py_clob_client.constants import END_CURSOR
 from pydantic import BaseModel, Field, ValidationError
-from shared.categories import canonical_category_from_raw
+from shared.categories import canonical_category_from_raw, refine_category
 from shared.logging import log_event
 from shared.models import ResolutionStatusEnum
 from shared.polymarket import build_polymarket_events_url, build_polymarket_markets_url
@@ -182,7 +182,10 @@ class MarketPayload(BaseModel):
         tags = _extract_tags(raw.get("tags"))
         canonical_category = canonical_category_from_raw(category, tags=tags)
         if canonical_category:
-            _, category = canonical_category
+            cat_slug, category = canonical_category
+            refined = refine_category(cat_slug, title)
+            if refined:
+                _, category = refined
         updated_at = _extract_updated_at(raw)
         closes_at = _extract_close_time(raw)
         starts_at = _extract_timestamp_candidate(

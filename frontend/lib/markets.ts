@@ -11,13 +11,10 @@ export type VolumePreference = "24h" | "total";
 export const MARKET_CATEGORY_FILTERS = [
   "Crypto",
   "Finance",
+  "Economy",
   "Sports",
   "Politics",
   "Geopolitics",
-  "Tech",
-  "Entertainment",
-  "Elections",
-  "Science",
 ] as const;
 
 /**

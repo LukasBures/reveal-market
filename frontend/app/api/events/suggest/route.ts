@@ -19,10 +19,16 @@ export async function GET(request: Request) {
   const endpoint = new URL("/events/suggest", DEFAULT_API_BASE);
   endpoint.searchParams.set("q", q);
   endpoint.searchParams.set("limit", limit);
-  const response = await fetch(endpoint.toString(), { cache: "no-store" });
+  const response = await fetch(endpoint.toString(), {
+    next: { revalidate: 15 },
+  });
   if (!response.ok) {
     return NextResponse.json([], { status: response.status });
   }
   const payload = await response.json();
-  return NextResponse.json(payload);
+  return NextResponse.json(payload, {
+    headers: {
+      "Cache-Control": "public, s-maxage=15, stale-while-revalidate=30",
+    },
+  });
 }

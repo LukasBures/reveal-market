@@ -60,6 +60,7 @@ export default async function HomePage({ searchParams }: PageProps) {
             sortBy={sortBy}
             status={effectiveSearchQuery ? "any" : "active"}
             onlyActive={!effectiveSearchQuery}
+            closesWithinHours={24}
           />
         </Suspense>
       </div>

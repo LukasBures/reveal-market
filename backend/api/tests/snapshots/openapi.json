@@ -792,14 +792,13 @@
               "anyOf": [
                 {
                   "type": "integer",
-                  "maximum": 168,
+                  "maximum": 720,
                   "minimum": 1
                 },
                 {
                   "type": "null"
                 }
               ],
-              "default": 24,
               "description": "Only return markets closing within this many hours",
               "title": "Closes Within Hours"
             },
@@ -887,14 +886,13 @@
               "anyOf": [
                 {
                   "type": "integer",
-                  "maximum": 168,
+                  "maximum": 720,
                   "minimum": 1
                 },
                 {
                   "type": "null"
                 }
               ],
-              "default": 24,
               "description": "Only return markets closing within this many hours",
               "title": "Closes Within Hours"
             },
