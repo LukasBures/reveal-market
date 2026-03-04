@@ -32,7 +32,7 @@ const rawHomeLink = isTestEnv ? "/" : resolvedSiteUrl;
 const internalHomeHref: Route =
   rawHomeLink && rawHomeLink.startsWith("/") ? (rawHomeLink as Route) : fallbackHomeRoute;
 const externalHomeHref = !isTestEnv && /^https?:\/\//.test(rawHomeLink) ? rawHomeLink : null;
-const HERO_CATEGORY_FILTERS = ["All", "Crypto", "Finance", "Sports", "Geopolitics"];
+const HERO_CATEGORY_FILTERS = ["All", "Crypto", "Finance", "Economy", "Sports", "Politics", "Geopolitics"];
 
 /**
  * Top navigation with logo, menu links, and Connect Wallet CTA.
@@ -42,8 +42,10 @@ export function MainNav() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const pathname = usePathname();
   const isLandingPage = pathname === "/";
-  const headerHeightClass = isLandingPage ? "h-[120px]" : "h-[72px]";
-  const spacerClass = isLandingPage ? "h-[120px]" : "h-[72px] bg-[#010314]";
+  const isCategoryPage = /^\/[a-z][a-z0-9-]*$/.test(pathname) && parseCategorySlug(pathname.slice(1)) !== null;
+  const showFiltersBar = isLandingPage || isCategoryPage;
+  const headerHeightClass = showFiltersBar ? "h-[120px]" : "h-[72px]";
+  const spacerClass = showFiltersBar ? "h-[120px]" : "h-[72px] bg-[#010314]";
 
   useEffect(() => {
     if (!isMobileMenuOpen) {
@@ -65,7 +67,7 @@ export function MainNav() {
       >
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-brand-500/40 to-transparent" />
       <div className="pointer-events-none absolute inset-x-0 top-0 h-[72px] bg-[radial-gradient(circle_at_top,_rgba(124,132,255,0.18),_transparent_70%)]" />
-      {isLandingPage ? (
+      {showFiltersBar ? (
         <div className="pointer-events-none absolute inset-x-0 top-[72px] h-[48px] bg-[radial-gradient(circle_at_top,_rgba(124,132,255,0.18),_transparent_70%)]" />
       ) : null}
       <div
@@ -155,7 +157,7 @@ export function MainNav() {
           </div>
         </div>
       </div>
-      {isLandingPage ? (
+      {showFiltersBar ? (
         <Suspense fallback={null}>
           <HomeFiltersBar />
         </Suspense>
@@ -208,20 +210,23 @@ export function MainNav() {
 }
 
 function HomeFiltersBar() {
+  const pathname = usePathname();
   const searchParams = useSearchParams();
-  const rawSearchQuery = searchParams.get("q") ?? "";
-  const normalizedSearch = rawSearchQuery.trim();
-  const hasShortSearch = normalizedSearch.length > 0 && normalizedSearch.length < 2;
-  const effectiveSearchQuery = hasShortSearch ? "" : normalizedSearch;
-  const rawCategoryParam = searchParams.get("category");
-  const parsedCategory = rawCategoryParam ? parseCategorySlug(rawCategoryParam) : null;
   const rawSortParam = searchParams.get("sort");
   const sortBy = (() => {
     if (rawSortParam === "newest") return "recent";
     if (rawSortParam === "trending") return "popularity";
     return "totalVolume";
   })();
-  const hasActiveFilters = Boolean(parsedCategory) || Boolean(effectiveSearchQuery);
+
+  // Detect active category from pathname (e.g., /geopolitics → "geopolitics")
+  const pathSegment = pathname === "/" ? null : pathname.slice(1);
+  const activeCategory = pathSegment ? parseCategorySlug(pathSegment) : null;
+  const isHome = pathname === "/";
+  const hasActiveFilters = Boolean(activeCategory) || rawSortParam !== null;
+
+  // Build the base path for sort links (stays on current category page)
+  const basePath = activeCategory ? `/${activeCategory.slug}` : "/";
 
   return (
     <div className="border-t border-white/5 bg-black/80 text-xs text-white/80 backdrop-blur">
@@ -235,20 +240,8 @@ function HomeFiltersBar() {
                 const isAll = category.toLowerCase() === "all";
                 const slug =
                   categorySlugFromLabel(category) ?? category.toLowerCase().replace(/[^a-z0-9-]/g, "-");
-                const isActive = isAll ? !parsedCategory : parsedCategory?.slug === slug;
-                const params = new URLSearchParams();
-                if (effectiveSearchQuery) {
-                  params.set("q", effectiveSearchQuery);
-                }
-                if (sortBy === "recent") {
-                  params.set("sort", "newest");
-                } else if (sortBy === "popularity") {
-                  params.set("sort", "trending");
-                }
-                if (!isAll) {
-                  params.set("category", slug);
-                }
-                const href = (isAll ? "/" : params.toString() ? `/?${params.toString()}` : "/") as Route;
+                const isActive = isAll ? isHome : activeCategory?.slug === slug;
+                const href = (isAll ? "/" : `/${slug}`) as Route;
                 return (
                   <Link
                     key={category}
@@ -272,16 +265,11 @@ function HomeFiltersBar() {
               { label: "Newest", value: "newest", active: sortBy === "recent" },
             ].map((pill) => {
               const params = new URLSearchParams();
-              if (effectiveSearchQuery) {
-                params.set("q", effectiveSearchQuery);
-              }
-              if (parsedCategory) {
-                params.set("category", parsedCategory.slug);
-              }
               if (pill.value !== "volume") {
                 params.set("sort", pill.value);
               }
-              const href = (params.toString() ? `/?${params.toString()}` : "/") as Route;
+              const qs = params.toString();
+              const href = (qs ? `${basePath}?${qs}` : basePath) as Route;
               return (
                 <Link
                   key={pill.value}

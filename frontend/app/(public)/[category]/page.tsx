@@ -61,15 +61,27 @@ export async function generateMetadata({ params }: { params: Promise<{ category:
   return buildMetadata({ title: config.title, description: config.description, path: `/${category}` });
 }
 
-export default async function CategoryPage({ params }: { params: Promise<{ category: string }> }) {
+type PageProps = {
+  params: Promise<{ category: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
+
+export default async function CategoryPage({ params, searchParams }: PageProps) {
   const { category } = await params;
   const config = CATEGORY_PAGES[category];
   if (!config) notFound();
+  const resolvedParams = (await searchParams) ?? {};
+  const rawSort = typeof resolvedParams.sort === "string" ? resolvedParams.sort : undefined;
+  const sortBy = (() => {
+    if (rawSort === "newest") return "recent" as const;
+    if (rawSort === "trending") return "popularity" as const;
+    return "totalVolume" as const;
+  })();
   return (
     <div className="mx-auto max-w-7xl px-4 pt-4 pb-16 text-white pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
       <h1 className="sr-only">{config.title}</h1>
       <Suspense fallback={<FeaturedEventsSkeleton />}>
-        <FeaturedEventsSection categoryFilter={config.apiLabel} closesWithinHours={24} />
+        <FeaturedEventsSection categoryFilter={config.apiLabel} sortBy={sortBy} closesWithinHours={24} />
       </Suspense>
     </div>
   );
