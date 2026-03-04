@@ -16,6 +16,7 @@ Timeline:
 
 Also checks: API event visibility, relayer status polling, prover health.
 """
+
 from __future__ import annotations
 
 import json
@@ -28,6 +29,7 @@ from eth_account import Account
 from eth_account.messages import encode_defunct
 from utils import (
     AUTH_SIGNER_ADDRESS,
+    AUTH_SIGNER_KEY,
     CIRCUIT_HASH,
     DEPLOYER_KEY,
     FACTORY,
@@ -41,7 +43,6 @@ from utils import (
     VERIFIER,
     api_post,
     build_web3,
-    check,
     contract,
     log,
     send_tx,
@@ -51,23 +52,21 @@ from utils import (
 from web3 import Web3
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-COMMIT_DEADLINE_OFFSET = 120       # 2 minutes — short enough to test quickly
-TICKET_SIZE            = 1 * 10**18
-MAX_COMMITMENTS        = 256
-LIABILITY_CAP          = 5 * 10**18   # must fit within pool balance (~10 ZEN)
-WINNING_OUTCOME        = 0            # YES wins
+COMMIT_DEADLINE_OFFSET = 120  # 2 minutes — short enough to test quickly
+TICKET_SIZE = 1 * 10**18
+MAX_COMMITMENTS = 256
+LIABILITY_CAP = 5 * 10**18  # must fit within pool balance (~10 ZEN)
+WINNING_OUTCOME = 0  # YES wins
 
-RELAYER_URL  = "http://localhost:8088"
-PROVER_URL   = "http://localhost:8085"
-API_URL      = "http://localhost:8000"
+RELAYER_URL = "http://localhost:8088"
+PROVER_URL = "http://localhost:8085"
+API_URL = "http://localhost:8000"
 
 FIELD_MODULUS = 21888242871839275222246405745257275088548364400416034343698204186575808495617
 
-RM_AUTH_SIGNER_KEY = "REDACTED"
-RM_INTERNAL_SECRET =<REDACTED>
-RELAYER_INTERNAL_SECRET =<REDACTED>
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
+
 
 def header(msg: str) -> None:
     log.info("")
@@ -99,22 +98,25 @@ def sign_commit_auth(
 ) -> bytes:
     """Sign commitWithAuthorization per AuthorizationVerifier EIP-191 digest."""
     from eth_abi import encode
+
     raw = Web3.solidity_keccak(
         ["bytes"],
-        [encode(
-            ["address", "uint256", "uint256", "bytes32", "address", "uint256", "uint256", "uint256", "uint256"],
-            [
-                web3.to_checksum_address(market),
-                market_id,
-                ticket_id,
-                commitment,
-                web3.to_checksum_address(user),
-                nonce,
-                expiry,
-                ticket_value,
-                chain_id,
-            ],
-        )],
+        [
+            encode(
+                ["address", "uint256", "uint256", "bytes32", "address", "uint256", "uint256", "uint256", "uint256"],
+                [
+                    web3.to_checksum_address(market),
+                    market_id,
+                    ticket_id,
+                    commitment,
+                    web3.to_checksum_address(user),
+                    nonce,
+                    expiry,
+                    ticket_value,
+                    chain_id,
+                ],
+            )
+        ],
     )
     signed = Account.sign_message(encode_defunct(raw), private_key=auth_signer_key)
     return signed.signature
@@ -131,19 +133,22 @@ def sign_lock_batches(
     chain_id: int,
 ) -> bytes:
     from eth_abi import encode
+
     raw = Web3.solidity_keccak(
         ["bytes"],
-        [encode(
-            ["address", "address", "uint256", "bytes32[]", "uint256[]", "uint256"],
-            [
-                web3.to_checksum_address(market),
-                web3.to_checksum_address(factory),
-                market_id,
-                roots,
-                counts,
-                chain_id,
-            ],
-        )],
+        [
+            encode(
+                ["address", "address", "uint256", "bytes32[]", "uint256[]", "uint256"],
+                [
+                    web3.to_checksum_address(market),
+                    web3.to_checksum_address(factory),
+                    market_id,
+                    roots,
+                    counts,
+                    chain_id,
+                ],
+            )
+        ],
     )
     signed = Account.sign_message(encode_defunct(raw), private_key=deployer_key)
     return signed.signature
@@ -179,7 +184,7 @@ def submit_commitment(
 
     auth_sig = sign_commit_auth(
         web3,
-        RM_AUTH_SIGNER_KEY,
+        AUTH_SIGNER_KEY,
         market_addr,
         market_id,
         ticket_id,
@@ -191,20 +196,28 @@ def submit_commitment(
         chain_id,
     )
 
-    escrow = contract(web3, RELAYER_ESCROW, [
-        {"name": "commitWithAuthorization", "type": "function", "stateMutability": "nonpayable",
-         "inputs": [
-             {"name": "market", "type": "address"},
-             {"name": "commitment", "type": "bytes32"},
-             {"name": "user", "type": "address"},
-             {"name": "nonce", "type": "uint256"},
-             {"name": "expiry", "type": "uint256"},
-             {"name": "ticketValue", "type": "uint256"},
-             {"name": "ticketId", "type": "uint256"},
-             {"name": "authSignature", "type": "bytes"},
-         ],
-         "outputs": []},
-    ])
+    escrow = contract(
+        web3,
+        RELAYER_ESCROW,
+        [
+            {
+                "name": "commitWithAuthorization",
+                "type": "function",
+                "stateMutability": "nonpayable",
+                "inputs": [
+                    {"name": "market", "type": "address"},
+                    {"name": "commitment", "type": "bytes32"},
+                    {"name": "user", "type": "address"},
+                    {"name": "nonce", "type": "uint256"},
+                    {"name": "expiry", "type": "uint256"},
+                    {"name": "ticketValue", "type": "uint256"},
+                    {"name": "ticketId", "type": "uint256"},
+                    {"name": "authSignature", "type": "bytes"},
+                ],
+                "outputs": [],
+            },
+        ],
+    )
 
     send_tx(
         web3,
@@ -247,6 +260,7 @@ def request_proof(market_addr: str, market_id: int, batch_root: str, tickets: li
 
 def pack_proof(proof_json: dict) -> bytes:
     """Pack Groth16 proof into 256-byte calldata: pi_a[2] + pi_b[2][2] + pi_c[2]."""
+
     def to_u256(x: str) -> bytes:
         return int(x).to_bytes(32, "big")
 
@@ -255,14 +269,19 @@ def pack_proof(proof_json: dict) -> bytes:
     pi_c = proof_json["pi_c"]
 
     return (
-        to_u256(pi_a[0]) + to_u256(pi_a[1])
-        + to_u256(pi_b[0][0]) + to_u256(pi_b[0][1])
-        + to_u256(pi_b[1][0]) + to_u256(pi_b[1][1])
-        + to_u256(pi_c[0]) + to_u256(pi_c[1])
+        to_u256(pi_a[0])
+        + to_u256(pi_a[1])
+        + to_u256(pi_b[0][0])
+        + to_u256(pi_b[0][1])
+        + to_u256(pi_b[1][0])
+        + to_u256(pi_b[1][1])
+        + to_u256(pi_c[0])
+        + to_u256(pi_c[1])
     )
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
+
 
 def main() -> int:
     setup_logging()
@@ -271,11 +290,14 @@ def main() -> int:
     chain_id = web3.eth.chain_id
 
     test_account = Account.from_key(TEST_ACCOUNT_KEY)
-    deployer_account = Account.from_key(DEPLOYER_KEY)
 
     # ─── Step 0: Health checks ──────────────────────────────────────────────
     header("Step 0: Health Checks")
-    for name, url in [("API", f"{API_URL}/healthz"), ("Relayer", f"{RELAYER_URL}/healthz"), ("Prover", f"{PROVER_URL}/healthz")]:
+    for name, url in [
+        ("API", f"{API_URL}/healthz"),
+        ("Relayer", f"{RELAYER_URL}/healthz"),
+        ("Prover", f"{PROVER_URL}/healthz"),
+    ]:
         try:
             r = httpx.get(url, timeout=5)
             status = r.json().get("status", r.status_code)
@@ -298,7 +320,9 @@ def main() -> int:
         is_approved = True  # already approved or call not available
     if not is_approved:
         log.info("Approving verifier...")
-        send_tx(web3, DEPLOYER_KEY, factory.functions.setVerifierApproval(verifier_addr, True), label="approve-verifier")
+        send_tx(
+            web3, DEPLOYER_KEY, factory.functions.setVerifierApproval(verifier_addr, True), label="approve-verifier"
+        )
 
     create_params = (
         web3.to_checksum_address(ORACLE_ADDRESS),
@@ -316,27 +340,36 @@ def main() -> int:
     market_addr = factory.functions.marketAddress(market_id).call()
     mkt = contract(web3, market_addr, MARKET_ABI)
     rake_bps = mkt.functions.rakeBps().call()
-    log.info("Market created: id=%s addr=%s rake=%sbps deadline=%ss from now",
-             market_id, market_addr, rake_bps, COMMIT_DEADLINE_OFFSET)
+    log.info(
+        "Market created: id=%s addr=%s rake=%sbps deadline=%ss from now",
+        market_id,
+        market_addr,
+        rake_bps,
+        COMMIT_DEADLINE_OFFSET,
+    )
 
     # Register in API DB
     from datetime import UTC, datetime
+
     event_id = f"ui-sim-{market_id}-{int(time.time())}"
     closes_at = datetime.fromtimestamp(commit_deadline, tz=UTC).isoformat()
     try:
-        api_post("/events", {
-            "event_id": event_id,
-            "title": f"UI Sim Test #{market_id}: Will YES win? (auto-resolves in {COMMIT_DEADLINE_OFFSET}s)",
-            "category": "test",
-            "oracle": web3.to_checksum_address(ORACLE_ADDRESS),
-            "market_address": market_addr,
-            "onchain_market_id": market_id,
-            "factory": web3.to_checksum_address(FACTORY),
-            "status": "commit",
-            "closes_at": closes_at,
-            "outcomes": ["Yes", "No"],
-            "outcome_prices": [0.5, 0.5],
-        })
+        api_post(
+            "/events",
+            {
+                "event_id": event_id,
+                "title": f"UI Sim Test #{market_id}: Will YES win? (auto-resolves in {COMMIT_DEADLINE_OFFSET}s)",
+                "category": "test",
+                "oracle": web3.to_checksum_address(ORACLE_ADDRESS),
+                "market_address": market_addr,
+                "onchain_market_id": market_id,
+                "factory": web3.to_checksum_address(FACTORY),
+                "status": "commit",
+                "closes_at": closes_at,
+                "outcomes": ["Yes", "No"],
+                "outcome_prices": [0.5, 0.5],
+            },
+        )
         log.info("API DB registration: event_id=%s", event_id)
     except Exception as e:
         log.warning("DB registration failed (non-fatal): %s", e)
@@ -358,7 +391,9 @@ def main() -> int:
         log.info("  commitment: 0x%s", commitment.hex())
 
         submit_commitment(web3, mkt, market_addr, market_id, ticket_id, commitment, TEST_ACCOUNT_KEY, chain_id)
-        tickets.append({"ticket_id": ticket_id, "outcome": outcome, "salt": str(salt), "commitment": "0x" + commitment.hex()})
+        tickets.append(
+            {"ticket_id": ticket_id, "outcome": outcome, "salt": str(salt), "commitment": "0x" + commitment.hex()}
+        )
         log.info("  Ticket %s placed (outcome=%s, 1 ZEN)", ticket_id, outcome)
 
     # Verify on-chain
@@ -375,13 +410,12 @@ def main() -> int:
 
     # ─── Step 4: Compute Merkle Root & Lock Batches ────────────────────────
     header("Step 4: Lock Batches (oracle action)")
-    import hashlib
 
     def poseidon_leaf(commitment: bytes) -> bytes:
         # For locking we need the Merkle root — use the prover's hash endpoint
         resp = httpx.post(
             f"{PROVER_URL}/api/v1/hash/poseidon",
-            json={"inputs": [str(int.from_bytes(commitment, 'big'))]},
+            json={"inputs": [str(int.from_bytes(commitment, "big"))]},
             timeout=30,
         )
         resp.raise_for_status()
@@ -404,8 +438,14 @@ def main() -> int:
     log.info("Batch root: %s", batch_root_hex)
 
     relayer_sig = sign_lock_batches(
-        web3, DEPLOYER_KEY, market_addr, FACTORY, market_id,
-        [batch_root_bytes], [2], chain_id,
+        web3,
+        DEPLOYER_KEY,
+        market_addr,
+        FACTORY,
+        market_id,
+        [batch_root_bytes],
+        [2],
+        chain_id,
     )
 
     send_tx(
@@ -449,23 +489,44 @@ def main() -> int:
     # ─── Step 8: Claim Payouts (simulates user wallet claim) ───────────────
     header("Step 8: Claim Payouts (simulates user wallet claims)")
 
-    escrow = contract(web3, RELAYER_ESCROW, [
-        {"name": "claimPayout", "type": "function", "stateMutability": "nonpayable",
-         "inputs": [
-             {"name": "market", "type": "address"},
-             {"name": "ticketId", "type": "uint256"},
-             {"name": "outcome", "type": "uint256"},
-             {"name": "salt", "type": "uint256"},
-         ],
-         "outputs": []},
-    ])
+    escrow = contract(
+        web3,
+        RELAYER_ESCROW,
+        [
+            {
+                "name": "claimPayout",
+                "type": "function",
+                "stateMutability": "nonpayable",
+                "inputs": [
+                    {"name": "market", "type": "address"},
+                    {"name": "ticketId", "type": "uint256"},
+                    {"name": "outcome", "type": "uint256"},
+                    {"name": "salt", "type": "uint256"},
+                ],
+                "outputs": [],
+            },
+        ],
+    )
 
     # YES winner (ticket 0)
     yes_ticket = tickets[0]
-    escrow_before = contract(web3, RELAYER_ESCROW, [
-        {"name": "balanceOf", "type": "function", "stateMutability": "view",
-         "inputs": [{"name": "", "type": "address"}], "outputs": [{"name": "", "type": "uint256"}]},
-    ]).functions.balanceOf(test_account.address).call()
+    escrow_before = (
+        contract(
+            web3,
+            RELAYER_ESCROW,
+            [
+                {
+                    "name": "balanceOf",
+                    "type": "function",
+                    "stateMutability": "view",
+                    "inputs": [{"name": "", "type": "address"}],
+                    "outputs": [{"name": "", "type": "uint256"}],
+                },
+            ],
+        )
+        .functions.balanceOf(test_account.address)
+        .call()
+    )
 
     send_tx(
         web3,
@@ -479,14 +540,29 @@ def main() -> int:
         label="claim-yes",
     )
 
-    escrow_after = contract(web3, RELAYER_ESCROW, [
-        {"name": "balanceOf", "type": "function", "stateMutability": "view",
-         "inputs": [{"name": "", "type": "address"}], "outputs": [{"name": "", "type": "uint256"}]},
-    ]).functions.balanceOf(test_account.address).call()
+    escrow_after = (
+        contract(
+            web3,
+            RELAYER_ESCROW,
+            [
+                {
+                    "name": "balanceOf",
+                    "type": "function",
+                    "stateMutability": "view",
+                    "inputs": [{"name": "", "type": "address"}],
+                    "outputs": [{"name": "", "type": "uint256"}],
+                },
+            ],
+        )
+        .functions.balanceOf(test_account.address)
+        .call()
+    )
     payout = escrow_after - escrow_before
     log.info("YES claim payout: %s ZEN (escrow delta)", wei_to_zen(payout))
     expected_payout = 2 * TICKET_SIZE * (10000 - rake_bps) // 10000
-    all_ok &= ok(f"YES payout ~{wei_to_zen(expected_payout)} ZEN", payout == expected_payout, f"got {wei_to_zen(payout)}")
+    all_ok &= ok(
+        f"YES payout ~{wei_to_zen(expected_payout)} ZEN", payout == expected_payout, f"got {wei_to_zen(payout)}"
+    )
 
     # NO loser (ticket 1): should revert
     no_ticket = tickets[1]
@@ -513,10 +589,26 @@ def main() -> int:
     log.info("Event ID:        %s", event_id)
     log.info("Rake:            %sbps (%.1f%%)", rake_bps, rake_bps / 100)
     log.info("YES payout:      %s ZEN", wei_to_zen(payout))
-    log.info("Pool remaining:  %s ZEN", wei_to_zen(contract(web3, PROTOCOL_POOL, [
-        {"name": "totalAssets", "type": "function", "stateMutability": "view",
-         "inputs": [], "outputs": [{"name": "", "type": "uint256"}]},
-    ]).functions.totalAssets().call()))
+    log.info(
+        "Pool remaining:  %s ZEN",
+        wei_to_zen(
+            contract(
+                web3,
+                PROTOCOL_POOL,
+                [
+                    {
+                        "name": "totalAssets",
+                        "type": "function",
+                        "stateMutability": "view",
+                        "inputs": [],
+                        "outputs": [{"name": "", "type": "uint256"}],
+                    },
+                ],
+            )
+            .functions.totalAssets()
+            .call()
+        ),
+    )
 
     if all_ok:
         log.info("")
