@@ -251,7 +251,8 @@ export function FeaturedEventsClient({
         </div>
       );
     }
-    const suggestions = MARKET_CATEGORY_FILTERS.slice(0, 4);
+    const currentLabel = (categoryFilter ?? "").toLowerCase();
+    const suggestions = MARKET_CATEGORY_FILTERS.filter((c) => c.toLowerCase() !== currentLabel);
     return (
       <div className="rounded-3xl border border-white/10 bg-slate-950/40 p-6 text-center text-sm text-slate-300">
         <p className="text-base font-semibold text-white">No markets match that yet.</p>
