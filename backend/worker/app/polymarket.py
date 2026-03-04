@@ -1165,6 +1165,7 @@ def _derive_group_slug(slug: str | None, question: str | None, group_item_title:
         # Remove money/percentage-like thresholds but keep dates.
         cleaned = re.sub(r"\$?\d{1,3}(?:,\d{3})+(?:\.\d+)?", " $X ", value)
         cleaned = re.sub(r"\$?\d+(?:\.\d+)?\s*[kmb]\b", " $X ", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\$\d+(?:\.\d+)?", " $X ", cleaned)
         cleaned = re.sub(r"\d+(?:\.\d+)?%", " X% ", cleaned)
         cleaned = re.sub(
             r"\b(above|below|over|under|between|reach|dip|greater\s+than|less\s+than|at\s+least|at\s+most)\b",
@@ -1172,7 +1173,9 @@ def _derive_group_slug(slug: str | None, question: str | None, group_item_title:
             cleaned,
             flags=re.IGNORECASE,
         )
-        cleaned = re.sub(r"\$X\s*-\s*\$X", "$X-$X", cleaned)
+        # Collapse multi-threshold expressions ($X and $X, $X-$X) into a
+        # single $X so "above $120" and "between $70 and $80" share a slug.
+        cleaned = re.sub(r"\$X\s*(?:and|-)\s*\$X", "$X", cleaned)
         cleaned = re.sub(r"\s*-\s*", "-", cleaned)
         cleaned = re.sub(r"\b\d{1,2}(:\d{2})?\s*(am|pm)\b", " ", cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r"\bET\b", " ", cleaned, flags=re.IGNORECASE)

@@ -424,6 +424,22 @@ def test_derive_group_slug_normalizes_range_variants():
     assert "240" not in derived[0]
 
 
+def test_derive_group_slug_groups_price_threshold_variants():
+    """Price threshold markets ($120, $110, between $70 and $80) must produce the same slug."""
+    from app.polymarket import _derive_group_slug
+
+    questions = [
+        "Will the price of Solana be above $120 on March 5?",
+        "Will the price of Solana be above $110 on March 5?",
+        "Will the price of Solana be between $70 and $80 on March 5?",
+        "Will the price of Solana be between $120 and $130 on March 5?",
+        "Will the price of Solana be less than $40 on March 5?",
+    ]
+    derived = [_derive_group_slug(None, q, None) for q in questions]
+    assert len(set(derived)) == 1, f"Expected all slugs to match, got: {set(derived)}"
+    assert derived[0] is not None
+
+
 def test_derive_group_slug_preserves_non_range_slugs():
     """Non-range slugs like sports matchups should not lose meaningful tokens."""
     from app.polymarket import _derive_group_slug
