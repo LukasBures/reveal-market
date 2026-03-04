@@ -34,7 +34,7 @@ from utils import (
 COMMIT_DEADLINE_OFFSET = 300  # 5 minutes from now (short for E2E test)
 TICKET_SIZE = 1 * 10**18  # 1 ZEN
 MAX_COMMITMENTS = 256  # 1 batch
-LIABILITY_CAP = 50 * 10**18  # 50 ZEN
+LIABILITY_CAP = 5 * 10**18  # 5 ZEN (must fit within pool balance of 10 ZEN)
 
 
 def main() -> int:

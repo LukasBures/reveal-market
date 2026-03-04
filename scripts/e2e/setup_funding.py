@@ -28,10 +28,10 @@ from utils import (
 )
 
 # Amounts in wei (18 decimals)
-ZEN_TO_DEPLOYER = 100 * 10**18  # 100 ZEN for pool deposit
-ZEN_TO_TEST = 50 * 10**18  # 50 ZEN for betting via escrow
-POOL_DEPOSIT = 100 * 10**18  # 100 ZEN LP deposit
-ESCROW_DEPOSIT = 50 * 10**18  # 50 ZEN escrow deposit
+ZEN_TO_DEPLOYER = 15 * 10**18  # 15 ZEN for pool deposit + gas
+ZEN_TO_TEST = 5 * 10**18  # 5 ZEN for betting via escrow
+POOL_DEPOSIT = 10 * 10**18  # 10 ZEN LP deposit
+ESCROW_DEPOSIT = 5 * 10**18  # 5 ZEN escrow deposit (covers 2×1 ZEN tickets + buffer)
 
 
 def main() -> int:
