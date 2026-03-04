@@ -1216,9 +1216,7 @@ def test_event_detail_groups_range_variant_slugs(client, db_session):
     resp = client.get("/events/by-key/evt-elon-detail-0")
     assert resp.status_code == 200
     payload = resp.json()
-    assert len(payload["markets"]) == 3, (
-        f"Expected 3 markets in event detail, got {len(payload['markets'])}"
-    )
+    assert len(payload["markets"]) == 3, f"Expected 3 markets in event detail, got {len(payload['markets'])}"
 
 
 def test_market_allowlists_filter_results(client, db_session):

@@ -161,10 +161,7 @@ def _normalize_group_slug(slug: str) -> str:
         # Check the span qualifies as range-like: ≥2 tokens, or a single kw
         # adjacent to a digit, and must be embedded (non-range tokens on both
         # sides).
-        has_range_pattern = (
-            len(span) >= 2
-            or (len(span) == 1 and span[0] in _RANGE_KEYWORDS)
-        )
+        has_range_pattern = len(span) >= 2 or (len(span) == 1 and span[0] in _RANGE_KEYWORDS)
         is_embedded = i > 0 and j < len(parts)
         if has_range_pattern and is_embedded:
             # Verify at least one digit is present (pure keyword-only spans
