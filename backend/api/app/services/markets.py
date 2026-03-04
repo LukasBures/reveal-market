@@ -81,6 +81,7 @@ GENERIC_GROUP_SLUGS = {
 }
 _EVENT_CONTEXT_RE = re.compile(r"\bat\s+([^,]+),\s*scheduled\b", flags=re.IGNORECASE)
 _TEMPORAL_SERIES_RE = re.compile(r"(?:^|-)updown$|up-or-down", flags=re.IGNORECASE)
+_RANGE_KEYWORDS = frozenset({"over", "under", "gt", "lt", "gte", "lte", "above", "below"})
 
 
 def _is_temporal_series_slug(slug: str) -> bool:
@@ -118,6 +119,36 @@ def _choose_group_slug(
     return None
 
 
+def _normalize_group_slug(slug: str) -> str:
+    """Strip digit-only tokens and range keywords when the slug contains a
+    range pattern, so that range variants share one key.
+
+    Only triggers when consecutive digit tokens (``40-64``) or a range keyword
+    adjacent to a digit (``lt-40``) are detected — single numbers like ``326``
+    in ``ufc-326-oliveira`` are left intact.
+    """
+    parts = slug.split("-")
+    if len(parts) < 3:
+        return slug
+    # Detect range patterns before stripping anything.
+    has_range = False
+    for i in range(len(parts) - 1):
+        a, b = parts[i], parts[i + 1]
+        if a.isdigit() and b.isdigit():
+            has_range = True
+            break
+        if (a in _RANGE_KEYWORDS and b.isdigit()) or (a.isdigit() and b in _RANGE_KEYWORDS):
+            has_range = True
+            break
+    if not has_range:
+        return slug
+    stripped = [p for p in parts if not p.isdigit() and p not in _RANGE_KEYWORDS]
+    if len(stripped) >= 2:
+        result = "-".join(stripped)
+        return result if result else slug
+    return slug
+
+
 def derive_group_key(market: schemas.MarketResponse) -> tuple[str, str | None]:
     """Return the group key and optional display title for event grouping."""
 
@@ -127,6 +158,7 @@ def derive_group_key(market: schemas.MarketResponse) -> tuple[str, str | None]:
         description=getattr(market, "description", None),
     )
     if slug:
+        slug = _normalize_group_slug(slug)
         if _is_temporal_series_slug(slug):
             closes_at = getattr(market, "closes_at", None)
             if isinstance(closes_at, datetime):

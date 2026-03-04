@@ -1212,10 +1212,13 @@ def _derive_group_slug(slug: str | None, question: str | None, group_item_title:
         ):
             prefix = "-".join(parts[: idx + 3]).strip("-")
             return prefix or base_slug
-    # Strip all digit-only tokens so range variants collapse to the same group
-    # slug.  Date digits are already removed by _strip_date_range above, so
-    # remaining digits are range/threshold numbers (e.g. "40", "64", "240").
-    stripped_parts = [p for p in parts if not p.isdigit()]
+    # Strip digit-only tokens and range keywords (lt, gt, over, under, …)
+    # so range variants collapse to the same group slug.  Date digits are
+    # already removed by _strip_date_range above, so remaining digits are
+    # range/threshold numbers (e.g. "40", "64", "240").  Range keywords
+    # like "lt" (from "<40") must also go to match "40-64" variants.
+    _range_kw = {"over", "under", "gt", "lt", "gte", "lte", "above", "below"}
+    stripped_parts = [p for p in parts if not p.isdigit() and p not in _range_kw]
     if len(stripped_parts) >= 2:
         parts = stripped_parts
     # Find the rightmost range-like token (numeric or range keywords) and trim everything from that token onward.

@@ -414,6 +414,7 @@ def test_derive_group_slug_normalizes_range_variants():
         "will-elon-musk-post-115-139-tweets-from-march-2-to-march-4-2026",
         "will-elon-musk-post-240-tweets-from-march-2-to-march-4-2026",
         "will-elon-musk-post-190-214-tweets-from-march-2-to-march-4-2026",
+        "will-elon-musk-post-lt-40-tweets-from-march-2-to-march-4-2026",
     ]
     derived = [_derive_group_slug(s, None, None) for s in slugs]
     assert len(set(derived)) == 1, f"Expected all slugs to match, got: {derived}"

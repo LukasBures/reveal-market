@@ -181,6 +181,36 @@ async def get_markets_by_group_slug(session: AsyncSession, group_slug: str, *, l
     return rows
 
 
+async def get_markets_by_group_slug_pattern(
+    session: AsyncSession, pattern: str, *, limit: int = 500
+) -> list[models.Market]:
+    """LIKE-based lookup: ``will-elon-musk-post-tweets`` becomes
+    ``%will%elon%musk%post%tweets%`` so all range variants match."""
+    if not pattern or not pattern.strip():
+        return []
+    like_expr = "%" + "%".join(pattern.strip().lower().split("-")) + "%"
+    stmt = (
+        select(models.Market)
+        .options(
+            selectinload(models.Market.outcomes_rel),
+            selectinload(models.Market.tags_rel),
+            selectinload(models.Market.clob_tokens_rel),
+            selectinload(models.Market.gamma_metadata_rel),
+        )
+        .outerjoin(models.MarketGammaMetadata, models.MarketGammaMetadata.market_id == models.Market.id)
+        .where(
+            or_(
+                models.Market.group_slug.ilike(like_expr),
+                models.MarketGammaMetadata.group_slug.ilike(like_expr),
+            )
+        )
+        .order_by(models.Market.created_at.desc())
+        .limit(limit)
+    )
+    result = await session.execute(stmt)
+    return list(result.unique().scalars().all())
+
+
 async def get_markets_by_public_event_id(session: AsyncSession, public_id: str) -> list[models.Market]:
     normalized = (public_id or "").strip().lower()
     if not normalized:

@@ -1190,6 +1190,37 @@ def test_suggest_deduplicates_by_group_key(client, db_session):
     assert len(payload) == 1, f"Expected 1 grouped result, got {len(payload)}"
 
 
+def test_event_detail_groups_range_variant_slugs(client, db_session):
+    """Event detail page must return all range-variant markets even when
+    each row has a different group_slug (stale DB values)."""
+    slugs = [
+        "will-elon-musk-post-lt-40-tweets",
+        "will-elon-musk-post-40-64-tweets",
+        "will-elon-musk-post-65-89-tweets",
+    ]
+    markets = [
+        _make_market(
+            f"evt-elon-detail-{idx}",
+            f"Will Elon Musk post range {idx} tweets?",
+            category="politics",
+            oracle="0xelon",
+            status="commit",
+            group_slug=slug,
+        )
+        for idx, slug in enumerate(slugs)
+    ]
+    db_session.add_all(markets)
+    db_session.commit()
+
+    # Look up by the first market's event_id — should expand to all 3.
+    resp = client.get("/events/by-key/evt-elon-detail-0")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert len(payload["markets"]) == 3, (
+        f"Expected 3 markets in event detail, got {len(payload['markets'])}"
+    )
+
+
 def test_market_allowlists_filter_results(client, db_session):
     market_allowed = _make_market(
         "evt-allowed",

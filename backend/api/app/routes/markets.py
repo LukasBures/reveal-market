@@ -606,7 +606,12 @@ async def get_event_by_key(
             model = schemas.MarketResponse.model_validate(cached)
             raw_group_slug = getattr(model, "group_slug", None) or ""
             if raw_group_slug:
+                normalized_group_slug = market_svc._normalize_group_slug(raw_group_slug)
                 group_markets = await crud.get_markets_by_group_slug(session, raw_group_slug, limit=500)
+                if len(group_markets) <= 1 and normalized_group_slug != raw_group_slug:
+                    group_markets = await crud.get_markets_by_group_slug_pattern(
+                        session, normalized_group_slug, limit=500
+                    )
                 if market_svc._is_temporal_series_slug(raw_group_slug):
                     closes_at = getattr(model, "closes_at", None)
                     if isinstance(closes_at, datetime):
@@ -656,7 +661,13 @@ async def get_event_by_key(
             group_slug = getattr(market, "group_slug", None)
             event_group_key = getattr(market, "event_key", None)
             if group_slug:
-                markets = await crud.get_markets_by_group_slug(session, str(group_slug), limit=500)
+                raw_slug = str(group_slug)
+                normalized_slug = market_svc._normalize_group_slug(raw_slug)
+                markets = await crud.get_markets_by_group_slug(session, raw_slug, limit=500)
+                # If the raw slug only matched a subset, retry with a
+                # pattern query so range-variant markets are included.
+                if len(markets) <= 1 and normalized_slug != raw_slug:
+                    markets = await crud.get_markets_by_group_slug_pattern(session, normalized_slug, limit=500)
                 if markets and market_svc._is_temporal_series_slug(str(group_slug)):
                     ref_closes = getattr(market, "closes_at", None)
                     if ref_closes is not None:
