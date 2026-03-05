@@ -1,12 +1,12 @@
 services:
   postgres:
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
 
   redis:
     # Bind Redis to localhost for local development/inspection only.
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     deploy:
       resources:
         limits:

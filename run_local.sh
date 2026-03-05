@@ -35,6 +35,37 @@ log_step() {
   printf '\n[%s] >>> %s\n' "$(timestamp)" "$*"
 }
 
+read_env_value() {
+  local env_file="$1"
+  local key="$2"
+  python3 - "${env_file}" "${key}" <<'PY'
+import pathlib
+import sys
+
+env_path = pathlib.Path(sys.argv[1])
+lookup_key = sys.argv[2]
+if not env_path.exists():
+    raise SystemExit(0)
+
+for raw_line in env_path.read_text().splitlines():
+    line = raw_line.strip()
+    if not line or line.startswith("#"):
+        continue
+    if line.startswith("export "):
+        line = line[len("export ") :].strip()
+    if "=" not in line:
+        continue
+    key, value = line.split("=", 1)
+    if key.strip() != lookup_key:
+        continue
+    cleaned = value.strip()
+    if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in "\"'":
+        cleaned = cleaned[1:-1]
+    print(cleaned)
+    break
+PY
+}
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_ENV_FILE="${ROOT_DIR}/.env.local"
 FALLBACK_ENV_FILE="${ROOT_DIR}/.env"
@@ -57,6 +88,20 @@ else
 fi
 export ENV_FILE
 export FRONTEND_ENV_FILE
+if [[ -f "${ENV_FILE}" ]]; then
+  if [[ -z "${POSTGRES_PORT:-}" ]]; then
+    POSTGRES_PORT="$(read_env_value "${ENV_FILE}" "POSTGRES_PORT" || true)"
+    if [[ -n "${POSTGRES_PORT}" ]]; then
+      export POSTGRES_PORT
+    fi
+  fi
+  if [[ -z "${REDIS_PORT:-}" ]]; then
+    REDIS_PORT="$(read_env_value "${ENV_FILE}" "REDIS_PORT" || true)"
+    if [[ -n "${REDIS_PORT}" ]]; then
+      export REDIS_PORT
+    fi
+  fi
+fi
 PROVER_BUILD_DIR="${ROOT_DIR}/prover/circuits/build"
 PROVER_ARTIFACTS_DIR="${ROOT_DIR}/prover/artifacts"
 PROVER_ARTIFACTS_BUILD_DIR="${PROVER_ARTIFACTS_DIR}/prover/circuits/build"
@@ -582,8 +627,10 @@ FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 STREAMER_PORT="${STREAMER_PORT:-8100}"
 RELAYER_PORT="${RELAYER_PORT:-8088}"
 HEDGER_API_PORT="${HEDGER_API_PORT:-8090}"
-POSTGRES_URI="${POSTGRES_URI:-postgres://market_admin:<REDACTED>@localhost:5432/reveal_market}"
-REDIS_CMD="${REDIS_CMD:-redis-cli -h localhost -p 6379}"
+POSTGRES_PORT="${POSTGRES_PORT:-5432}"
+REDIS_PORT="${REDIS_PORT:-6379}"
+POSTGRES_URI="${POSTGRES_URI:-postgres://market_admin:<REDACTED>@localhost:${POSTGRES_PORT}/reveal_market}"
+REDIS_CMD="${REDIS_CMD:-redis-cli -h localhost -p ${REDIS_PORT}}"
 
 PROMETHEUS_PORT="${PROMETHEUS_PORT:-9090}"
 GRAFANA_PORT="${GRAFANA_PORT:-3001}"
