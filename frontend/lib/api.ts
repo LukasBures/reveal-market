@@ -705,6 +705,7 @@ export async function fetchTradeStatus(
 
 export async function fetchPositions(
   wallet: string,
+  signature?: string,
 ): Promise<{ positions: PositionRecord[]; escrowBalance?: string | number | null; error?: string }> {
   if (maybeShortCircuitOffline("fetchPositions")) {
     return { positions: [], error: "offline" };
@@ -712,9 +713,10 @@ export async function fetchPositions(
   const url = new URL(`${DEFAULT_API_BASE}/positions`);
   url.searchParams.set("wallet", wallet);
   try {
+    const headers = signature ? { "X-Wallet-Signature": signature } : undefined;
     const response = await fetchWithTimeout(
       url.toString(),
-      { cache: "no-store" },
+      { cache: "no-store", headers },
       DEFAULT_FETCH_TIMEOUT_MS,
     );
     if (!response.ok) {

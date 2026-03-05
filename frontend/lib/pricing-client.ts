@@ -242,15 +242,33 @@ export async function fetchPricingPreview(
 
 export async function fetchPricingQuoteWithMeta(
   stakeZen: number,
-  opts: { marketId?: string; walletAddress?: string; outcomeId?: number; marketAddress?: string } = {},
+  opts: {
+    marketId?: string;
+    walletAddress?: string;
+    outcomeId?: number;
+    marketAddress?: string;
+    walletSignature?: string;
+    walletSignatureNonce?: string;
+    walletSignatureTimestamp?: number;
+  } = {},
 ): Promise<PricingQuote> {
   if (!opts.walletAddress || opts.outcomeId === undefined || opts.outcomeId === null || !opts.marketId) {
     throw new Error("walletAddress, marketId, and outcomeId are required for signed quotes");
   }
   const normalizedAddress = opts.marketAddress && opts.marketAddress.length > 0 ? opts.marketAddress : null;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (opts.walletSignature) {
+    headers["X-Wallet-Signature"] = opts.walletSignature;
+  }
+  if (opts.walletSignatureNonce) {
+    headers["X-Wallet-Signature-Nonce"] = opts.walletSignatureNonce;
+  }
+  if (typeof opts.walletSignatureTimestamp === "number" && Number.isFinite(opts.walletSignatureTimestamp)) {
+    headers["X-Wallet-Signature-Timestamp"] = String(Math.trunc(opts.walletSignatureTimestamp));
+  }
   const res = await fetch(getEndpoint("/pricing/quote"), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({
       stake_zen: stakeZen,
       market_id: opts.marketId,

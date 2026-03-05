@@ -13,6 +13,7 @@ import { fetchPositions, fetchTradeStatus } from "@/lib/api";
 import { useFxStream } from "@/hooks/useFxStream";
 import { useChainId, useConnection, useSignMessage } from "wagmi";
 import { normalizeTxHash } from "@/lib/formatters";
+import { buildCommitSignatureMessage } from "@/lib/signature-messages";
 import { defaultChain } from "@/lib/wagmi";
 import { StakeInput } from "./StakeInput";
 import { QuoteDisplay } from "./QuoteDisplay";
@@ -115,6 +116,7 @@ export function StakeQuoteCard({
 
   // ── Wallet & chain context ─────────────────────────────────────────────
   const [escrowBalanceZen, setEscrowBalanceZen] = useState<number | null>(null);
+  const [positionsSignature, setPositionsSignature] = useState<string | null>(null);
   const { fx, status } = useFxStream(FX_DEFAULT_PATH);
   const fxIsStale = Boolean(fx?.stale);
   const fxStale = status === "stale";
@@ -248,6 +250,17 @@ export function StakeQuoteCard({
     txLoading ||
     txPending;
 
+  const ensurePositionsSignature = useCallback(async () => {
+    if (!address) return null;
+    if (positionsSignature && positionsSignature.length > 0) {
+      return positionsSignature;
+    }
+    const message = `positions:${address.toLowerCase()}`;
+    const signature = await signMessage({ message });
+    setPositionsSignature(signature);
+    return signature;
+  }, [address, positionsSignature, signMessage]);
+
   // ── Effects: outcome bounds ────────────────────────────────────────────
   useEffect(() => {
     if (selectedOutcome >= outcomeOptions.length) {
@@ -268,7 +281,11 @@ export function StakeQuoteCard({
     if (!address) return undefined;
     const loadEscrow = async () => {
       try {
-        const resp = await fetchPositions(address);
+        const signature = await ensurePositionsSignature();
+        if (!signature) {
+          return;
+        }
+        const resp = await fetchPositions(address, signature);
         if (cancelled) return;
         const escrowRaw = resp.escrowBalance ?? null;
         if (escrowRaw === null || escrowRaw === undefined) {
@@ -288,7 +305,7 @@ export function StakeQuoteCard({
     return () => {
       cancelled = true;
     };
-  }, [address]);
+  }, [address, ensurePositionsSignature]);
 
   // ── Effects: quote lifecycle ───────────────────────────────────────────
   useEffect(() => {
@@ -521,6 +538,7 @@ export function StakeQuoteCard({
     setQuote(null);
     setQuoteRefreshing(false);
     setError(null);
+    setPositionsSignature(null);
     setRefreshNonce((prev) => prev + 1);
     if (!initialTxHash) {
       setTxHash(null);
@@ -574,14 +592,20 @@ export function StakeQuoteCard({
         (previewQuote.market_id ?? marketId) !== marketId ||
         (previewQuote.outcome_id ?? selectedOutcome) !== selectedOutcome ||
         Math.abs(Number(previewQuote.stake_zen ?? NaN) - stakeZen) > 1e-6;
-      const issuedQuote = needsFreshQuote
-        ? await fetchPricingQuoteWithMeta(stakeZen, {
-            marketId,
-            walletAddress: address,
-            marketAddress: normalizedMarketAddress,
-            outcomeId: selectedOutcome,
-          })
-        : previewQuote;
+      let issuedQuote: PricingQuote;
+      if (needsFreshQuote) {
+        issuedQuote = await fetchPricingQuoteWithMeta(stakeZen, {
+          marketId,
+          walletAddress: address,
+          marketAddress: normalizedMarketAddress,
+          outcomeId: selectedOutcome,
+        });
+      } else {
+        if (!previewQuote) {
+          throw new Error("Quote unavailable");
+        }
+        issuedQuote = previewQuote;
+      }
       setQuote(issuedQuote);
       if (!issuedQuote.quote_id) {
         setTxError("Quote unavailable");
@@ -602,7 +626,7 @@ export function StakeQuoteCard({
         return;
       }
       const signature = await signMessage({
-        message: `commit:${issuedQuote.quote_id}:${address.toLowerCase()}`,
+        message: buildCommitSignatureMessage(issuedQuote, address),
       });
       const resp: TradeCommitResponse = await submitTrade(issuedQuote.quote_id, address, signature);
       const respJob = resp.relayer_job_id ? String(resp.relayer_job_id) : null;

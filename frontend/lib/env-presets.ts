@@ -42,6 +42,17 @@ const assertValidUrl = (value: string, label: string): string => {
   }
 };
 
+const isLoopbackHost = (host: string): boolean =>
+  host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "0.0.0.0";
+
+const isLoopbackUrl = (value: string): boolean => {
+  try {
+    return isLoopbackHost(new URL(value).hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+};
+
 const coalesceUrl = (candidate: string | undefined | null, fallback: string, label: string) => {
   const value = (candidate ?? "").trim();
   if (!value) return assertValidUrl(fallback, label);
@@ -75,12 +86,22 @@ export function resolveUrlConfig() {
   const apiBaseUrl = safeCoalesce(apiBaseOverride, preset.apiBase, "API base URL");
   const apiBaseInternal = runningInDocker && preset.apiInternal ? preset.apiInternal : apiBaseUrl;
   const siteUrl = safeCoalesce(process.env.NEXT_PUBLIC_SITE_URL ?? process.env.RM_SITE_URL, preset.siteUrl, "Site URL");
-  const streamerPublic = safeCoalesce(
+  const streamerPublicCandidate = safeCoalesce(
     process.env.NEXT_PUBLIC_PRICE_STREAMER_URL ??
       (runningInDocker ? process.env.STREAMER_PUBLIC_BASE_URL : undefined),
     preset.streamerPublic,
     "Streamer URL",
   );
+  const streamerPublic =
+    mode === "prod" && isLoopbackUrl(streamerPublicCandidate)
+      ? (() => {
+          logger.error("env-presets:loopback_streamer_url_in_prod", {
+            configured: streamerPublicCandidate,
+            fallback: preset.streamerPublic,
+          });
+          return assertValidUrl(preset.streamerPublic, "Streamer URL");
+        })()
+      : streamerPublicCandidate;
   const streamerInternal = safeCoalesce(
     process.env.STREAMER_INTERNAL_URL ?? (runningInDocker ? preset.streamerInternal : streamerPublic),
     runningInDocker ? preset.streamerInternal : streamerPublic,

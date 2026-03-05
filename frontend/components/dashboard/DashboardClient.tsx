@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useTransition,
 } from "react";
@@ -280,6 +281,10 @@ export function DashboardClient() {
   const [claimBundles, setClaimBundles] = useState<ClaimBundle[]>([]);
   const [bundleError, setBundleError] = useState<string | null>(null);
   const [bundleSignature, setBundleSignature] = useState<string | null>(null);
+  const positionsSignatureRef = useRef<{
+    wallet: string;
+    signature: string;
+  } | null>(null);
   const [preparingBundles, setPreparingBundles] = useState<Set<string>>(
     () => new Set()
   );
@@ -389,14 +394,33 @@ export function DashboardClient() {
     [explorerBase]
   );
 
+  const ensurePositionsSignature = useCallback(
+    async (wallet: string) => {
+      const normalizedWallet = wallet.toLowerCase();
+      const cached = positionsSignatureRef.current;
+      if (cached && cached.wallet === normalizedWallet) {
+        return cached.signature;
+      }
+      const message = `positions:${normalizedWallet}`;
+      const signature = await signMessage({ message });
+      positionsSignatureRef.current = { wallet: normalizedWallet, signature };
+      return signature;
+    },
+    [signMessage]
+  );
+
   const load = useMemo(
     () => async (wallet: string) => {
       setPositionsLoading(true);
       try {
         setError(null);
-        const res = await fetchPositions(wallet);
+        const signature = await ensurePositionsSignature(wallet);
+        const res = await fetchPositions(wallet, signature);
         setPositions(res.positions || []);
         setEscrowBalance(res.escrowBalance ?? null);
+        if (res.error) {
+          setError(res.error);
+        }
       } catch (err) {
         setError(
           err instanceof Error ? err.message : "Failed to load positions"
@@ -405,7 +429,7 @@ export function DashboardClient() {
         setPositionsLoading(false);
       }
     },
-    []
+    [ensurePositionsSignature]
   );
 
   const bundleLookup = useMemo(() => {
@@ -524,6 +548,7 @@ export function DashboardClient() {
       setPositions([]);
       setClaimBundles([]);
       setBundleSignature(null);
+      positionsSignatureRef.current = null;
       setPreparingBundles(new Set());
       setClaimMessage(null);
       setClaimTxHash(null);

@@ -1688,10 +1688,57 @@ def _verify_wallet_signature(wallet: str, signature: str) -> None:
     _verify_scoped_signature(wallet, f"claim-bundles:{wallet.lower()}", signature)
 
 
-def _verify_commit_signature(wallet: str, quote_id: str, signature: str) -> None:
-    """Verify that the signature was produced by the wallet for the commit scope."""
+def _format_signature_decimal(value: Decimal | float | int | None, places: int = 8) -> str:
+    if value is None:
+        return "n/a"
+    quant = Decimal("1").scaleb(-places) if places > 0 else Decimal("1")
+    quantized = Decimal(str(value)).quantize(quant, rounding=ROUND_DOWN)
+    text = format(quantized, "f").rstrip("0").rstrip(".")
+    return text if text else "0"
 
-    _verify_scoped_signature(wallet, f"commit:{quote_id}:{wallet.lower()}", signature)
+
+def _build_commit_signature_message(wallet: str, quote: schemas.PricingQuotePayload) -> str:
+    wallet_lower = wallet.lower()
+    quote_id = str(quote.quote_id or "")
+    market_id = str(quote.market_id or "n/a")
+    outcome_id = str(int(quote.outcome_id)) if quote.outcome_id is not None else "n/a"
+    stake_wei = str(int(quote.stake_wei))
+    stake_zen = _format_signature_decimal(cast(Decimal, quote.stake_zen))
+    payout_zen = _format_signature_decimal(cast(Decimal | None, quote.payout_zen))
+    return "\n".join(
+        [
+            "RevealMarket Buy Confirmation",
+            "",
+            f"Market ID: {market_id}",
+            f"Outcome ID: {outcome_id}",
+            f"You pay: {stake_zen} ZEN ({stake_wei} wei)",
+            f"You can win: {payout_zen} ZEN",
+            f"Quote ID: {quote_id}",
+            f"Wallet: {wallet_lower}",
+            "",
+            "By signing, you authorize RevealMarket to submit this buy.",
+        ]
+    )
+
+
+def _verify_commit_signature(wallet: str, quote: schemas.PricingQuotePayload, signature: str) -> None:
+    """Verify commit signatures (legacy and human-readable message formats)."""
+
+    quote_id = str(quote.quote_id or "")
+    challenges = [
+        f"commit:{quote_id}:{wallet.lower()}",
+        _build_commit_signature_message(wallet, quote),
+    ]
+    last_error: HTTPException | None = None
+    for challenge in challenges:
+        try:
+            _verify_scoped_signature(wallet, challenge, signature)
+            return
+        except HTTPException as exc:
+            last_error = exc
+    if last_error is not None:
+        raise last_error
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="wallet_signature_mismatch")
 
 
 def _verify_claim_signature(wallet: str, market_id: str, ticket_id: int, signature: str) -> None:
@@ -1816,7 +1863,7 @@ async def trade_commit(
     salt_hex = "0x" + salt_int.to_bytes(32, "big").hex()
     if not quote.wallet_address:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="wallet_required")
-    _verify_commit_signature(quote.wallet_address, str(quote.quote_id or ""), wallet_signature)
+    _verify_commit_signature(quote.wallet_address, quote, wallet_signature)
     user_address = Web3.to_checksum_address(str(quote.wallet_address))
     rake_bps = onchain_rake_bps
     if rake_bps is None and market_record and market_record.rake_bps is not None:
