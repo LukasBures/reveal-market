@@ -539,10 +539,12 @@ def test_positions_zeroes_payout_for_losing_outcome(client, db_session):
     assert pos["payout_zen"] == 0
 
 
-def test_positions_requires_wallet_signature(client):
+def test_positions_without_signature_returns_only_escrow(client):
     resp = client.get("/positions?wallet=0x1111111111111111111111111111111111111111")
-    assert resp.status_code == 401
-    assert resp.json()["detail"] == "wallet_signature_required"
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["positions"] == []
+    assert "escrow_balance_wei" in body
 
 
 def test_sync_commitments_endpoint(client, db_session, monkeypatch):

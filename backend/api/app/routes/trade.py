@@ -1993,7 +1993,9 @@ async def list_positions(
     if not wallet:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="wallet_required")
     if not wallet_signature:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="wallet_signature_required")
+        # Allow unsigned escrow-balance lookups for passive UI rendering; on-chain balance is public data.
+        escrow_balance = await _fetch_escrow_balance(wallet)
+        return schemas.PositionsResponse(positions=[], escrow_balance_wei=escrow_balance)
     _verify_positions_signature(wallet, wallet_signature)
     rows = await repository_async.list_commitments_with_settlement(session, wallet)
     await _sync_claimed_commitments(session, rows)

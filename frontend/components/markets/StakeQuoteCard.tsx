@@ -116,7 +116,6 @@ export function StakeQuoteCard({
 
   // ── Wallet & chain context ─────────────────────────────────────────────
   const [escrowBalanceZen, setEscrowBalanceZen] = useState<number | null>(null);
-  const [positionsSignature, setPositionsSignature] = useState<string | null>(null);
   const { fx, status } = useFxStream(FX_DEFAULT_PATH);
   const fxIsStale = Boolean(fx?.stale);
   const fxStale = status === "stale";
@@ -250,17 +249,6 @@ export function StakeQuoteCard({
     txLoading ||
     txPending;
 
-  const ensurePositionsSignature = useCallback(async () => {
-    if (!address) return null;
-    if (positionsSignature && positionsSignature.length > 0) {
-      return positionsSignature;
-    }
-    const message = `positions:${address.toLowerCase()}`;
-    const signature = await signMessage({ message });
-    setPositionsSignature(signature);
-    return signature;
-  }, [address, positionsSignature, signMessage]);
-
   // ── Effects: outcome bounds ────────────────────────────────────────────
   useEffect(() => {
     if (selectedOutcome >= outcomeOptions.length) {
@@ -281,11 +269,8 @@ export function StakeQuoteCard({
     if (!address) return undefined;
     const loadEscrow = async () => {
       try {
-        const signature = await ensurePositionsSignature();
-        if (!signature) {
-          return;
-        }
-        const resp = await fetchPositions(address, signature);
+        // Do not prompt for signatures on page load; signing is reserved for explicit buy actions.
+        const resp = await fetchPositions(address);
         if (cancelled) return;
         const escrowRaw = resp.escrowBalance ?? null;
         if (escrowRaw === null || escrowRaw === undefined) {
@@ -305,7 +290,7 @@ export function StakeQuoteCard({
     return () => {
       cancelled = true;
     };
-  }, [address, ensurePositionsSignature]);
+  }, [address]);
 
   // ── Effects: quote lifecycle ───────────────────────────────────────────
   useEffect(() => {
@@ -538,7 +523,6 @@ export function StakeQuoteCard({
     setQuote(null);
     setQuoteRefreshing(false);
     setError(null);
-    setPositionsSignature(null);
     setRefreshNonce((prev) => prev + 1);
     if (!initialTxHash) {
       setTxHash(null);
