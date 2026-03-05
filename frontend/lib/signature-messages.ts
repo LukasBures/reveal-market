@@ -41,4 +41,3 @@ export const buildCommitSignatureMessage = (quote: PricingQuote, walletAddress: 
     "By signing, you authorize RevealMarket to submit this buy.",
   ].join("\n");
 };
-
