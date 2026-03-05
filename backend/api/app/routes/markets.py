@@ -298,6 +298,16 @@ async def list_markets(
         )
     events = market_svc.build_event_responses(market_models)
     page_events = events[offset : offset + limit]
+    page_events = await market_svc.expand_event_groups_for_list(
+        session,
+        page_events,
+        status=status,
+        category=category,
+        oracle=oracle,
+        featured=featured,
+        closes_after=closes_after,
+        closes_before=closes_before,
+    )
     # Extract the actual MarketResponse models from the EventResponse objects.
     # EventResponse.event_id is the *group key* (from derive_group_key), which
     # may differ from MarketResponse.event_id — so we pull from .markets instead.

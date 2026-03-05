@@ -26,7 +26,7 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from . import runtime
 from .backfill import backfill_market_addresses, backfill_market_params
-from .cache_ops import invalidate_cache_tags, persist_resolution_cache_updates
+from .cache_ops import invalidate_cache_tags, persist_group_markets_cache, persist_resolution_cache_updates
 from .database import session_scope
 from .market_sync import (
     SyncSummary,
@@ -1262,11 +1262,20 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
                     summary.changed_conditions_total += len(summary.changed_conditions)
                     summary.changed_categories_total += len(summary.changed_categories)
                     summary.changed_group_slugs_total += len(summary.changed_group_slugs)
+                    group_slugs_snapshot = set(summary.changed_group_slugs)
 
                     if redis_client is not None:
                         cache_report = await invalidate_cache_tags(redis_client, summary)
                         summary.cache_invalidations += cache_report.total
                         await persist_resolution_cache_updates(redis_client, summary)
+                        if group_slugs_snapshot:
+                            await session.flush()
+                            await persist_group_markets_cache(
+                                session,
+                                redis_client,
+                                group_slugs_snapshot,
+                                runtime.settings.markets_cache_ttl_seconds,
+                            )
                         await enqueue_proof_jobs(redis_client, summary)
                         summary.proof_jobs = []
                     else:
@@ -1842,11 +1851,20 @@ async def _reconcile_closed_markets(session, redis_client: Redis | None) -> dict
         summary_obj.changed_conditions_total += len(summary_obj.changed_conditions)
         summary_obj.changed_categories_total += len(summary_obj.changed_categories)
         summary_obj.changed_group_slugs_total += len(summary_obj.changed_group_slugs)
+        group_slugs_snapshot = set(summary_obj.changed_group_slugs)
 
         if redis_client is not None:
             cache_report = await invalidate_cache_tags(redis_client, summary_obj)
             summary_obj.cache_invalidations += cache_report.total
             await persist_resolution_cache_updates(redis_client, summary_obj)
+            if group_slugs_snapshot:
+                await session.flush()
+                await persist_group_markets_cache(
+                    session,
+                    redis_client,
+                    group_slugs_snapshot,
+                    runtime.settings.markets_cache_ttl_seconds,
+                )
             proofs_enqueued += len(summary_obj.proof_jobs)
             await enqueue_proof_jobs(redis_client, summary_obj)
             summary_obj.proof_jobs = []

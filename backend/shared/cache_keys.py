@@ -9,6 +9,7 @@ SUGGEST_PREFIX = f"{CACHE_VERSION}:markets:suggest"
 RESOLUTION_PREFIX = f"{CACHE_VERSION}:markets:resolution"
 PROOF_PREFIX = f"{CACHE_VERSION}:proofs:receipt"
 GROUP_PREFIX = f"{CACHE_VERSION}:markets:group"
+GROUP_MARKETS_PREFIX = f"{CACHE_VERSION}:markets:group:markets"
 MARKET_STATS_PREFIX = f"{CACHE_VERSION}:market:stats"
 CLOB_PRICES_HISTORY_PREFIX = f"{CACHE_VERSION}:clob:prices-history"
 EVENTS_COUNT_PREFIX = f"{CACHE_VERSION}:events:count"
@@ -86,6 +87,11 @@ def proof_receipt_cache_key(condition_id: str) -> str:
 def group_cache_key(group_slug: str) -> str:
     slug = _slugify(group_slug)
     return f"{GROUP_PREFIX}:{slug}"
+
+
+def group_markets_cache_key(group_slug: str) -> str:
+    slug = _slugify(group_slug)
+    return f"{GROUP_MARKETS_PREFIX}:{slug}"
 
 
 def market_stats_cache_key(event_id: str) -> str:

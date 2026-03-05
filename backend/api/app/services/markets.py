@@ -7,6 +7,7 @@ outcomes, tags, and Gamma metadata.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import re
@@ -33,6 +34,7 @@ from shared.cache_async import (
 )
 from shared.cache_keys import (
     group_cache_key,
+    group_markets_cache_key,
     market_stats_cache_key,
     markets_list_cache_key,
 )
@@ -598,6 +600,223 @@ def build_event_responses(
             )
         )
     return grouped_events
+
+
+def _event_group_lookup_key(event: schemas.EventResponse) -> str | None:
+    if event.markets:
+        primary = event.markets[0]
+        for candidate in (primary.group_slug, primary.event_key, primary.event_id):
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
+    for candidate in (event.group_slug, event.event_id):
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return None
+
+
+def _matches_event_filters(
+    market: schemas.MarketResponse,
+    *,
+    status: str | None,
+    category: str | None,
+    oracle: str | None,
+    featured: bool | None,
+    closes_after: datetime | None,
+    closes_before: datetime | None,
+) -> bool:
+    if status:
+        normalized_status = status.lower()
+        if normalized_status == "active":
+            if (market.status or "").lower() != "commit":
+                return False
+        elif normalized_status not in {"any", "all"}:
+            if (market.status or "").lower() != normalized_status:
+                return False
+    if category:
+        if (market.category or "").lower() != category.lower():
+            return False
+    if oracle:
+        if (market.oracle or "").lower() != oracle.lower():
+            return False
+    if featured:
+        if not bool(market.featured):
+            return False
+    if closes_after or closes_before:
+        closes_at = normalize_datetime(getattr(market, "closes_at", None))
+        if closes_at is None:
+            return False
+        if closes_after and closes_at < closes_after:
+            return False
+        if closes_before and closes_at > closes_before:
+            return False
+    return True
+
+
+async def _load_group_markets_from_cache(cache: Redis | None, group_slug: str) -> list[schemas.MarketResponse] | None:
+    if cache is None:
+        return None
+    normalized = (group_slug or "").strip().lower()
+    if not normalized:
+        return None
+    cached = await get_json(cache, group_markets_cache_key(normalized))
+    if cached is None:
+        return None
+    if not isinstance(cached, list):
+        return None
+    try:
+        return [schemas.MarketResponse.model_validate(item) for item in cached]
+    except (ValueError, TypeError):
+        return None
+
+
+async def _load_group_markets_for_event(
+    session: AsyncSession,
+    event: schemas.EventResponse,
+    *,
+    status: str | None,
+    category: str | None,
+    oracle: str | None,
+    featured: bool | None,
+    closes_after: datetime | None,
+    closes_before: datetime | None,
+) -> list[schemas.MarketResponse]:
+    primary = event.markets[0] if event.markets else None
+    raw_group_slug = primary.group_slug if primary else None
+    raw_event_key = primary.event_key if primary else None
+    event_group_slug = event.group_slug
+    raw_group_slug_norm = (raw_group_slug or "").strip().lower()
+    raw_event_key_norm = (raw_event_key or "").strip().lower()
+    event_group_norm = (event_group_slug or "").strip().lower()
+    raw_group_slug_key = raw_group_slug_norm or None
+    raw_event_key_value = raw_event_key_norm or None
+    use_raw_group_slug = bool(raw_group_slug_norm) and (
+        raw_group_slug_norm not in GENERIC_GROUP_SLUGS
+        or not event_group_norm
+        or event_group_norm == raw_group_slug_norm
+    )
+    use_raw_event_key = bool(raw_event_key_norm) and (
+        raw_event_key_norm not in GENERIC_GROUP_SLUGS or not event_group_norm or event_group_norm == raw_event_key_norm
+    )
+    lookup_key = _event_group_lookup_key(event)
+    markets: list[models.Market] = []
+    cache = await cache_client_service.get_cache_client()
+    if use_raw_group_slug and raw_group_slug_key is not None:
+        cached = await _load_group_markets_from_cache(cache, raw_group_slug_key)
+        if cached:
+            filtered_cached = [
+                model
+                for model in cached
+                if _matches_event_filters(
+                    model,
+                    status=status,
+                    category=category,
+                    oracle=oracle,
+                    featured=featured,
+                    closes_after=closes_after,
+                    closes_before=closes_before,
+                )
+            ]
+            if filtered_cached:
+                return filtered_cached
+    if lookup_key and raw_group_slug_key is None:
+        cached = await _load_group_markets_from_cache(cache, lookup_key)
+        if cached:
+            filtered_cached = [
+                model
+                for model in cached
+                if _matches_event_filters(
+                    model,
+                    status=status,
+                    category=category,
+                    oracle=oracle,
+                    featured=featured,
+                    closes_after=closes_after,
+                    closes_before=closes_before,
+                )
+            ]
+            if filtered_cached:
+                return filtered_cached
+    if use_raw_group_slug and raw_group_slug_key is not None:
+        markets = await crud.get_markets_by_group_slug(session, raw_group_slug_key)
+        if markets and _is_temporal_series_slug(raw_group_slug_key):
+            ref_date = normalize_datetime(getattr(primary, "closes_at", None))
+            if ref_date is not None:
+                markets = [
+                    record
+                    for record in markets
+                    if isinstance(record.closes_at, datetime) and record.closes_at.date() == ref_date.date()
+                ]
+        if len(markets) <= 1:
+            normalized_slug = _normalize_group_slug(raw_group_slug_key)
+            if normalized_slug and normalized_slug != raw_group_slug_key:
+                candidates = await crud.get_markets_by_group_slug_pattern(session, normalized_slug)
+                if candidates:
+                    markets = candidates
+    if not markets and use_raw_event_key and raw_event_key_value is not None:
+        markets = await crud.get_markets_by_event_key(session, raw_event_key_value)
+    if not markets and lookup_key and lookup_key not in {raw_group_slug_key, raw_event_key_value}:
+        markets = await crud.get_markets_by_event_key(session, lookup_key)
+    if not markets and lookup_key:
+        market = await crud.get_market_by_event_id(session, lookup_key)
+        if market is not None:
+            markets = [market]
+    models_list = [schemas.MarketResponse.model_validate(item) for item in markets]
+    filtered = [
+        model
+        for model in models_list
+        if _matches_event_filters(
+            model,
+            status=status,
+            category=category,
+            oracle=oracle,
+            featured=featured,
+            closes_after=closes_after,
+            closes_before=closes_before,
+        )
+    ]
+    return filtered
+
+
+async def expand_event_groups_for_list(
+    session: AsyncSession,
+    events: list[schemas.EventResponse],
+    *,
+    status: str | None,
+    category: str | None,
+    oracle: str | None,
+    featured: bool | None,
+    closes_after: datetime | None,
+    closes_before: datetime | None,
+) -> list[schemas.EventResponse]:
+    if not events:
+        return []
+    tasks = [
+        _load_group_markets_for_event(
+            session,
+            event,
+            status=status,
+            category=category,
+            oracle=oracle,
+            featured=featured,
+            closes_after=closes_after,
+            closes_before=closes_before,
+        )
+        for event in events
+    ]
+    results = await asyncio.gather(*tasks)
+    expanded_models: list[schemas.MarketResponse] = []
+    for event, event_models in zip(events, results, strict=True):
+        if event_models:
+            expanded_models.extend(event_models)
+        else:
+            expanded_models.extend(event.markets)
+    if not expanded_models:
+        return events
+    expanded_models = await enrich_market_models(session, expanded_models)
+    if status and status.lower() == "active":
+        expanded_models = filter_markets_for_visibility(expanded_models, hide_settled=True)
+    expanded_events = build_event_responses(expanded_models)
+    return expanded_events or events
 
 
 def apply_market_caps(market: schemas.MarketResponse) -> None:

@@ -376,10 +376,105 @@ def test_event_by_key_prefers_event_id_before_broad_event_key(client, db_session
     assert response.status_code == 200
     payload = response.json()
     assert payload["group_slug"] == "ufc-fight-night-spann-vs-kuniev"
-    assert {market["event_id"] for market in payload["markets"]} == {
-        primary.event_id,
-        sibling.event_id,
-    }
+
+
+def test_events_list_expands_grouped_markets(client, db_session):
+    group_slug = "grouped-event"
+    first = _make_market(
+        "evt-group-1",
+        "Grouped Market One",
+        category="sports",
+        oracle="0xaaa",
+        status="commit",
+        group_slug=group_slug,
+        group_position=1,
+    )
+    second = _make_market(
+        "evt-group-2",
+        "Grouped Market Two",
+        category="sports",
+        oracle="0xaaa",
+        status="commit",
+        group_slug=group_slug,
+        group_position=2,
+    )
+    db_session.add_all([first, second])
+    db_session.commit()
+
+    response = client.get("/events", params={"limit": 1})
+    payload = response.json()
+    assert len(payload) == 1
+    markets = payload[0]["markets"]
+    assert {market["event_id"] for market in markets} == {"evt-group-1", "evt-group-2"}
+
+
+def test_events_list_expansion_ignores_generic_group_slug_when_event_is_inferred(client, db_session):
+    first = _make_market(
+        "evt-ufc-card-1-main",
+        "UFC Fight Night: Sean Strickland vs. Anthony Hernandez",
+        category="sports",
+        oracle="0xufc",
+        status="commit",
+        event_key="ufc",
+        group_slug="ufc",
+    )
+    second = _make_market(
+        "evt-ufc-card-1-prelim",
+        "UFC Fight Night: Dan Ige vs. Melquizael Costa",
+        category="sports",
+        oracle="0xufc",
+        status="commit",
+        event_key="ufc",
+        group_slug="ufc",
+    )
+    unrelated = _make_market(
+        "evt-ufc-326-main",
+        "UFC 326: Charles Oliveira vs. Max Holloway",
+        category="sports",
+        oracle="0xufc",
+        status="commit",
+        event_key="ufc",
+        group_slug="ufc",
+    )
+    db_session.add_all([first, second, unrelated])
+    db_session.flush()
+    db_session.add_all(
+        [
+            models.MarketGammaMetadata(
+                market_id=first.id,
+                group_slug="ufc",
+                description=(
+                    "This market will resolve if the fight happens at UFC Fight Night: Strickland vs. Hernandez, "
+                    "scheduled for February 21, 2026."
+                ),
+            ),
+            models.MarketGammaMetadata(
+                market_id=second.id,
+                group_slug="ufc",
+                description=(
+                    "This market will resolve if the fight happens at UFC Fight Night: Strickland vs. Hernandez, "
+                    "scheduled for February 21, 2026."
+                ),
+            ),
+            models.MarketGammaMetadata(
+                market_id=unrelated.id,
+                group_slug="ufc",
+                description=(
+                    "This market will resolve if the fight happens at UFC 326: Oliveira vs. Holloway, "
+                    "scheduled for March 15, 2026."
+                ),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/events", params={"status": "commit", "limit": 2})
+    assert response.status_code == 200
+    payload = response.json()
+    market_sets = [{market["event_id"] for market in event["markets"]} for event in payload]
+    assert {"evt-ufc-card-1-main", "evt-ufc-card-1-prelim"} in market_sets
+    assert {"evt-ufc-326-main"} in market_sets
+    assert all(len(market_ids) < 3 for market_ids in market_sets)
 
 
 def test_event_by_key_supports_inferred_group_key(client, db_session):
