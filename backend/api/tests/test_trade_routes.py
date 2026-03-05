@@ -121,7 +121,7 @@ def test_claim_rejected_when_resolution_pending(client, db_session, monkeypatch)
     assert resp.json()["detail"] == "market_not_final"
 
 
-def test_pricing_quote_rejects_missing_address(client, db_session, monkeypatch):
+def test_pricing_quote_allows_missing_address(client, db_session, monkeypatch):
     signer = Account.create()
     user = Account.create()
     market = _seed_market(db_session, event_id="auto-mkt", address=None)
@@ -148,8 +148,49 @@ def test_pricing_quote_rejects_missing_address(client, db_session, monkeypatch):
         "user_id": user.address,
     }
     resp = client.post("/pricing/quote", json=payload)
-    assert resp.status_code == 409
-    assert resp.json()["detail"] == "market_not_deployed"
+    assert resp.status_code == 200, resp.json()
+    body = resp.json()
+    assert body["market_address"] is None
+    assert body["signature"] is None
+
+
+def test_pricing_quote_does_not_deploy_market_when_enabled(client, db_session, monkeypatch):
+    signer = Account.create()
+    user = Account.create()
+    market = _seed_market(db_session, event_id="auto-mkt-enabled", address=None)
+    settings = runtime.settings
+    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
+    monkeypatch.setattr(settings, "max_stake_zen", 1, raising=False)
+    monkeypatch.setattr(settings, "max_user_stake_per_market_zen", 10, raising=False)
+    monkeypatch.setattr(settings, "max_market_stake_zen", 100, raising=False)
+    monkeypatch.setattr(settings, "haircut_percent", 0.12, raising=False)
+    monkeypatch.setattr(settings, "pricing_edge_percent", 0.05, raising=False)
+    monkeypatch.setattr(settings, "public_market_auto_create_enabled", True, raising=False)
+
+    async def _fx_quote(*_args, **_kwargs):
+        return FxQuoteResponse(zen_usd=Decimal("2"), stale=False, received_at=None)
+
+    async def _ensure_market_or_create(*_args, **_kwargs):
+        raise AssertionError("quote path must not deploy market")
+
+    monkeypatch.setattr("app.routes.pricing.fetch_fx_quote", _fx_quote)
+    monkeypatch.setattr("app.routes.pricing._fetch_streamer_price", _streamer_price)
+    monkeypatch.setattr("app.routes.trade._ensure_market_or_create", _ensure_market_or_create)
+
+    payload = {
+        "stake_zen": 0.1,
+        "wallet_address": user.address,
+        "market_address": None,
+        "outcome_id": 0,
+        "market_id": market.event_id,
+        "user_id": user.address,
+    }
+    resp = client.post("/pricing/quote", json=payload)
+    assert resp.status_code == 200, resp.json()
+    body = resp.json()
+    assert body["market_address"] is None
+    assert body["signature"] is None
 
 
 def test_trade_commit_and_positions_roundtrip(client, db_session, monkeypatch):
@@ -177,7 +218,7 @@ def test_trade_commit_and_positions_roundtrip(client, db_session, monkeypatch):
     monkeypatch.setattr("app.routes.pricing.fetch_fx_quote", _fx_quote)
     monkeypatch.setattr("app.routes.pricing._fetch_streamer_price", _streamer_price)
 
-    async def _ensure_market(_session, _market_id, _expected):
+    async def _ensure_market(_session, _market_id, _expected, *, allow_create=False):
         return market.id, market.market_address, 1
 
     monkeypatch.setattr("app.routes.trade._ensure_market", _ensure_market)

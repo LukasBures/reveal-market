@@ -1784,10 +1784,11 @@ async def trade_commit(
         )
     # Check relayer escrow balance if available.
     escrow_balance = await _fetch_escrow_balance(quote.wallet_address or "")
-    market_db_id, market_address, market_onchain_id = await _ensure_market(
+    market_db_id, market_address, market_onchain_id = await _ensure_market_or_create(
         session,
         quote.market_id or "",
         quote.market_address,
+        allow_create=settings.public_market_auto_create_enabled,
     )
     if not market_address:
         raise HTTPException(

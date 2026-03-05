@@ -561,22 +561,11 @@ async def pricing_quote(
             )
         if market_record:
             _assert_commits_allowed(market_record, now, session)
-        # Public quote issuance never auto-creates markets.
+        # Quotes can be issued before on-chain market deployment.
+        # Deployment is handled later during /trade/commit.
         ensured_market_address: str | None = (payload.market_address or "") or None
         if not ensured_market_address and market_record is not None:
             ensured_market_address = getattr(market_record, "market_address", None)
-        if payload.market_id and not ensured_market_address:
-            if settings.public_market_auto_create_enabled and internal_caller:
-                from app.routes.trade import _ensure_market_or_create
-
-                _, ensured_market_address, _ = await _ensure_market_or_create(
-                    session,
-                    payload.market_id,
-                    payload.market_address,
-                    allow_create=True,
-                )
-            else:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="market_not_deployed")
         try:
             fx_quote = await fetch_fx_quote(settings)
             if fx_quote.stale:
