@@ -53,12 +53,11 @@ def _seed_market(db_session, event_id: str = "mkt-test", address: str = "0x11111
     return market
 
 
-def _format_signature_decimal(value: Decimal | float | int | None, places: int = 8) -> str:
+def _format_signature_decimal(value: Decimal | float | int | None, places: int = 3) -> str:
     if value is None:
         return "n/a"
     quant = Decimal("1").scaleb(-places) if places > 0 else Decimal("1")
-    text = format(Decimal(str(value)).quantize(quant), "f").rstrip("0").rstrip(".")
-    return text if text else "0"
+    return format(Decimal(str(value)).quantize(quant), "f")
 
 
 def _build_commit_message(quote: dict, wallet: str) -> str:
@@ -66,7 +65,6 @@ def _build_commit_message(quote: dict, wallet: str) -> str:
     market_id = str(quote.get("market_id") or "n/a")
     outcome_raw = quote.get("outcome_id")
     outcome_id = str(int(outcome_raw)) if outcome_raw is not None else "n/a"
-    stake_wei = str(int(quote.get("stake_wei") or 0))
     stake_zen = _format_signature_decimal(quote.get("stake_zen"))
     payout_zen = _format_signature_decimal(quote.get("payout_zen"))
     wallet_lower = wallet.lower()
@@ -76,7 +74,7 @@ def _build_commit_message(quote: dict, wallet: str) -> str:
             "",
             f"Market ID: {market_id}",
             f"Outcome ID: {outcome_id}",
-            f"You pay: {stake_zen} ZEN ({stake_wei} wei)",
+            f"You pay: {stake_zen} ZEN",
             f"You can win: {payout_zen} ZEN",
             f"Quote ID: {quote_id}",
             f"Wallet: {wallet_lower}",

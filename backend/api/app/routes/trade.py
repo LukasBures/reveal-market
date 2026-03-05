@@ -1688,13 +1688,12 @@ def _verify_wallet_signature(wallet: str, signature: str) -> None:
     _verify_scoped_signature(wallet, f"claim-bundles:{wallet.lower()}", signature)
 
 
-def _format_signature_decimal(value: Decimal | float | int | None, places: int = 8) -> str:
+def _format_signature_decimal(value: Decimal | float | int | None, places: int = 3) -> str:
     if value is None:
         return "n/a"
     quant = Decimal("1").scaleb(-places) if places > 0 else Decimal("1")
     quantized = Decimal(str(value)).quantize(quant, rounding=ROUND_DOWN)
-    text = format(quantized, "f").rstrip("0").rstrip(".")
-    return text if text else "0"
+    return format(quantized, "f")
 
 
 def _build_commit_signature_message(wallet: str, quote: schemas.PricingQuotePayload) -> str:
@@ -1702,7 +1701,6 @@ def _build_commit_signature_message(wallet: str, quote: schemas.PricingQuotePayl
     quote_id = str(quote.quote_id or "")
     market_id = str(quote.market_id or "n/a")
     outcome_id = str(int(quote.outcome_id)) if quote.outcome_id is not None else "n/a"
-    stake_wei = str(int(quote.stake_wei))
     stake_zen = _format_signature_decimal(cast(Decimal, quote.stake_zen))
     payout_zen = _format_signature_decimal(cast(Decimal | None, quote.payout_zen))
     return "\n".join(
@@ -1711,7 +1709,7 @@ def _build_commit_signature_message(wallet: str, quote: schemas.PricingQuotePayl
             "",
             f"Market ID: {market_id}",
             f"Outcome ID: {outcome_id}",
-            f"You pay: {stake_zen} ZEN ({stake_wei} wei)",
+            f"You pay: {stake_zen} ZEN",
             f"You can win: {payout_zen} ZEN",
             f"Quote ID: {quote_id}",
             f"Wallet: {wallet_lower}",

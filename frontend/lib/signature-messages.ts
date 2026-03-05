@@ -1,22 +1,10 @@
 import type { PricingQuote } from "@/lib/pricing-client";
 
-const formatDecimal = (value: number | string | null | undefined, maxDecimals = 8): string => {
+const formatDecimal = (value: number | string | null | undefined, decimals = 3): string => {
   if (value === null || value === undefined) return "n/a";
   const numeric = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(numeric)) return "n/a";
-  const fixed = numeric.toFixed(maxDecimals);
-  return fixed.replace(/\.?0+$/, "") || "0";
-};
-
-const normalizeWei = (value: string | number | null | undefined): string => {
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    return trimmed.length ? trimmed : "0";
-  }
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return Math.trunc(value).toString();
-  }
-  return "0";
+  return numeric.toFixed(decimals);
 };
 
 export const buildCommitSignatureMessage = (quote: PricingQuote, walletAddress: string): string => {
@@ -26,14 +14,13 @@ export const buildCommitSignatureMessage = (quote: PricingQuote, walletAddress: 
   const outcomeId =
     quote.outcome_id === null || quote.outcome_id === undefined ? "n/a" : String(Math.trunc(quote.outcome_id));
   const stakeZen = formatDecimal(quote.stake_zen);
-  const stakeWei = normalizeWei(quote.stake_wei);
   const payoutZen = formatDecimal(quote.payout_zen);
   return [
     "RevealMarket Buy Confirmation",
     "",
     `Market ID: ${marketId}`,
     `Outcome ID: ${outcomeId}`,
-    `You pay: ${stakeZen} ZEN (${stakeWei} wei)`,
+    `You pay: ${stakeZen} ZEN`,
     `You can win: ${payoutZen} ZEN`,
     `Quote ID: ${quoteId}`,
     `Wallet: ${wallet}`,
