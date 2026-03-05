@@ -215,7 +215,7 @@ class Settings(BaseSettings):
     )
     pricing_quote_ttl_seconds: int = Field(default=15, ge=15, le=600)
     pricing_quote_signature_required: bool = Field(
-        default=True,
+        default=False,
         description="Require wallet signature proof-of-possession on /pricing/quote unless an internal secret is used",
     )
     quote_signature_nonce_ttl_seconds: int = Field(
