@@ -113,34 +113,34 @@ function ProgressSteps({ steps }: { steps: [StepState, StepState, StepState] }) 
   return (
     <div className="flex items-center gap-0 py-2" role="group" aria-label="Transaction progress">
       {steps.map((state, i) => (
-        <div key={i} className="flex items-center" style={i < 2 ? { flex: "1 1 0%" } : undefined}>
+        <div key={i} className="flex items-start" style={i < 2 ? { flex: "1 1 0%" } : undefined}>
           <div className="flex flex-col items-center gap-1">
             <StepDot state={state} />
             <span
               className={`text-[10px] uppercase tracking-[0.15em] whitespace-nowrap ${
                 state === "error"
                   ? "text-rose-200"
-                  : state === "done" || state === "active"
-                    ? state === "active"
+                  : state === "done"
+                    ? "text-emerald-200"
+                    : state === "active"
                       ? "text-white"
-                      : "text-emerald-200"
-                    : "text-slate-500"
+                      : "text-slate-500"
               }`}
             >
               {STEP_LABELS[i]}
             </span>
           </div>
           {i < 2 && (
-            <div className="flex flex-1 items-center min-w-3">
+            <div className="flex flex-1 h-4 items-center min-w-3">
               <div
                 className={`h-px flex-1 ${
-                  state === "done" ? "bg-emerald-400/50" : "bg-slate-700"
+                  state === "done" ? "bg-emerald-400" : "bg-slate-700"
                 }`}
               />
               <svg
                 viewBox="0 0 6 10"
                 className={`h-2.5 w-1.5 shrink-0 -ml-px ${
-                  state === "done" ? "text-emerald-400/50" : "text-slate-700"
+                  state === "done" ? "text-emerald-400" : "text-slate-700"
                 }`}
               >
                 <path
@@ -241,7 +241,7 @@ export function TradeSubmission({
           Switch to {chainName} (chain {expectedChainId}) to trade.
         </p>
       )}
-      {stepStates && <ProgressSteps steps={stepStates} />}
+      {stepStates && !txConfirmed && <ProgressSteps steps={stepStates} />}
       {relayerJobId && !txHashIsHex && (
         <p className="text-[11px] uppercase tracking-[0.2em] text-slate-300">
           Waiting for the relayer to return the commit transaction hash. If this takes too long, retry once.
