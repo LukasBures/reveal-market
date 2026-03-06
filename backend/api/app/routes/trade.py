@@ -1696,13 +1696,15 @@ def _format_signature_decimal(value: Decimal | float | int | None, places: int =
     return format(quantized, "f")
 
 
-def _build_commit_signature_message(wallet: str, quote: schemas.PricingQuotePayload) -> str:
+def _build_commit_signature_message(
+    wallet: str, quote: schemas.PricingQuotePayload, *, decimal_places: int = 4
+) -> str:
     wallet_lower = wallet.lower()
     quote_id = str(quote.quote_id or "")
     market_id = str(quote.market_id or "n/a")
     outcome_id = str(int(quote.outcome_id)) if quote.outcome_id is not None else "n/a"
-    stake_zen = _format_signature_decimal(cast(Decimal, quote.stake_zen))
-    payout_zen = _format_signature_decimal(cast(Decimal | None, quote.payout_zen))
+    stake_zen = _format_signature_decimal(cast(Decimal, quote.stake_zen), places=decimal_places)
+    payout_zen = _format_signature_decimal(cast(Decimal | None, quote.payout_zen), places=decimal_places)
     return "\n".join(
         [
             "RevealMarket Buy Confirmation",
@@ -1720,12 +1722,10 @@ def _build_commit_signature_message(wallet: str, quote: schemas.PricingQuotePayl
 
 
 def _verify_commit_signature(wallet: str, quote: schemas.PricingQuotePayload, signature: str) -> None:
-    """Verify commit signatures (legacy and human-readable message formats)."""
+    """Verify commit signatures (human-readable message format only)."""
 
-    quote_id = str(quote.quote_id or "")
     challenges = [
-        f"commit:{quote_id}:{wallet.lower()}",
-        _build_commit_signature_message(wallet, quote),
+        _build_commit_signature_message(wallet, quote, decimal_places=4),
     ]
     last_error: HTTPException | None = None
     for challenge in challenges:
