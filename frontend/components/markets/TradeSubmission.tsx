@@ -59,7 +59,7 @@ function getStepStates(
   if (txConfirmed) return ["done", "done", "done"];
   if (txStatus === "failed") {
     // Error on the most-recent active step
-    if (txHashIsHex || txStatus === "pending") return ["done", "done", "error"];
+    if (txHashIsHex) return ["done", "done", "error"];
     if (relayerJobId) return ["done", "error", "pending"];
     return ["error", "pending", "pending"];
   }
