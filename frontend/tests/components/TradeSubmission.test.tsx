@@ -194,7 +194,7 @@ describe("TradeSubmission", () => {
 
   // --- Progress indicator tests ---
 
-  it("shows all steps done when txConfirmed", () => {
+  it("hides progress steps and shows confirmed message when txConfirmed", () => {
     const txHash = `0x${"b".repeat(64)}`;
     render(
       <TradeSubmission
@@ -204,12 +204,8 @@ describe("TradeSubmission", () => {
         txStatus="confirmed"
       />,
     );
-    const group = screen.getByRole("group", { name: /transaction progress/i });
-    expect(group).toBeInTheDocument();
-    // All three step labels should be visible
-    expect(screen.getByText(/wallet confirmation/i)).toBeInTheDocument();
-    expect(screen.getByText(/submitting commit/i)).toBeInTheDocument();
-    expect(screen.getByText(/on-chain confirmation/i)).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: /transaction progress/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/commit confirmed on-chain/i)).toBeInTheDocument();
   });
 
   it("hides progress indicator when no tx activity", () => {

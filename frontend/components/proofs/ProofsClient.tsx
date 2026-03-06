@@ -159,11 +159,13 @@ export function ProofsClient({ initialReceipts, pageSize = 24, filters }: Props)
       latestReceipt: latestTimestamp !== null ? formatDateTime(new Date(latestTimestamp)) : "—",
     };
   }, [receipts]);
+
   const filterChips = useMemo(() => buildFilterChips(filters), [filters]);
   const hasDraftFilters = useMemo(
     () => Object.values(draftFilters).some((value) => value.trim().length > 0),
     [draftFilters],
   );
+  const hasActiveFilters = filterChips.length > 0;
 
   const handleFilterSubmit = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
@@ -184,80 +186,111 @@ export function ProofsClient({ initialReceipts, pageSize = 24, filters }: Props)
   }, [router, startFilterTransition]);
 
   return (
-    <div className="space-y-6">
-      <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 shadow-md shadow-black/30">
-        <div className="grid gap-4 md:grid-cols-4">
-          <SummaryMetric label="Receipts loaded" value={formatNumber(receipts.length)} />
-          <SummaryMetric label="Proofs ready" value={formatNumber(proofReadyCount)} />
-          <SummaryMetric label="Unique markets" value={formatNumber(uniqueMarkets)} />
-          <SummaryMetric label="Latest receipt" value={latestReceipt} />
-        </div>
-        <form onSubmit={handleFilterSubmit} className="mt-4 space-y-4">
-          <div className="grid gap-3 md:grid-cols-4">
-            <FilterField
-              label="Market id"
-              value={draftFilters.marketId}
-              placeholder="123"
-              inputMode="numeric"
-              onChange={(value) => setDraftFilters((prev) => ({ ...prev, marketId: value.replace(/\D/g, "") }))}
-            />
-            <FilterField
-              label="Event id"
-              value={draftFilters.eventId}
-              placeholder="mvp-lose-..."
-              onChange={(value) => setDraftFilters((prev) => ({ ...prev, eventId: value }))}
-            />
-            <FilterField
-              label="Condition id"
-              value={draftFilters.conditionId}
-              placeholder="0x..."
-              onChange={(value) => setDraftFilters((prev) => ({ ...prev, conditionId: value }))}
-            />
-            <FilterField
-              label="Request id"
-              value={draftFilters.requestId}
-              placeholder="req-..."
-              onChange={(value) => setDraftFilters((prev) => ({ ...prev, requestId: value }))}
-            />
-          </div>
-          <div className="flex flex-wrap items-center gap-3 text-xs">
-            <button
-              type="submit"
-              disabled={isFiltering}
-              className="w-full rounded-full bg-brand-500 px-5 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white transition hover:bg-brand-400 disabled:opacity-40 sm:w-auto sm:tracking-[0.3em]"
-            >
-              {isFiltering ? "Filtering..." : "Apply filters"}
-            </button>
-            <button
-              type="button"
-              onClick={handleClearFilters}
-              disabled={!hasDraftFilters || isFiltering}
-              className="w-full rounded-full border border-white/15 bg-white/5 px-5 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white transition hover:border-white/40 disabled:opacity-40 sm:w-auto sm:tracking-[0.3em]"
-            >
-              Clear
-            </button>
-            <span className="text-slate-400">Values are shown in ZEN (18 decimals).</span>
-          </div>
-        </form>
-        {filterChips.length ? (
-          <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-200">
-            {filterChips.map((chip) => (
-              <span key={chip.label} className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
-                <span className="text-slate-400">{chip.label}</span> {chip.value}
-              </span>
-            ))}
-          </div>
-        ) : null}
+    <div className="space-y-5">
+      {/* Summary metrics — always visible, separated from filters */}
+      <div className="grid gap-3 md:grid-cols-4">
+        <SummaryMetric label="Receipts loaded" value={formatNumber(receipts.length)} />
+        <SummaryMetric label="Proofs ready" value={formatNumber(proofReadyCount)} />
+        <SummaryMetric label="Unique markets" value={formatNumber(uniqueMarkets)} />
+        <SummaryMetric label="Latest receipt" value={latestReceipt} />
       </div>
+
+      {/* Filter panel — collapsible */}
+      <details className="group rounded-2xl border border-white/10 bg-white/[0.04] shadow-md shadow-black/30">
+        <summary className="flex cursor-pointer list-none items-center justify-between px-5 py-4 [&::-webkit-details-marker]:hidden">
+          <div className="flex items-center gap-3">
+            <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Filter receipts</span>
+            {hasActiveFilters ? (
+              <span className="rounded-full bg-brand-500/20 px-2 py-0.5 text-xs text-brand-200">
+                {filterChips.length} active
+              </span>
+            ) : null}
+          </div>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 16 16"
+            fill="currentColor"
+            className="h-4 w-4 text-slate-400 transition-transform duration-200 group-open:rotate-180"
+          >
+            <path
+              fillRule="evenodd"
+              d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z"
+              clipRule="evenodd"
+            />
+          </svg>
+        </summary>
+
+        <div className="border-t border-white/10 px-5 pb-5 pt-4">
+          <form onSubmit={handleFilterSubmit} className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-4">
+              <FilterField
+                label="Market id"
+                value={draftFilters.marketId}
+                placeholder="123"
+                inputMode="numeric"
+                onChange={(value) => setDraftFilters((prev) => ({ ...prev, marketId: value.replace(/\D/g, "") }))}
+              />
+              <FilterField
+                label="Event id"
+                value={draftFilters.eventId}
+                placeholder="mvp-lose-..."
+                onChange={(value) => setDraftFilters((prev) => ({ ...prev, eventId: value }))}
+              />
+              <FilterField
+                label="Condition id"
+                value={draftFilters.conditionId}
+                placeholder="0x..."
+                onChange={(value) => setDraftFilters((prev) => ({ ...prev, conditionId: value }))}
+              />
+              <FilterField
+                label="Request id"
+                value={draftFilters.requestId}
+                placeholder="req-..."
+                onChange={(value) => setDraftFilters((prev) => ({ ...prev, requestId: value }))}
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-3 text-xs">
+              <button
+                type="submit"
+                disabled={isFiltering}
+                className="w-full cursor-pointer rounded-full bg-brand-500 px-5 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white transition hover:bg-brand-400 disabled:opacity-40 sm:w-auto sm:tracking-[0.3em]"
+              >
+                {isFiltering ? "Filtering..." : "Apply filters"}
+              </button>
+              <button
+                type="button"
+                onClick={handleClearFilters}
+                disabled={!hasDraftFilters || isFiltering}
+                className="w-full cursor-pointer rounded-full border border-white/15 bg-white/5 px-5 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white transition hover:border-white/40 disabled:opacity-40 sm:w-auto sm:tracking-[0.3em]"
+              >
+                Clear
+              </button>
+              <span className="text-slate-400">Amounts are in ZEN (18 decimals).</span>
+            </div>
+          </form>
+
+          {filterChips.length ? (
+            <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-200">
+              {filterChips.map((chip) => (
+                <span key={chip.label} className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
+                  <span className="text-slate-400">{chip.label}</span> {chip.value}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </details>
+
       <ProofReceiptList receipts={receipts} />
       <div ref={sentinelRef} aria-hidden className="h-6 w-full" />
+
       {hasMore ? (
         <div className="flex justify-center">
           <button
             type="button"
             onClick={() => loadMore()}
             disabled={isLoadingMore}
-            className="rounded-full border border-white/20 bg-white/5 px-6 py-2 text-sm font-semibold text-white transition hover:border-white/40 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+            className="cursor-pointer rounded-full border border-white/20 bg-white/5 px-6 py-2 text-sm font-semibold text-white transition hover:border-white/40 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {isLoadingMore ? "Loading..." : "Load more receipts"}
           </button>
@@ -267,13 +300,17 @@ export function ProofsClient({ initialReceipts, pageSize = 24, filters }: Props)
           All available proof receipts are loaded. Check back soon for fresh attestations.
         </p>
       )}
+
       {loadMoreError ? (
         <div className="flex flex-col items-center gap-2 py-4">
           <p className="text-sm text-slate-400">{loadMoreError}</p>
           <button
             type="button"
-            onClick={() => { setLoadMoreError(null); loadMore(); }}
-            className="rounded-full border border-white/20 bg-white/5 px-4 py-2 text-sm text-white transition hover:border-white/40 hover:bg-white/10 cursor-pointer"
+            onClick={() => {
+              setLoadMoreError(null);
+              loadMore();
+            }}
+            className="cursor-pointer rounded-full border border-white/20 bg-white/5 px-4 py-2 text-sm text-white transition hover:border-white/40 hover:bg-white/10"
           >
             Try again
           </button>
@@ -290,9 +327,9 @@ type SummaryMetricProps = {
 
 function SummaryMetric({ label, value }: SummaryMetricProps) {
   return (
-    <div className="rounded-xl border border-white/10 bg-black/30 px-4 py-3">
+    <div className="rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3">
       <p className="text-xs uppercase tracking-[0.3em] text-slate-500">{label}</p>
-      <p className="mt-2 text-2xl font-semibold text-white">{value}</p>
+      <p className="mt-1 text-2xl font-semibold text-white">{value}</p>
     </div>
   );
 }
@@ -364,7 +401,10 @@ type FilterFieldProps = {
 };
 
 function FilterField({ label, value, placeholder, inputMode = "text", onChange }: FilterFieldProps) {
-  const fieldId = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+  const fieldId = label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
   return (
     <label className="text-xs uppercase tracking-[0.3em] text-slate-400">
       {label}
