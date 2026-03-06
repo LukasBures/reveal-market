@@ -61,9 +61,10 @@ describe("TradeSubmission", () => {
     expect(screen.queryByText(/buy yes/i)).not.toBeInTheDocument();
   });
 
-  it("shows tx loading spinner state", () => {
+  it("shows wallet confirmation step when txLoading", () => {
     render(<TradeSubmission {...defaultProps} txLoading={true} />);
-    expect(screen.getByText(/committing\.\.\./i)).toBeInTheDocument();
+    expect(screen.getByText(/wallet confirmation/i)).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: /transaction progress/i })).toBeInTheDocument();
   });
 
   it("shows tx error message", () => {
@@ -95,7 +96,7 @@ describe("TradeSubmission", () => {
     expect(link).toHaveAttribute("target", "_blank");
   });
 
-  it("shows relayer job ID when no tx hash", () => {
+  it("shows relayer submission progress when no tx hash", () => {
     render(
       <TradeSubmission
         {...defaultProps}
@@ -103,7 +104,7 @@ describe("TradeSubmission", () => {
         txStatus="pending"
       />,
     );
-    expect(screen.getByText(/job job-abc-123/i)).toBeInTheDocument();
+    expect(screen.getByText(/submitting commit/i)).toBeInTheDocument();
     expect(screen.getByText(/waiting for the relayer/i)).toBeInTheDocument();
   });
 
@@ -189,5 +190,44 @@ describe("TradeSubmission", () => {
       />,
     );
     expect(screen.getByText(/stake cap reached/i)).toBeInTheDocument();
+  });
+
+  // --- Progress indicator tests ---
+
+  it("shows all steps done when txConfirmed", () => {
+    const txHash = `0x${"b".repeat(64)}`;
+    render(
+      <TradeSubmission
+        {...defaultProps}
+        txHash={txHash}
+        txConfirmed={true}
+        txStatus="confirmed"
+      />,
+    );
+    const group = screen.getByRole("group", { name: /transaction progress/i });
+    expect(group).toBeInTheDocument();
+    // All three step labels should be visible
+    expect(screen.getByText(/wallet confirmation/i)).toBeInTheDocument();
+    expect(screen.getByText(/submitting commit/i)).toBeInTheDocument();
+    expect(screen.getByText(/on-chain confirmation/i)).toBeInTheDocument();
+  });
+
+  it("hides progress indicator when no tx activity", () => {
+    render(<TradeSubmission {...defaultProps} />);
+    expect(screen.queryByRole("group", { name: /transaction progress/i })).not.toBeInTheDocument();
+  });
+
+  it("shows on-chain confirmation step when tx hash is present", () => {
+    const txHash = `0x${"c".repeat(64)}`;
+    render(
+      <TradeSubmission
+        {...defaultProps}
+        txHash={txHash}
+        txStatus="pending"
+      />,
+    );
+    const group = screen.getByRole("group", { name: /transaction progress/i });
+    expect(group).toBeInTheDocument();
+    expect(screen.getByText(/on-chain confirmation/i)).toBeInTheDocument();
   });
 });

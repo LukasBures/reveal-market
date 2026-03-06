@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import time
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 
 import app.runtime as runtime
 import pytest
@@ -57,7 +57,15 @@ def _format_signature_decimal(value: Decimal | float | int | None, places: int =
     if value is None:
         return "n/a"
     quant = Decimal("1").scaleb(-places) if places > 0 else Decimal("1")
-    return format(Decimal(str(value)).quantize(quant), "f")
+    quantized = Decimal(str(value)).quantize(quant, rounding=ROUND_DOWN)
+    result = format(quantized, "f")
+    if places > 0:
+        if "." not in result:
+            result += "." + "0" * places
+        else:
+            int_part, frac_part = result.split(".", 1)
+            result = f"{int_part}.{frac_part.ljust(places, '0')}"
+    return result
 
 
 def _build_commit_message(quote: dict, wallet: str) -> str:

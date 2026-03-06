@@ -1694,7 +1694,14 @@ def _format_signature_decimal(value: Decimal | float | int | None, places: int =
         return "n/a"
     quant = Decimal("1").scaleb(-places) if places > 0 else Decimal("1")
     quantized = Decimal(str(value)).quantize(quant, rounding=ROUND_DOWN)
-    return format(quantized, "f")
+    result = format(quantized, "f")
+    if places > 0:
+        if "." not in result:
+            result += "." + "0" * places
+        else:
+            int_part, frac_part = result.split(".", 1)
+            result = f"{int_part}.{frac_part.ljust(places, '0')}"
+    return result
 
 
 def _build_commit_signature_message(wallet: str, quote: schemas.PricingQuotePayload, *, decimal_places: int = 4) -> str:

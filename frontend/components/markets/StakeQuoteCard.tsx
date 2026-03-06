@@ -111,6 +111,7 @@ export function StakeQuoteCard({
   const [txError, setTxError] = useState<string | null>(null);
   const [txHash, setTxHash] = useState<string | null>(initialTxHash);
   const [relayerJobId, setRelayerJobId] = useState<string | null>(null);
+  const [relayerPendingSince, setRelayerPendingSince] = useState<number | null>(null);
   const [txConfirmed, setTxConfirmed] = useState(false);
   const [txStatus, setTxStatus] = useState<string | null>(null);
 
@@ -531,6 +532,7 @@ export function StakeQuoteCard({
       setTxHash(null);
     }
     setRelayerJobId(null);
+    setRelayerPendingSince(null);
     setTxConfirmed(false);
     setTxStatus(null);
   }, [chainId, address, initialTxHash]);
@@ -540,6 +542,7 @@ export function StakeQuoteCard({
     setTxError(null);
     setTxHash(null);
     setRelayerJobId(null);
+    setRelayerPendingSince(null);
     setTxConfirmed(false);
     if (tradingDisabled) {
       setTxError(tradingReason ?? "Trading disabled");
@@ -572,27 +575,13 @@ export function StakeQuoteCard({
     }
     setTxLoading(true);
     try {
-      const previewQuote = quote && !quoteExpired ? quote : null;
-      const needsFreshQuote =
-        !previewQuote ||
-        !previewQuote.quote_id ||
-        (previewQuote.market_id ?? marketId) !== marketId ||
-        (previewQuote.outcome_id ?? selectedOutcome) !== selectedOutcome ||
-        Math.abs(Number(previewQuote.stake_zen ?? NaN) - stakeZen) > 1e-6;
-      let issuedQuote: PricingQuote;
-      if (needsFreshQuote) {
-        issuedQuote = await fetchPricingQuoteWithMeta(stakeZen, {
-          marketId,
-          walletAddress: address,
-          marketAddress: normalizedMarketAddress,
-          outcomeId: selectedOutcome,
-        });
-      } else {
-        if (!previewQuote) {
-          throw new Error("Quote unavailable");
-        }
-        issuedQuote = previewQuote;
-      }
+      // Always fetch a fresh full quote for commit — previews lack quote_id
+      const issuedQuote = await fetchPricingQuoteWithMeta(stakeZen, {
+        marketId,
+        walletAddress: address,
+        marketAddress: normalizedMarketAddress,
+        outcomeId: selectedOutcome,
+      });
       setQuote(issuedQuote);
       if (!issuedQuote.quote_id) {
         setTxError("Quote unavailable");
@@ -622,6 +611,7 @@ export function StakeQuoteCard({
         const normalizedHash = normalizeTxHash(respHash) ?? respHash;
         setTxHash(normalizedHash || null);
         setRelayerJobId(respJob);
+        setRelayerPendingSince(respJob && !normalizedHash ? Date.now() : null);
         const initialStatus = resp.relayer_status || (respHash ? "pending" : null);
         setTxStatus(initialStatus);
         setTxConfirmed(initialStatus === "confirmed");
@@ -652,8 +642,6 @@ export function StakeQuoteCard({
     fxUnavailable,
     marketId,
     normalizedMarketAddress,
-    quote,
-    quoteExpired,
     selectedOutcome,
     sanitizeTradeErrorMessage,
     signMessage,
@@ -667,6 +655,7 @@ export function StakeQuoteCard({
   useEffect(() => {
     if (!txHash && !relayerJobId) return;
     let cancelled = false;
+    const pendingStart = relayerPendingSince;
     const poll = async () => {
       try {
         const isHexHash = normalizeTxHash(txHash);
@@ -682,11 +671,15 @@ export function StakeQuoteCard({
           }
           if (statusResp.status === "confirmed" || statusResp.status === "failed") {
             setTxConfirmed(statusResp.status === "confirmed");
+            setRelayerPendingSince(null);
             return;
           }
         }
       } catch {
         // best effort
+      }
+      if (!cancelled && relayerJobId && !txHash && pendingStart && Date.now() - pendingStart > 60_000) {
+        setTxError("Relayer is taking longer than expected. Please retry once.");
       }
       if (!cancelled) {
         setTimeout(poll, 5000);
@@ -696,7 +689,7 @@ export function StakeQuoteCard({
     return () => {
       cancelled = true;
     };
-  }, [txHash, relayerJobId]);
+  }, [txHash, relayerJobId, relayerPendingSince]);
 
   // ── Render ─────────────────────────────────────────────────────────────
   return (

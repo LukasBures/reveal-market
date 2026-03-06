@@ -41,6 +41,112 @@ const shortenHash = (hash?: string | null): string | null => {
   return `${trimmed.slice(0, 10)}...${trimmed.slice(-6)}`;
 };
 
+// ---------------------------------------------------------------------------
+// Progress step types & logic
+// ---------------------------------------------------------------------------
+
+type StepState = "pending" | "active" | "done" | "error";
+
+const STEP_LABELS = ["Wallet confirmation", "Submitting commit", "On-chain confirmation"] as const;
+
+function getStepStates(
+  txLoading: boolean,
+  relayerJobId: string | null,
+  txHashIsHex: boolean,
+  txConfirmed: boolean,
+  txStatus: string | null,
+): [StepState, StepState, StepState] | null {
+  if (txConfirmed) return ["done", "done", "done"];
+  if (txStatus === "failed") {
+    // Error on the most-recent active step
+    if (txHashIsHex || txStatus === "pending") return ["done", "done", "error"];
+    if (relayerJobId) return ["done", "error", "pending"];
+    return ["error", "pending", "pending"];
+  }
+  if (txHashIsHex || txStatus === "pending") return ["done", "done", "active"];
+  if (relayerJobId && !txHashIsHex) return ["done", "active", "pending"];
+  if (txLoading) return ["active", "pending", "pending"];
+  return null; // no activity — hide indicator
+}
+
+// ---------------------------------------------------------------------------
+// Step dot SVG components
+// ---------------------------------------------------------------------------
+
+function CheckIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" className="h-4 w-4">
+      <circle cx="8" cy="8" r="8" className="fill-emerald-400" />
+      <path d="M5 8.5l2 2 4-4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function ErrorIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" className="h-4 w-4">
+      <circle cx="8" cy="8" r="8" className="fill-rose-400" />
+      <path d="M5.5 5.5l5 5M10.5 5.5l-5 5" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function StepDot({ state }: { state: StepState }) {
+  if (state === "done") return <CheckIcon />;
+  if (state === "error") return <ErrorIcon />;
+  return (
+    <span
+      className={`inline-block h-4 w-4 rounded-full border-2 ${
+        state === "active"
+          ? "animate-pulse border-emerald-400 bg-emerald-400"
+          : "border-slate-600 bg-transparent"
+      }`}
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ProgressSteps component
+// ---------------------------------------------------------------------------
+
+function ProgressSteps({ steps }: { steps: [StepState, StepState, StepState] }) {
+  return (
+    <div className="flex items-center gap-0 py-2" role="group" aria-label="Transaction progress">
+      {steps.map((state, i) => (
+        <div key={i} className="flex items-center" style={i < 2 ? { flex: "1 1 0%" } : undefined}>
+          <div className="flex flex-col items-center gap-1">
+            <StepDot state={state} />
+            <span
+              className={`text-[10px] uppercase tracking-[0.15em] whitespace-nowrap ${
+                state === "error"
+                  ? "text-rose-200"
+                  : state === "done" || state === "active"
+                    ? state === "active"
+                      ? "text-white"
+                      : "text-emerald-200"
+                    : "text-slate-500"
+              }`}
+            >
+              {STEP_LABELS[i]}
+            </span>
+          </div>
+          {i < 2 && (
+            <div
+              className={`h-px flex-1 min-w-3 ${
+                state === "done" ? "bg-emerald-400/50" : "bg-slate-700"
+              }`}
+            />
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
+
 export function TradeSubmission({
   ctaLabel,
   submitBlockedReason,
@@ -68,16 +174,7 @@ export function TradeSubmission({
   const txHashIsHex = Boolean(normalizedTxHash);
   const txHashDisplay = normalizedTxHash ?? (typeof txHash === "string" ? txHash.trim() : "");
 
-  const txStatusLabel =
-    txLoading
-      ? "Committing..."
-      : txStatus === "failed"
-        ? "Commit failed"
-        : txConfirmed || txStatus === "confirmed"
-          ? "Committed"
-          : txStatus === "pending" || relayerJobId
-            ? "Confirming..."
-            : null;
+  const stepStates = getStepStates(txLoading, relayerJobId, txHashIsHex, txConfirmed, txStatus);
 
   return (
     <div className="mt-4 flex flex-col gap-2">
@@ -127,19 +224,10 @@ export function TradeSubmission({
           Switch to {chainName} (chain {expectedChainId}) to trade.
         </p>
       )}
-      {txStatusLabel && (
-        <p
-          className={`text-[11px] uppercase tracking-[0.2em] ${
-            txStatus === "failed" ? "text-rose-200" : "text-emerald-200"
-          }`}
-        >
-          {txStatusLabel}{" "}
-          {relayerJobId && !txHashIsHex ? `(job ${relayerJobId})` : null}
-        </p>
-      )}
+      {stepStates && <ProgressSteps steps={stepStates} />}
       {relayerJobId && !txHashIsHex && (
         <p className="text-[11px] uppercase tracking-[0.2em] text-slate-300">
-          Waiting for the relayer to return the commit transaction hash...
+          Waiting for the relayer to return the commit transaction hash. If this takes too long, retry once.
         </p>
       )}
       {txHashIsHex && txHash && (
