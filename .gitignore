@@ -936,5 +936,6 @@ scripts/generated/
 contracts/cache/
 
 # Claude Code worktrees (temporary isolated git worktrees used during dev sessions)
+.worktrees/
 .claude/worktrees/
 .aider*
