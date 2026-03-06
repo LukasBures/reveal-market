@@ -1806,9 +1806,18 @@ async def trade_commit(
         quote = _sign_quote_for_commit(quote)
         db_quote.payload = quote.model_dump(mode="json")
         await session.flush()
+    if not quote.wallet_address:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="wallet_required")
+    _verify_commit_signature(quote.wallet_address, quote, wallet_signature)
     outcome_id = int(cast(int, quote.outcome_id))
-    if settings.relayer_escrow_address and escrow_balance is not None and int(escrow_balance) < int(quote.stake_wei):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="insufficient_escrow_balance")
+    if settings.relayer_escrow_address:
+        if escrow_balance is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="escrow_balance_unavailable",
+            )
+        if int(escrow_balance) < int(quote.stake_wei):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="insufficient_escrow_balance")
     market_record = await repository_async.get_market_by_event_id(session, quote.market_id or "")
     if market_record and (
         market_record.status in {models.MarketStatusEnum.SETTLED.value, models.MarketStatusEnum.CANCELLED.value}
@@ -1867,9 +1876,6 @@ async def trade_commit(
     ticket_id = reserved_ticket_id
     salt_int = secrets.randbelow(FIELD_MODULUS)
     salt_hex = "0x" + salt_int.to_bytes(32, "big").hex()
-    if not quote.wallet_address:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="wallet_required")
-    _verify_commit_signature(quote.wallet_address, quote, wallet_signature)
     user_address = Web3.to_checksum_address(str(quote.wallet_address))
     rake_bps = onchain_rake_bps
     if rake_bps is None and market_record and market_record.rake_bps is not None:
@@ -1890,10 +1896,11 @@ async def trade_commit(
     expiry = int(time.time()) + int(settings.commit_nonce_ttl_seconds)
     await _record_commit_nonce(nonce)
     auth_digest = Web3.solidity_keccak(
-        ["address", "uint256", "bytes32", "address", "uint256", "uint256", "uint256", "uint256"],
+        ["address", "uint256", "uint256", "bytes32", "address", "uint256", "uint256", "uint256", "uint256"],
         [
             Web3.to_checksum_address(market_address),
             int(market_onchain_id or 0),
+            ticket_id,
             bytes.fromhex(_strip_hex(commitment)),
             user_address,
             nonce,
