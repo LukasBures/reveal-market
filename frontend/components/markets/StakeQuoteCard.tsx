@@ -253,6 +253,15 @@ export function StakeQuoteCard({
     return cleaned || "Trade failed";
   }, []);
 
+  // ── Effect: sync selectedOutcome when initialOutcomeId changes (e.g. from URL param after hydration)
+  const prevInitialOutcomeIdRef = useRef(initialOutcomeId);
+  useEffect(() => {
+    if (prevInitialOutcomeIdRef.current !== initialOutcomeId) {
+      prevInitialOutcomeIdRef.current = initialOutcomeId;
+      setSelectedOutcome(initialOutcomeId);
+    }
+  }, [initialOutcomeId]);
+
   // ── Effects: outcome bounds ────────────────────────────────────────────
   useEffect(() => {
     if (selectedOutcome >= outcomeOptions.length) {
