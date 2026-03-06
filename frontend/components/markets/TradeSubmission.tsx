@@ -63,8 +63,8 @@ function getStepStates(
     if (relayerJobId) return ["done", "error", "pending"];
     return ["error", "pending", "pending"];
   }
-  if (txHashIsHex || txStatus === "pending") return ["done", "done", "active"];
-  if (relayerJobId && !txHashIsHex) return ["done", "active", "pending"];
+  if (txHashIsHex) return ["done", "done", "active"];
+  if (relayerJobId) return ["done", "active", "pending"];
   if (txLoading) return ["active", "pending", "pending"];
   return null; // no activity — hide indicator
 }
@@ -244,7 +244,7 @@ export function TradeSubmission({
       {stepStates && !txConfirmed && <ProgressSteps steps={stepStates} />}
       {relayerJobId && !txHashIsHex && (
         <p className="text-[11px] uppercase tracking-[0.2em] text-slate-300">
-          Waiting for the relayer to return the commit transaction hash. If this takes too long, retry once.
+          Waiting for the relayer to return the commit transaction hash.
         </p>
       )}
       {txHashIsHex && txHash && (
