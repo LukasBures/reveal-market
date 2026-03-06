@@ -46,7 +46,7 @@ describe("QuoteDisplay", () => {
   it("renders 'to win' value", () => {
     render(<QuoteDisplay {...defaultProps} />);
     expect(screen.getByText("To win")).toBeInTheDocument();
-    expect(screen.getByText("0.154 ZEN")).toBeInTheDocument();
+    expect(screen.getByText("0.1540 ZEN")).toBeInTheDocument();
   });
 
   it("shows shortened quote ID", () => {
@@ -63,12 +63,12 @@ describe("QuoteDisplay", () => {
 
   it("shows user/market caps when present", () => {
     render(<QuoteDisplay {...defaultProps} />);
-    // user cap: remaining_user_stake_zen (0.9) + stake_zen (0.1) = 1.0, min(1.0, max=1.0) = 1.000 ZEN
-    // market cap: remaining_market_stake_zen (4.5) + stake_zen (0.1) = 4.6, min(4.6, max=5.0) = 4.600 ZEN
+    // user cap: remaining_user_stake_zen (0.9) + stake_zen (0.1) = 1.0, min(1.0, max=1.0) = 1.0000 ZEN
+    // market cap: remaining_market_stake_zen (4.5) + stake_zen (0.1) = 4.6, min(4.6, max=5.0) = 4.6000 ZEN
     expect(screen.getByText(/caps/i)).toBeInTheDocument();
     expect(screen.getByText(/user:/i)).toBeInTheDocument();
-    expect(screen.getByText(/1\.000 ZEN/)).toBeInTheDocument();
-    expect(screen.getByText(/4\.600 ZEN/)).toBeInTheDocument();
+    expect(screen.getByText(/1\.0000 ZEN/)).toBeInTheDocument();
+    expect(screen.getByText(/4\.6000 ZEN/)).toBeInTheDocument();
   });
 
   it("handles null quote gracefully", () => {
@@ -125,14 +125,14 @@ describe("QuoteDisplay", () => {
       />,
     );
     expect(screen.getByText("To win")).toBeInTheDocument();
-    expect(screen.getByText("0.000 ZEN")).toBeInTheDocument();
+    expect(screen.getByText("0.0000 ZEN")).toBeInTheDocument();
     expect(screen.getByText("q-zero")).toBeInTheDocument();
   });
 
   it("shows stake and win summary line when quote is present", () => {
     render(<QuoteDisplay {...defaultProps} />);
-    expect(screen.getByText(/stake 0\.100 zen/i)).toBeInTheDocument();
-    expect(screen.getByText(/win 0\.154 zen/i)).toBeInTheDocument();
+    expect(screen.getByText(/stake 0\.1000 zen/i)).toBeInTheDocument();
+    expect(screen.getByText(/win 0\.1540 zen/i)).toBeInTheDocument();
   });
 
   it("uses 'preview' fallback when shortQuoteId is null but quote is present", () => {
