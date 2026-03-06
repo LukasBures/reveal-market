@@ -5,7 +5,6 @@ import {
   fetchPricingQuoteWithMeta,
   FX_DEFAULT_PATH,
   type PricingQuote,
-  fetchPricingPreview,
   submitTrade,
   type TradeCommitResponse,
 } from "@/lib/pricing-client";
@@ -133,15 +132,6 @@ export function StakeQuoteCard({
 
   // ── Derived values ─────────────────────────────────────────────────────
   const outcomeOptions = useMemo(() => (outcomes.length ? outcomes : ["Yes", "No"]), [outcomes]);
-  const normalizedPrices = useMemo(() => (Array.isArray(outcomePrices) ? outcomePrices : []), [outcomePrices]);
-  const priceForOutcome = useCallback(
-    (index: number): number | null => {
-      const value = normalizedPrices[index];
-      if (Number.isFinite(value)) return value;
-      return null;
-    },
-    [normalizedPrices],
-  );
   const outcomeLabel =
     outcomeOptions[selectedOutcome] ??
     (selectedOutcome === 0 ? "Yes" : selectedOutcome === 1 ? "No" : `Outcome ${selectedOutcome + 1}`);
@@ -191,19 +181,11 @@ export function StakeQuoteCard({
 
   // ── CTA derivations ────────────────────────────────────────────────────
   const toWinZen = useMemo(() => {
-    const outcomePrice = priceForOutcome(selectedOutcome);
-    if (Number.isFinite(stakeZen) && outcomePrice && outcomePrice > 0) {
-      return stakeZen / outcomePrice;
-    }
-    if (!quote) return null;
-    if (quote.payout_zen !== null && quote.payout_zen !== undefined && Number.isFinite(Number(quote.payout_zen))) {
+    if (quote?.payout_zen !== null && quote?.payout_zen !== undefined && Number.isFinite(Number(quote.payout_zen))) {
       return Number(quote.payout_zen);
     }
-    if (Number.isFinite(quote.stake_zen)) {
-      return Number(quote.stake_zen);
-    }
     return null;
-  }, [quote, priceForOutcome, selectedOutcome, stakeZen]);
+  }, [quote]);
 
   const stakeDisplay = Number.isFinite(stakeZen) && stakeZen > 0 ? `${stakeZen.toFixed(2)} ZEN` : null;
   const ctaLabel = txLoading
@@ -230,6 +212,8 @@ export function StakeQuoteCard({
     (!address ? "Connect wallet" : null) ??
     (!marketId ? "Market unavailable" : null) ??
     (chainMismatch ? `Switch to ${defaultChain.name}` : null) ??
+    (!quote?.quote_id ? "Waiting for quote..." : null) ??
+    (quoteExpired ? "Quote expired. Refreshing..." : null) ??
     (capExhausted ? "Stake cap reached" : null) ??
     (stakeOutOfRange ? STAKE_RANGE_ERROR : null) ??
     (fxUnavailable ? "FX unavailable" : null) ??
@@ -241,6 +225,9 @@ export function StakeQuoteCard({
     fxUnavailable ||
     !marketId ||
     !address ||
+    !quote?.quote_id ||
+    quoteExpired ||
+    quoteRefreshing ||
     stakeOutOfRange ||
     tradingDisabled ||
     capExhausted ||
@@ -248,6 +235,21 @@ export function StakeQuoteCard({
     escrowInsufficient ||
     txLoading ||
     txPending;
+
+  const sanitizeTradeErrorMessage = useCallback((err: unknown): string => {
+    const raw = err instanceof Error ? err.message : String(err);
+    const [withoutVersion] = raw.split("Version:");
+    const cleaned = withoutVersion.replace(/^Details:\s*/i, "").trim();
+    const normalized = cleaned.toLowerCase();
+    if (
+      normalized.includes("user rejected") ||
+      normalized.includes("rejected the request") ||
+      normalized.includes("user denied")
+    ) {
+      return "User rejected the request.";
+    }
+    return cleaned || "Trade failed";
+  }, []);
 
   // ── Effects: outcome bounds ────────────────────────────────────────────
   useEffect(() => {
@@ -423,7 +425,7 @@ export function StakeQuoteCard({
         setQuoteRefreshing(true);
       }
       try {
-        const payload = await fetchPricingPreview(cappedStake, {
+        const payload = await fetchPricingQuoteWithMeta(cappedStake, {
           marketId,
           walletAddress: address,
           marketAddress: normalizedMarketAddress,
@@ -624,7 +626,7 @@ export function StakeQuoteCard({
         setTxConfirmed(initialStatus === "confirmed");
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Trade failed";
+      const message = sanitizeTradeErrorMessage(err);
       const normalized = message.toLowerCase();
       if (normalized.includes("expired")) {
         setTxError("Quote expired. Refreshing...");
@@ -652,6 +654,7 @@ export function StakeQuoteCard({
     quote,
     quoteExpired,
     selectedOutcome,
+    sanitizeTradeErrorMessage,
     signMessage,
     stakeOutOfRange,
     stakeZen,
