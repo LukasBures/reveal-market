@@ -1,3 +1,4 @@
 generated/
 *.txt
 *.md
+!e2e/DEPLOYMENT_GUIDE.md

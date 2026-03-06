@@ -1090,7 +1090,6 @@ def create_app() -> FastAPI:
             return
         connection_id = f"conn-{uuid4().hex}"
         client_id = websocket.client.host if websocket.client else "unknown"
-        _rate_limit(client_id)
         assets: list[str] = []
         assets_supplied = bool(assets_ids)
         if assets_ids:
@@ -1123,6 +1122,7 @@ def create_app() -> FastAPI:
         symbols_acquired = False
         pubsub = None
         try:
+            _rate_limit(client_id)
             _acquire_connection(client_id, access_token)
             connection_acquired = True
             if assets:
@@ -1133,6 +1133,18 @@ def create_app() -> FastAPI:
                 symbols_acquired = True
             pubsub = await state.subscribe(market_id)
             await websocket.accept()
+        except HTTPException:
+            if pubsub:
+                with suppress(Exception):
+                    await pubsub.close()
+            if symbols_acquired:
+                state.release_rtds_symbols(symbols_list)
+            if connection_acquired:
+                _release_connection(client_id, access_token)
+            if assets_acquired:
+                state.release_assets(assets_for_release)
+            await websocket.close(code=status.WS_1013_TRY_AGAIN_LATER)
+            return
         except Exception:
             if pubsub:
                 with suppress(Exception):
@@ -1143,6 +1155,8 @@ def create_app() -> FastAPI:
                 _release_connection(client_id, access_token)
             if assets_acquired:
                 state.release_assets(assets_for_release)
+            with suppress(Exception):
+                await websocket.close(code=status.WS_1013_TRY_AGAIN_LATER)
             raise
         logger.info(
             "ws stream connection accepted",

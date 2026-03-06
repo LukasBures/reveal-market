@@ -139,7 +139,7 @@ const nextConfig = (phase) => {
     { key: 'X-Content-Type-Options', value: 'nosniff' },
     { key: 'Referrer-Policy', value: 'no-referrer' },
     { key: 'Permissions-Policy', value: 'geolocation=(), camera=(), microphone=()' },
-    { key: 'Cross-Origin-Resource-Policy', value: 'same-site' },
+    { key: 'Cross-Origin-Resource-Policy', value: 'same-origin' },
     { key: 'Cross-Origin-Opener-Policy', value: 'same-origin-allow-popups' },
     { key: 'X-DNS-Prefetch-Control', value: 'off' },
     { key: 'Content-Security-Policy', value: csp },

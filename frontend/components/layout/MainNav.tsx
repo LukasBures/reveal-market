@@ -87,6 +87,7 @@ export function MainNav() {
                 fill
                 sizes="(min-width: 640px) 200px, 160px"
                 priority
+                unoptimized
                 className="select-none object-contain"
               />
             </div>
@@ -104,6 +105,7 @@ export function MainNav() {
                 fill
                 sizes="(min-width: 640px) 200px, 160px"
                 priority
+                unoptimized
                 className="select-none object-contain"
               />
             </div>
