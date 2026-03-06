@@ -1786,7 +1786,8 @@ async def trade_commit(
         session,
         quote.market_id or "",
         quote.market_address,
-        allow_create=settings.public_market_auto_create_enabled,
+        # Commit is an explicit user action; allow lazy deployment here even when quote/preview had no address.
+        allow_create=True,
     )
     if not market_address:
         raise HTTPException(
