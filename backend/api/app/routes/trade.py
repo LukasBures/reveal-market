@@ -15,7 +15,7 @@ from decimal import ROUND_DOWN, Decimal
 from typing import Any, cast
 
 from eth_account import Account
-from eth_account.messages import encode_defunct
+from eth_account.messages import encode_defunct, encode_typed_data
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from shared import cache_async as shared_cache
 from shared import models
@@ -343,8 +343,9 @@ def _sign_quote_for_commit(quote: schemas.PricingQuotePayload) -> schemas.Pricin
     if not signer_key:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="pricing_signer_unavailable")
     signer_account = load_account(str(signer_key))
-    digest = pricing_routes.build_quote_digest(
+    eip712_msg = pricing_routes.build_eip712_quote_message(
         settings.pricing_chain_id,
+        settings.pricing_verifying_contract,
         quote.market_address,
         quote.wallet_address,
         int(quote.outcome_id),
@@ -353,7 +354,7 @@ def _sign_quote_for_commit(quote: schemas.PricingQuotePayload) -> schemas.Pricin
         int(expiry_ts),
         quote.quote_id,
     )
-    signed = Account.sign_message(encode_defunct(hexstr=digest.hex()), signer_account.key)
+    signed = Account.sign_message(encode_typed_data(full_message=eip712_msg), signer_account.key)
     quote.signature = signed.signature.hex()
     quote.signer = signer_account.address
     quote.expiry_ts = int(expiry_ts)
