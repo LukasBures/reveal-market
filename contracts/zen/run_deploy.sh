@@ -126,11 +126,39 @@ done
 echo
 
 export FOUNDRY_SIG_PROVIDER=none
-forge "${FOUNDRY_ARGS[@]}"
+FORGE_OUTPUT="$(forge "${FOUNDRY_ARGS[@]}" 2>&1)"
+FORGE_EXIT=$?
+echo "${FORGE_OUTPUT}"
+if [[ $FORGE_EXIT -ne 0 ]]; then
+  exit $FORGE_EXIT
+fi
 
 # Point to the latest broadcast artifact for downstream consumption.
 BROADCAST_DIR="${ROOT_DIR}/broadcast/Deploy.s.sol"
 if [[ -n "${CHAIN_ID:-}" && -f "${BROADCAST_DIR}/${CHAIN_ID}/run-latest.json" ]]; then
   echo ""
   echo "Broadcast artifact: ${BROADCAST_DIR}/${CHAIN_ID}/run-latest.json"
+fi
+
+# Print GitHub Variables summary for easy copy-paste.
+_extract_addr() {
+  echo "${FORGE_OUTPUT}" | grep -m1 "^${1}:" | awk '{print $NF}'
+}
+FACTORY_ADDR="$(_extract_addr "MarketFactory")"
+POOL_ADDR="$(_extract_addr "ProtocolPool")"
+ESCROW_ADDR="$(_extract_addr "RelayerEscrow")"
+IMPL_ADDR="$(echo "${FORGE_OUTPUT}" | grep -m1 "^RevealMarket implementation:" | awk '{print $NF}')"
+VERIFIER_ADDR="$(_extract_addr "Verifier")"
+
+if [[ -n "${FACTORY_ADDR}" ]]; then
+  echo ""
+  echo "=========================================="
+  echo " GitHub Variables (Settings → Variables → Actions)"
+  echo "=========================================="
+  echo "RM_FACTORY_ADDRESS=${FACTORY_ADDR}"
+  echo "RM_PROTOCOL_POOL_ADDRESS=${POOL_ADDR}"
+  echo "RM_RELAYER_ESCROW_ADDRESS=${ESCROW_ADDR}"
+  echo "RM_MARKET_IMPLEMENTATION_ADDRESS=${IMPL_ADDR}"
+  echo "RM_VERIFIER_ADDRESS=${VERIFIER_ADDR}"
+  echo "=========================================="
 fi

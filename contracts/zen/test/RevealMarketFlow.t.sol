@@ -118,8 +118,6 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(authKey, digest);
         bytes memory signature = abi.encodePacked(r, s, v);
 
-        vm.prank(user);
-        relayerEscrow.approveCommitAuthorization(address(market), auth);
         vm.prank(relayer);
         relayerEscrow.commitOnBehalf(user, address(market), auth, signature);
 
@@ -220,8 +218,6 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(authKey, digest);
         bytes memory signature = abi.encodePacked(r, s, v);
 
-        vm.prank(user);
-        relayerEscrow.approveCommitAuthorization(address(market), auth);
         vm.prank(relayer);
         relayerEscrow.commitOnBehalf(user, address(market), auth, signature);
 
@@ -314,8 +310,6 @@ contract RevealMarketFlowTest is Test, PoseidonTestUtils {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(authKey, digest);
         bytes memory signature = abi.encodePacked(r, s, v);
 
-        vm.prank(user);
-        relayerEscrow.approveCommitAuthorization(address(market), auth);
         vm.prank(relayer);
         relayerEscrow.commitOnBehalf(user, address(market), auth, signature);
 

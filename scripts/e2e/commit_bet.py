@@ -117,20 +117,7 @@ def place_bet(
         ticket_size,  # ticketValue (uint256)
     )
 
-    # Step 1: User pre-approves on the RelayerEscrow
-    escrow = contract(web3, RELAYER_ESCROW, ESCROW_ABI)
-    log.info("Approving commit authorization on escrow...")
-    send_tx(
-        web3,
-        TEST_ACCOUNT_KEY,
-        escrow.functions.approveCommitAuthorization(
-            Web3.to_checksum_address(market_address),
-            auth_tuple,
-        ),
-        label=f"approve-commit-{ticket_id}",
-    )
-
-    # Step 2: Escrow owner calls commitOnBehalf directly (bypassing relayer HTTP API)
+    # Escrow owner calls commitOnBehalf directly (bypassing relayer HTTP API)
     # Note: escrow owner is the deployer, not the relayer address
     from utils import DEPLOYER_KEY
 

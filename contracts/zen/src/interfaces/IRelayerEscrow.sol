@@ -1,18 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.33;
 
-import {IRevealMarket} from "./IRevealMarket.sol";
-
 interface IRelayerEscrow {
-    function approveCommitAuthorization(address market, IRevealMarket.CommitAuth calldata auth) external;
-
-    function revokeCommitAuthorization(address market, IRevealMarket.CommitAuth calldata auth) external;
-
-    function commitAuthorizationHash(address market, IRevealMarket.CommitAuth calldata auth)
-        external
-        view
-        returns (bytes32);
-
     function creditFromMarket(address user, uint256 amount) external;
 
     function creditMigrated(address user, uint256 amount) external;

@@ -91,8 +91,6 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
         relayerEscrow.deposit(ticketSize);
 
         bytes memory badSig = _signAuth(auth, authKey);
-        vm.prank(user);
-        relayerEscrow.approveCommitAuthorization(address(market), auth);
         vm.expectRevert(RevealMarket.InvalidSignature.selector);
         vm.prank(relayerOwner);
         relayerEscrow.commitOnBehalf(user, address(market), auth, badSig);
@@ -245,8 +243,6 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
         IRevealMarket.CommitAuth memory auth,
         bytes memory sig
     ) internal {
-        vm.prank(commitUser);
-        escrow.approveCommitAuthorization(marketAddr, auth);
         vm.prank(relayerCaller);
         escrow.commitOnBehalf(commitUser, marketAddr, auth, sig);
     }
@@ -514,8 +510,6 @@ contract MarketAdminTest is Test, PoseidonTestUtils {
         factory.setMarketCommitsPaused(address(market), true);
 
         bytes memory sig = _signAuth(auth, authKey);
-        vm.prank(user);
-        relayerEscrow.approveCommitAuthorization(address(market), auth);
         vm.expectRevert(RevealMarket.CommitsPaused.selector);
         vm.prank(relayerOwner);
         relayerEscrow.commitOnBehalf(user, address(market), auth, sig);

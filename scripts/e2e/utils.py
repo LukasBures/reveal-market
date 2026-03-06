@@ -36,10 +36,10 @@ EXPLORER_URL = os.getenv("NEXT_PUBLIC_BLOCK_EXPLORER_URL", "https://horizen-test
 
 # Contract addresses
 ZEN_TOKEN = os.getenv("ZEN_TOKEN_ADDRESS", "0x070040A826B586b58569750ED43cb5979b171e8d")
-FACTORY = os.getenv("RM_FACTORY_ADDRESS", "0x5163c0CB206e7b69fFB15D9E9b52f24B4B189F77")
-PROTOCOL_POOL = os.getenv("RM_PROTOCOL_POOL_ADDRESS", "0xcBa9935a4E529883e5577ab525Bc4B7B4066f84C")
-RELAYER_ESCROW = os.getenv("RM_RELAYER_ESCROW_ADDRESS", "0x494464c34AaC52E48461D5926C8CeE608f4e3ad8")
-VERIFIER = os.getenv("RM_VERIFIER_ADDRESS", "0x590730be9D051994dCc8A91B42E92D5770e7B8f6")
+FACTORY = os.getenv("RM_FACTORY_ADDRESS", "0x07e13179E5231B3823f26ECBA2750834cBAfC9d3")
+PROTOCOL_POOL = os.getenv("RM_PROTOCOL_POOL_ADDRESS", "0x314E44e894DeFDDb4c7337F7031901Ef7Bbab2E2")
+RELAYER_ESCROW = os.getenv("RM_RELAYER_ESCROW_ADDRESS", "0x5b0fA47675D07b018E2151d49d4aECc71b47E47D")
+VERIFIER = os.getenv("RM_VERIFIER_ADDRESS", "0xC319CC9576dAc33440ab2b7013D067CbD88aBd07")
 ORACLE_ADDRESS = os.getenv("RM_ORACLE_ADDRESS", "0x0F3d0f9274fA6AAEEbc493EdD44d2979BD75F369")
 AUTH_SIGNER_ADDRESS = os.getenv("RM_AUTHORIZATION_SIGNER", "0x38C57472479fe7bB4C87e7A4BB23c7AAf10595Fd")
 CIRCUIT_HASH = os.getenv("PROVER_CIRCUIT_HASH", "0x181e1866c82c6c72f18cd61723f1f61cd0a02224250b988af5a3f32863f2b157")
@@ -353,27 +353,6 @@ ESCROW_ABI: list[dict[str, Any]] = [
     {
         "inputs": [{"name": "amount", "type": "uint256"}],
         "name": "withdraw",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function",
-    },
-    {
-        "inputs": [
-            {"name": "market", "type": "address"},
-            {
-                "name": "auth",
-                "type": "tuple",
-                "components": [
-                    {"name": "commitment", "type": "bytes32"},
-                    {"name": "ticketId", "type": "uint256"},
-                    {"name": "user", "type": "address"},
-                    {"name": "nonce", "type": "uint256"},
-                    {"name": "expiry", "type": "uint256"},
-                    {"name": "ticketValue", "type": "uint256"},
-                ],
-            },
-        ],
-        "name": "approveCommitAuthorization",
         "outputs": [],
         "stateMutability": "nonpayable",
         "type": "function",

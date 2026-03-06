@@ -16,7 +16,6 @@ contract RelayerEscrow is Ownable2Step, ReentrancyGuard {
     IERC20 public immutable COLLATERAL_TOKEN;
     mapping(address => uint256) public balances;
     mapping(address => bool) public allowedMarket;
-    mapping(address => mapping(bytes32 => bool)) public approvedCommitAuthorizations;
     uint256 public accountedCollateral;
 
     address public marketFactory;
@@ -29,12 +28,6 @@ contract RelayerEscrow is Ownable2Step, ReentrancyGuard {
     event MarketFactoryUpdated(address indexed factory);
     event CommitsPausedSet(bool paused);
     event CommitForwarded(address indexed market, bytes32 commitment, uint256 debitedFromUser);
-    event CommitAuthorizationApproved(
-        address indexed user, address indexed market, uint256 indexed nonce, bytes32 authHash
-    );
-    event CommitAuthorizationRevoked(
-        address indexed user, address indexed market, uint256 indexed nonce, bytes32 authHash
-    );
     event CreditReceived(address indexed market, address indexed user, uint256 amount);
     event MigratedCreditReceived(address indexed user, uint256 amount);
     event ExcessCollateralRecovered(address indexed recipient, uint256 amount);
@@ -58,7 +51,6 @@ contract RelayerEscrow is Ownable2Step, ReentrancyGuard {
     error InsufficientCollateralBacking();
     error InvalidAddress();
     error InvalidMarket();
-    error CommitAuthorizationMissing();
 
     constructor(address owner_, IERC20 collateralToken_) Ownable(owner_) {
         COLLATERAL_TOKEN = collateralToken_;
@@ -142,10 +134,6 @@ contract RelayerEscrow is Ownable2Step, ReentrancyGuard {
         if (auth.user != user || user == address(0)) revert UserMismatch();
         uint256 ticket = IRevealMarket(market).ticketSize();
         if (balances[user] < ticket) revert InsufficientBalance();
-        bytes32 authHash = _commitAuthorizationHash(market, auth);
-        if (!approvedCommitAuthorizations[user][authHash]) revert CommitAuthorizationMissing();
-        approvedCommitAuthorizations[user][authHash] = false;
-
         uint256 escrowBalanceBefore = COLLATERAL_TOKEN.balanceOf(address(this));
         uint256 marketBalanceBefore = COLLATERAL_TOKEN.balanceOf(market);
         balances[user] -= ticket;
@@ -154,32 +142,6 @@ contract RelayerEscrow is Ownable2Step, ReentrancyGuard {
         IRevealMarket(market).commitWithAuthorization(auth, signature);
 
         emit CommitForwarded(market, auth.commitment, ticket);
-    }
-
-    /// @notice User-side authorization gate for relayed commits; one approval can be consumed exactly once.
-    function approveCommitAuthorization(address market, IRevealMarket.CommitAuth calldata auth) external {
-        if (market == address(0)) revert InvalidAddress();
-        if (auth.user != msg.sender || auth.user == address(0)) revert UserMismatch();
-        bytes32 authHash = _commitAuthorizationHash(market, auth);
-        approvedCommitAuthorizations[msg.sender][authHash] = true;
-        emit CommitAuthorizationApproved(msg.sender, market, auth.nonce, authHash);
-    }
-
-    /// @notice Revoke a previously approved commit authorization before the relayer consumes it.
-    function revokeCommitAuthorization(address market, IRevealMarket.CommitAuth calldata auth) external {
-        if (auth.user != msg.sender) revert UserMismatch();
-        bytes32 authHash = _commitAuthorizationHash(market, auth);
-        approvedCommitAuthorizations[msg.sender][authHash] = false;
-        emit CommitAuthorizationRevoked(msg.sender, market, auth.nonce, authHash);
-    }
-
-    /// @notice View helper for clients to precompute commit-authorization hashes.
-    function commitAuthorizationHash(address market, IRevealMarket.CommitAuth calldata auth)
-        external
-        view
-        returns (bytes32)
-    {
-        return _commitAuthorizationHash(market, auth);
     }
 
     /// @notice Emergency pause for relayer commits.
@@ -251,36 +213,6 @@ contract RelayerEscrow is Ownable2Step, ReentrancyGuard {
             return false;
         }
         return true;
-    }
-
-    function _commitAuthorizationHash(address market, IRevealMarket.CommitAuth calldata auth)
-        internal
-        view
-        returns (bytes32)
-    {
-        bytes32 commitment = auth.commitment;
-        uint256 ticketId = auth.ticketId;
-        address user = auth.user;
-        uint256 nonce = auth.nonce;
-        uint256 expiry = auth.expiry;
-        uint256 ticketValue = auth.ticketValue;
-        uint256 chainId = block.chainid;
-        address self = address(this);
-        bytes32 digest;
-        assembly {
-            let ptr := mload(0x40)
-            mstore(ptr, self)
-            mstore(add(ptr, 0x20), market)
-            mstore(add(ptr, 0x40), commitment)
-            mstore(add(ptr, 0x60), ticketId)
-            mstore(add(ptr, 0x80), user)
-            mstore(add(ptr, 0xa0), nonce)
-            mstore(add(ptr, 0xc0), expiry)
-            mstore(add(ptr, 0xe0), ticketValue)
-            mstore(add(ptr, 0x100), chainId)
-            digest := keccak256(ptr, 0x120)
-        }
-        return digest;
     }
 
     function _safeTransferExact(address recipient, uint256 amount) internal {

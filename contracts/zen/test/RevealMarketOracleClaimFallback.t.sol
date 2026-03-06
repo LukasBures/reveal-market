@@ -123,8 +123,6 @@ contract RevealMarketOracleClaimFallbackTest is Test, PoseidonTestUtils {
             expiry: block.timestamp + 12 hours,
             ticketValue: ticketSize
         });
-        vm.prank(user);
-        relayerEscrow.approveCommitAuthorization(address(market), auth);
         bytes memory signature = _signAuth(auth);
         vm.prank(relayer);
         relayerEscrow.commitOnBehalf(user, address(market), auth, signature);

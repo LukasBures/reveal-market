@@ -237,8 +237,6 @@ contract RevealMarketRefundsTest is Test, PoseidonTestUtils {
             ticketValue: ticketSize
         });
         bytes memory sig = _signAuth(auth, authKey);
-        vm.prank(user);
-        relayerEscrow.approveCommitAuthorization(address(market), auth);
         vm.prank(relayerOwner);
         relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
     }

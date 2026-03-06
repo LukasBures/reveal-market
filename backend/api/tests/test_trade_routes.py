@@ -515,6 +515,7 @@ def test_positions_marks_claimed(client, db_session):
             leaf=commitment_hex.lower(),
             leaf_index=0,
             claimed_at=datetime.now(tz=UTC),
+            tx_hash="0x" + "aa" * 32,
         )
     )
     db_session.add(
@@ -558,6 +559,7 @@ def test_positions_zeroes_payout_for_losing_outcome(client, db_session):
             ticket_hash=commitment_hex.lower(),
             leaf=commitment_hex.lower(),
             leaf_index=0,
+            tx_hash="0x" + "bb" * 32,
         )
     )
     db_session.add(

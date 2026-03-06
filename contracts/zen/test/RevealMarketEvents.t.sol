@@ -255,8 +255,6 @@ contract RevealMarketEventsTest is Test, PoseidonTestUtils {
         vm.prank(user);
         relayerEscrow.deposit(ticketSize);
 
-        vm.prank(user);
-        relayerEscrow.approveCommitAuthorization(address(market), auth);
         vm.prank(relayerOwner);
         relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
     }

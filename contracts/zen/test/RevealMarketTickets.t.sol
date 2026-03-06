@@ -177,8 +177,6 @@ contract RevealMarketTicketsTest is Test, PoseidonTestUtils {
 
         uint256 expectedRake = (ticketSize * rakeBps) / 10_000;
         uint256 net = ticketSize - expectedRake;
-        vm.prank(user);
-        relayerEscrow.approveCommitAuthorization(address(market), auth);
         vm.expectEmit(true, false, false, true, address(market));
         emit RevealMarket.Committed(0, leaf, net);
         vm.prank(relayer);
@@ -199,8 +197,6 @@ contract RevealMarketTicketsTest is Test, PoseidonTestUtils {
         });
         bytes memory sig = _signAuth(leaf, auth.ticketId, auth.nonce, auth.expiry);
 
-        vm.prank(user);
-        relayerEscrow.approveCommitAuthorization(address(market), auth);
         vm.expectRevert(RevealMarket.InvalidPayment.selector);
         vm.prank(relayer);
         relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
@@ -218,8 +214,6 @@ contract RevealMarketTicketsTest is Test, PoseidonTestUtils {
         });
         bytes memory sig = _signAuth(leaf, auth.ticketId, auth.nonce, auth.expiry);
 
-        vm.prank(user);
-        relayerEscrow.approveCommitAuthorization(address(market), auth);
         vm.expectRevert(RevealMarket.TicketIndexMismatch.selector);
         vm.prank(relayer);
         relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
@@ -247,8 +241,6 @@ contract RevealMarketTicketsTest is Test, PoseidonTestUtils {
         });
         bytes memory sig = _signAuth(signedAuth, user, block.chainid, authKey);
 
-        vm.prank(user);
-        relayerEscrow.approveCommitAuthorization(address(market), auth);
         vm.expectRevert(RevealMarket.InvalidSignature.selector);
         vm.prank(relayer);
         relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
@@ -273,8 +265,6 @@ contract RevealMarketTicketsTest is Test, PoseidonTestUtils {
         bytes memory replaySig =
             _signAuth(replayAuth.commitment, replayAuth.ticketId, replayAuth.nonce, replayAuth.expiry);
 
-        vm.prank(user);
-        relayerEscrow.approveCommitAuthorization(address(market), replayAuth);
         vm.expectRevert(RevealMarket.CommitReplay.selector);
         vm.prank(relayer);
         relayerEscrow.commitOnBehalf(user, address(market), replayAuth, replaySig);
@@ -308,8 +298,6 @@ contract RevealMarketTicketsTest is Test, PoseidonTestUtils {
         IRevealMarket.CommitAuth memory auth = _buildAuth(leaf, 0, 1, pastExpiry, user);
         bytes memory sig = _signAuth(leaf, auth.ticketId, auth.nonce, auth.expiry);
 
-        vm.prank(user);
-        relayerEscrow.approveCommitAuthorization(address(market), auth);
         vm.expectRevert(RevealMarket.CommitExpired.selector);
         vm.prank(relayer);
         relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
@@ -321,8 +309,6 @@ contract RevealMarketTicketsTest is Test, PoseidonTestUtils {
         IRevealMarket.CommitAuth memory auth = _buildAuth(leaf, 0, 1, block.timestamp + 12 hours, user);
         bytes memory sig = _signAuth(leaf, auth.ticketId, auth.nonce, auth.expiry);
 
-        vm.prank(user);
-        relayerEscrow.approveCommitAuthorization(address(market), auth);
         vm.expectRevert(RevealMarket.CommitWindowClosed.selector);
         vm.prank(relayer);
         relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
@@ -337,8 +323,6 @@ contract RevealMarketTicketsTest is Test, PoseidonTestUtils {
         bytes32 overflowLeaf = _leaf(99, 0, ticketSize, ticketSize, _salt("salt"), user);
         IRevealMarket.CommitAuth memory overflowAuth =
             _buildAuth(overflowLeaf, market.nextTicketId(), 999, block.timestamp + 12 hours, user);
-        vm.prank(user);
-        relayerEscrow.approveCommitAuthorization(address(market), overflowAuth);
         vm.expectRevert(RevealMarket.MaxCommitmentsReached.selector);
         vm.prank(relayer);
         relayerEscrow.commitOnBehalf(
@@ -370,8 +354,6 @@ contract RevealMarketTicketsTest is Test, PoseidonTestUtils {
         address impostor = makeAddr("impostor");
         bytes memory sig = _signAuth(auth, impostor, block.chainid, authKey);
 
-        vm.prank(user);
-        relayerEscrow.approveCommitAuthorization(address(market), auth);
         vm.expectRevert(RevealMarket.InvalidSignature.selector);
         vm.prank(relayer);
         relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
@@ -382,8 +364,6 @@ contract RevealMarketTicketsTest is Test, PoseidonTestUtils {
         IRevealMarket.CommitAuth memory auth = _buildAuth(leaf, 0, 12, block.timestamp + 12 hours, user);
         bytes memory sig = _signAuth(auth, user, block.chainid + 1, authKey);
 
-        vm.prank(user);
-        relayerEscrow.approveCommitAuthorization(address(market), auth);
         vm.expectRevert(RevealMarket.InvalidSignature.selector);
         vm.prank(relayer);
         relayerEscrow.commitOnBehalf(user, address(market), auth, sig);
@@ -408,8 +388,6 @@ contract RevealMarketTicketsTest is Test, PoseidonTestUtils {
 
         _approveAndCommit(user, address(market), auth, sig);
 
-        vm.prank(user);
-        relayerEscrow.approveCommitAuthorization(address(market2), auth);
         vm.expectRevert(RevealMarket.InvalidSignature.selector);
         vm.prank(relayer);
         relayerEscrow.commitOnBehalf(user, address(market2), auth, sig);
@@ -421,8 +399,6 @@ contract RevealMarketTicketsTest is Test, PoseidonTestUtils {
         IRevealMarket.CommitAuth memory auth,
         bytes memory sig
     ) internal {
-        vm.prank(commitUser);
-        relayerEscrow.approveCommitAuthorization(marketAddr, auth);
         vm.prank(relayer);
         relayerEscrow.commitOnBehalf(commitUser, marketAddr, auth, sig);
     }
