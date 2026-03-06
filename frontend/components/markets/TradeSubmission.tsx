@@ -131,11 +131,28 @@ function ProgressSteps({ steps }: { steps: [StepState, StepState, StepState] }) 
             </span>
           </div>
           {i < 2 && (
-            <div
-              className={`h-px flex-1 min-w-3 ${
-                state === "done" ? "bg-emerald-400/50" : "bg-slate-700"
-              }`}
-            />
+            <div className="flex flex-1 items-center min-w-3">
+              <div
+                className={`h-px flex-1 ${
+                  state === "done" ? "bg-emerald-400/50" : "bg-slate-700"
+                }`}
+              />
+              <svg
+                viewBox="0 0 6 10"
+                className={`h-2.5 w-1.5 shrink-0 -ml-px ${
+                  state === "done" ? "text-emerald-400/50" : "text-slate-700"
+                }`}
+              >
+                <path
+                  d="M1 1l4 4-4 4"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  fill="none"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </div>
           )}
         </div>
       ))}

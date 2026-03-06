@@ -2035,6 +2035,8 @@ async def list_positions(
                 tx_hash_value = resolved_tx
         if tx_hash_value and not _is_hex_tx(tx_hash_value):
             tx_hash_value = None
+        if not tx_hash_value:
+            continue
         stake_wei = int(commitment.amount_wei)
         stake_zen = stake_wei / 1e18
         base_payout_wei = int(getattr(commitment, "payout_wei", 0) or 0)
