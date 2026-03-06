@@ -1025,7 +1025,13 @@ async def pricing_submit(
         except Exception as exc:
             PRICING_COUNTER.labels(event="submit", result="bad_signature").inc()
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid signature: {exc}") from exc
-        if recovered.lower() != signer_account.address.lower():
+        expected_signer = (quote.signer or "").lower() if quote.signer else None
+        if expected_signer:
+            signer_mismatch = recovered.lower() != expected_signer
+        else:
+            # Fallback for legacy payloads that predate signer persistence.
+            signer_mismatch = recovered.lower() != signer_account.address.lower()
+        if signer_mismatch:
             PRICING_COUNTER.labels(event="submit", result="signer_mismatch").inc()
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quote signer mismatch")
         if db_quote.stake_wei != stake_wei or db_quote.fx_scaled != zen_usd_scaled:

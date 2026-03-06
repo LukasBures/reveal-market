@@ -1696,9 +1696,7 @@ def _format_signature_decimal(value: Decimal | float | int | None, places: int =
     return format(quantized, "f")
 
 
-def _build_commit_signature_message(
-    wallet: str, quote: schemas.PricingQuotePayload, *, decimal_places: int = 4
-) -> str:
+def _build_commit_signature_message(wallet: str, quote: schemas.PricingQuotePayload, *, decimal_places: int = 4) -> str:
     wallet_lower = wallet.lower()
     quote_id = str(quote.quote_id or "")
     market_id = str(quote.market_id or "n/a")
