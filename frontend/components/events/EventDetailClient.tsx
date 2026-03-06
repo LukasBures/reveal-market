@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import type { MarketDetail, MarketSibling } from "@/lib/api-types";
 import { MarketDetailHeader } from "@/components/markets/MarketDetailHeader";
@@ -46,17 +46,6 @@ export function EventDetailClient({
       ? initialMarket.groupMarkets
       : [initialMarket],
   );
-
-  const searchParams = useSearchParams();
-  useEffect(() => {
-    if (typeof initialOutcome === "number" && Number.isFinite(initialOutcome)) return;
-    const outcomeParam = searchParams.get("outcome");
-    if (outcomeParam === null) return;
-    const parsed = Number(outcomeParam);
-    if (Number.isFinite(parsed) && parsed >= 0) {
-      setRequestedOutcome(parsed);
-    }
-  }, [searchParams, initialOutcome]);
 
   const selectionCutoff = useMemo(() => Date.now(), []);
   const isSelectableMarket = useCallback((item: MarketDetail) => {
@@ -168,6 +157,9 @@ export function EventDetailClient({
 
   return (
     <>
+      <Suspense fallback={null}>
+        <OutcomeParamReader initialOutcome={initialOutcome} onOutcome={setRequestedOutcome} />
+      </Suspense>
       <div className="bg-gradient-to-b from-slate-950 via-slate-950 to-black text-white">
         <div className="mx-auto flex max-w-7xl flex-col gap-8 px-4 py-16 pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
           <MarketDetailHeader
@@ -233,4 +225,22 @@ export function EventDetailClient({
       <JsonLd data={breadcrumbs} id="market-breadcrumbs" />
     </>
   );
+}
+
+function OutcomeParamReader({
+  initialOutcome,
+  onOutcome,
+}: {
+  initialOutcome: number | null | undefined;
+  onOutcome: (id: number) => void;
+}) {
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    if (typeof initialOutcome === "number" && Number.isFinite(initialOutcome)) return;
+    const outcomeParam = searchParams.get("outcome");
+    if (outcomeParam === null) return;
+    const parsed = Number(outcomeParam);
+    if (Number.isFinite(parsed) && parsed >= 0) onOutcome(parsed);
+  }, [searchParams, initialOutcome, onOutcome]);
+  return null;
 }
