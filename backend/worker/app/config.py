@@ -155,22 +155,9 @@ class Settings(BaseSettings):
     polymarket_only_open_markets: bool | None = Field(default=None)
     polymarket_active_filter: bool | None = Field(default=None)
     polymarket_archived_filter: bool | None = Field(default=None)
-    polymarket_end_date_min_days: int | None = Field(
-        default=-7,
-        description=(
-            "Only sync markets whose end date is at or after today+N days. "
-            "Negative values look back; e.g. -7 = 7 days ago. "
-            "Set to None (or blank env var) to disable and fetch all markets."
-        ),
-    )
-    polymarket_end_date_max_days: int | None = Field(
-        default=7,
-        description=(
-            "Only sync markets whose end date is at or before today+N days. "
-            "Positive values look forward; e.g. 7 = 7 days from now. "
-            "Set to None (or blank env var) to disable and fetch all markets."
-        ),
-    )
+    # Hardcoded: only sync markets ending within -14/+14 days of today.
+    polymarket_end_date_min_days: int = -14
+    polymarket_end_date_max_days: int = 14
     polymarket_max_retries: int = Field(default=3, ge=1)
     polymarket_retry_backoff_seconds: float = Field(default=0.2, ge=0)
     polymarket_retry_backoff_max_seconds: float = Field(default=2.0, ge=0)
@@ -566,8 +553,6 @@ class Settings(BaseSettings):
     @field_validator(
         "polymarket_active_filter",
         "polymarket_archived_filter",
-        "polymarket_end_date_min_days",
-        "polymarket_end_date_max_days",
         "settlement_gas_price_gwei",
         "settlement_max_priority_fee_gwei",
         "lock_batches_gas_price_gwei",

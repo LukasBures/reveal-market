@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { cache } from "react";
+import { cache, Suspense } from "react";
 import { EventDetailClient } from "@/components/events/EventDetailClient";
 import { JsonLd } from "@/components/seo/JsonLd";
 import { fetchFeaturedEvents, fetchMarketByEventId } from "@/lib/api";
@@ -236,15 +236,17 @@ export default async function MarketDetailPage({ params, searchParams }: MarketD
   const coverImage = resolveEventImage(market);
   return (
     <>
-      <EventDetailClient
-        initialMarket={market}
-        initialOutcome={requestedOutcome}
-        fallbackEventId={eventId}
-        canonicalEventId={canonicalEventId}
-        canonicalPath={canonicalPath}
-        coverImage={coverImage}
-        contextCopy={contextCopy}
-      />
+      <Suspense>
+        <EventDetailClient
+          initialMarket={market}
+          initialOutcome={requestedOutcome}
+          fallbackEventId={eventId}
+          canonicalEventId={canonicalEventId}
+          canonicalPath={canonicalPath}
+          coverImage={coverImage}
+          contextCopy={contextCopy}
+        />
+      </Suspense>
       <JsonLd data={structuredData} id="event-structured-data" />
       <JsonLd
         data={{

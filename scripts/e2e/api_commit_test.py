@@ -321,7 +321,7 @@ def main() -> int:
     market_id = args.market_id
     market: dict[str, Any] = {}
     if not market_id:
-        resp = api_get("/events")
+        resp = api_get("/events?status=commit")
         if not ok("Events endpoint reachable", resp.status_code == 200, f"status={resp.status_code}"):
             return 1
         events = resp.json()

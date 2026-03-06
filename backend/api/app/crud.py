@@ -294,6 +294,10 @@ def _apply_common_filters(stmt, *, status: str | None, category: str | None, ora
         )
     elif status and status.lower() not in {"any", "all"}:
         stmt = stmt.where(models.Market.status == status)
+    elif not status:
+        # Without an explicit status filter, exclude closed markets at the DB level
+        # to prevent pagination exhaustion (settled markets dominate created_at ordering).
+        stmt = stmt.where(models.Market.closed.isnot(True))
     if category:
         normalized_category = category.lower()
         stmt = stmt.where(func.lower(models.Market.category) == normalized_category)

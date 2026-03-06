@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import type { MarketDetail, MarketSibling } from "@/lib/api-types";
 import { MarketDetailHeader } from "@/components/markets/MarketDetailHeader";
 import { StakeQuoteCard } from "@/components/markets/StakeQuoteCard";
@@ -45,6 +46,17 @@ export function EventDetailClient({
       ? initialMarket.groupMarkets
       : [initialMarket],
   );
+
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    if (typeof initialOutcome === "number" && Number.isFinite(initialOutcome)) return;
+    const outcomeParam = searchParams.get("outcome");
+    if (outcomeParam === null) return;
+    const parsed = Number(outcomeParam);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      setRequestedOutcome(parsed);
+    }
+  }, [searchParams, initialOutcome]);
 
   const selectionCutoff = useMemo(() => Date.now(), []);
   const isSelectableMarket = useCallback((item: MarketDetail) => {

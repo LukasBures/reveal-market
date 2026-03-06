@@ -52,12 +52,10 @@ __all__ = ["AsyncPolymarketClient", "MarketPayload", "build_filters_from_setting
 def build_filters_from_settings(settings_obj=None) -> dict[str, Any]:
     """Translate worker settings into Gamma API query params.
 
-    Date-range filtering (``polymarket_end_date_min_days`` / ``polymarket_end_date_max_days``)
-    dramatically reduces the sync scope.  With the defaults of -7/+7 the worker only pages
-    through markets whose end date falls within a 14-day window, cutting the typical fetch
-    from ~36 000 markets (182 pages) down to a few hundred.  Markets already in the DB that
-    fall outside the window are not deleted; the closed_markets_reconcile path continues to
-    refresh those that carry user commitments.
+    Date-range filtering is hardcoded to -14/+14 days to limit sync scope.
+    Markets already in the DB that fall outside the window are not deleted;
+    the closed_markets_reconcile path continues to refresh those that carry
+    user commitments.
     """
 
     params: dict[str, Any] = {}
@@ -70,12 +68,12 @@ def build_filters_from_settings(settings_obj=None) -> dict[str, Any]:
     if archived is not None:
         params["archived"] = str(archived).lower()
     now = datetime.now(UTC)
-    end_date_min_days = getattr(settings_obj, "polymarket_end_date_min_days", None)
-    end_date_max_days = getattr(settings_obj, "polymarket_end_date_max_days", None)
-    if end_date_min_days is not None:
-        params["end_date_min"] = (now + timedelta(days=end_date_min_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    if end_date_max_days is not None:
-        params["end_date_max"] = (now + timedelta(days=end_date_max_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    params["end_date_min"] = (now + timedelta(days=settings_obj.polymarket_end_date_min_days)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    params["end_date_max"] = (now + timedelta(days=settings_obj.polymarket_end_date_max_days)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
     return params
 
 
