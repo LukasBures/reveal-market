@@ -22,7 +22,7 @@ import { fetchPositions, fetchClaimBundles } from "@/lib/api";
 import type { ClaimBundle, PositionRecord } from "@/lib/api-types";
 import { defaultChain } from "@/lib/wagmi";
 import { RELAYER_ESCROW_ADDRESS, ZEN_TOKEN_ADDRESS } from "@/lib/tokens";
-import { formatDateTime, normalizeTxHash } from "@/lib/formatters";
+import { formatDateTime, normalizeTxHash, roundDown } from "@/lib/formatters";
 import {
   computePoseidonLeaf,
   parseBigInt,
@@ -68,6 +68,8 @@ const shortenHash = (hash: string) => {
     : normalized;
 };
 const MIN_CLAIM_GAS = 5_000_000n;
+const formatZenDown = (value: number, decimals = 4): string =>
+  roundDown(value, decimals).toFixed(decimals);
 
 type PositionStatusFlowProps = {
   status: string;
@@ -730,7 +732,7 @@ export function DashboardClient() {
     escrowBalance !== null ? Number(escrowBalance) : null;
   const escrowDisplay =
     normalizedEscrow !== null && Number.isFinite(normalizedEscrow)
-      ? (normalizedEscrow / 1e18).toFixed(3)
+      ? formatZenDown(normalizedEscrow / 1e18)
       : "—";
   const escrowBalanceBigInt =
     onchainEscrowBalance !== undefined && onchainEscrowBalance !== null
@@ -913,7 +915,7 @@ export function DashboardClient() {
               <span className="text-[11px] text-slate-400">
                 Wallet:{" "}
                 {tokenBalance !== undefined && tokenBalance !== null
-                  ? `${(Number(tokenBalance) / 1e18).toFixed(3)} ZEN`
+                  ? `${formatZenDown(Number(tokenBalance) / 1e18)} ZEN`
                   : "—"}
               </span>
             </div>
@@ -983,7 +985,7 @@ export function DashboardClient() {
                 Escrow:{" "}
                 {normalizedOnchainEscrow !== null &&
                 Number.isFinite(normalizedOnchainEscrow)
-                  ? `${(normalizedOnchainEscrow / 1e18).toFixed(3)} ZEN`
+                  ? `${formatZenDown(normalizedOnchainEscrow / 1e18)} ZEN`
                   : "—"}
               </span>
             </div>
@@ -1095,7 +1097,7 @@ export function DashboardClient() {
               </p>
               <p className="mt-1 text-2xl font-semibold text-white">
                 {totalEscrowZen !== null && Number.isFinite(totalEscrowZen)
-                  ? `${totalEscrowZen.toFixed(3)} ZEN`
+                  ? `${formatZenDown(totalEscrowZen)} ZEN`
                   : "—"}
               </p>
             </div>
@@ -1104,7 +1106,7 @@ export function DashboardClient() {
                 Total staked
               </p>
               <p className="mt-1 text-2xl font-semibold text-white">
-                {totalStakeZen.toFixed(3)} ZEN
+                {formatZenDown(totalStakeZen)} ZEN
               </p>
             </div>
             <div className="rounded-xl border border-white/10 bg-white/5 p-3">
@@ -1112,7 +1114,7 @@ export function DashboardClient() {
                 Total to win
               </p>
               <p className="mt-1 text-2xl font-semibold text-white">
-                {totalToWinZen > 0 ? `${totalToWinZen.toFixed(3)} ZEN` : "—"}
+                {totalToWinZen > 0 ? `${formatZenDown(totalToWinZen)} ZEN` : "—"}
               </p>
             </div>
             <div className="rounded-xl border border-white/10 bg-white/5 p-3">
@@ -1121,7 +1123,7 @@ export function DashboardClient() {
               </p>
               <p className="mt-1 text-2xl font-semibold text-white">
                 {Number.isFinite(pnlZen)
-                  ? `${pnlZen >= 0 ? "+" : ""}${pnlZen.toFixed(3)} ZEN`
+                  ? `${pnlZen >= 0 ? "+" : ""}${formatZenDown(pnlZen)} ZEN`
                   : "—"}
               </p>
               <p className="text-xs text-slate-400">
@@ -1193,7 +1195,7 @@ export function DashboardClient() {
                               Stake
                             </p>
                             <p className="font-mono text-white">
-                              {p.stake_zen.toFixed(3)} ZEN
+                              {formatZenDown(p.stake_zen)} ZEN
                             </p>
                           </div>
                           <div className="text-right">
@@ -1202,7 +1204,7 @@ export function DashboardClient() {
                             </p>
                             <p className="font-mono text-white">
                               {toWinZen !== null
-                                ? `${toWinZen.toFixed(3)} ZEN`
+                                ? `${formatZenDown(toWinZen)} ZEN`
                                 : p.claimable
                                 ? "Get payment data"
                                 : "—"}

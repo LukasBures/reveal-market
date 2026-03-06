@@ -53,7 +53,7 @@ def _seed_market(db_session, event_id: str = "mkt-test", address: str = "0x11111
     return market
 
 
-def _format_signature_decimal(value: Decimal | float | int | None, places: int = 3) -> str:
+def _format_signature_decimal(value: Decimal | float | int | None, places: int = 4) -> str:
     if value is None:
         return "n/a"
     quant = Decimal("1").scaleb(-places) if places > 0 else Decimal("1")

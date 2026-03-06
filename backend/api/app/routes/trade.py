@@ -1688,7 +1688,7 @@ def _verify_wallet_signature(wallet: str, signature: str) -> None:
     _verify_scoped_signature(wallet, f"claim-bundles:{wallet.lower()}", signature)
 
 
-def _format_signature_decimal(value: Decimal | float | int | None, places: int = 3) -> str:
+def _format_signature_decimal(value: Decimal | float | int | None, places: int = 4) -> str:
     if value is None:
         return "n/a"
     quant = Decimal("1").scaleb(-places) if places > 0 else Decimal("1")

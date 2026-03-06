@@ -1,10 +1,11 @@
 import type { PricingQuote } from "@/lib/pricing-client";
+import { roundDown } from "@/lib/formatters";
 
-const formatDecimal = (value: number | string | null | undefined, decimals = 3): string => {
+const formatDecimal = (value: number | string | null | undefined, decimals = 4): string => {
   if (value === null || value === undefined) return "n/a";
   const numeric = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(numeric)) return "n/a";
-  return numeric.toFixed(decimals);
+  return roundDown(numeric, decimals).toFixed(decimals);
 };
 
 export const buildCommitSignatureMessage = (quote: PricingQuote, walletAddress: string): string => {

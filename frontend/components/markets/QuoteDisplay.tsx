@@ -1,7 +1,7 @@
 "use client";
 
 import type { PricingQuote } from "@/lib/pricing-client";
-import { formatTime } from "@/lib/formatters";
+import { formatTime, roundDown } from "@/lib/formatters";
 
 type QuoteDisplayProps = {
   quote: PricingQuote | null;
@@ -14,7 +14,7 @@ type QuoteDisplayProps = {
 
 const formatNumber = (value: number, decimals = 4) => {
   if (!Number.isFinite(value)) return "—";
-  return value.toFixed(decimals);
+  return roundDown(value, decimals).toFixed(decimals);
 };
 
 const formatPreStakeCap = (
@@ -28,9 +28,9 @@ const formatPreStakeCap = (
   const stakeValue = typeof stake === "number" && !Number.isNaN(stake) ? stake : 0;
   const preStake = Math.max(0, remaining + stakeValue);
   if (typeof maxCap === "number" && !Number.isNaN(maxCap)) {
-    return `${Math.min(preStake, maxCap).toFixed(3)} ZEN`;
+    return `${Math.min(preStake, maxCap).toFixed(4)} ZEN`;
   }
-  return `${preStake.toFixed(3)} ZEN`;
+  return `${preStake.toFixed(4)} ZEN`;
 };
 
 function Metric({ label, value, highlight = false }: { label: string; value: string; highlight?: boolean }) {
@@ -53,12 +53,12 @@ export function QuoteDisplay({
   return (
     <>
       <div className="grid grid-cols-1 gap-3 text-xs">
-        <Metric label="To win" value={`${formatNumber(toWinZen ?? NaN, 3)} ZEN`} highlight />
+        <Metric label="To win" value={`${formatNumber(toWinZen ?? NaN, 4)} ZEN`} highlight />
       </div>
 
       {quote && (
         <p className="text-xs text-slate-300">
-          Stake {formatNumber(quote.stake_zen, 3)} ZEN → Win {formatNumber(toWinZen ?? NaN, 3)} ZEN
+          Stake {formatNumber(quote.stake_zen, 4)} ZEN → Win {formatNumber(toWinZen ?? NaN, 4)} ZEN
         </p>
       )}
 

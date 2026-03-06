@@ -404,7 +404,7 @@ export function StakeQuoteCard({
       if (cappedStake !== TICKET_SIZE_ZEN) {
         setStakeZen(cappedStake);
         setStakeInput(cappedStake.toFixed(2));
-        setError(`Stake capped at ${cappedStake.toFixed(3)} ZEN`);
+        setError(`Stake capped at ${cappedStake.toFixed(4)} ZEN`);
       } else if (debouncedStake !== TICKET_SIZE_ZEN) {
         setStakeZen(TICKET_SIZE_ZEN);
         setStakeInput(TICKET_SIZE_ZEN.toFixed(2));

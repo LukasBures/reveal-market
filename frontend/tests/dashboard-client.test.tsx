@@ -159,7 +159,7 @@ describe("DashboardClient", () => {
 
     render(<DashboardClient />);
 
-    await waitFor(() => expect(screen.getByText(/balance: 0\.100 zen/i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/balance: 0\.1000 zen/i)).toBeInTheDocument());
     expect(screen.getByText(/yes\/no/i)).toBeInTheDocument();
     expect(screen.getAllByText(/claimable/i)[0]).toBeInTheDocument();
     expect(screen.getByText(/outcome: yes/i)).toBeInTheDocument();

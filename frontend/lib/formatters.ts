@@ -4,6 +4,14 @@ const FALLBACK = "—";
 
 const defaultNumberFormatter = new Intl.NumberFormat(DEFAULT_LOCALE);
 
+export function roundDown(value: number, decimals = 4): number {
+  if (!Number.isFinite(value)) return Number.NaN;
+  const factor = 10 ** decimals;
+  if (!Number.isFinite(factor) || factor <= 0) return value;
+  // Match Decimal ROUND_DOWN semantics (towards zero, never away from zero).
+  return value >= 0 ? Math.floor(value * factor) / factor : Math.ceil(value * factor) / factor;
+}
+
 export function formatNumber(value?: number | null, options?: Intl.NumberFormatOptions): string {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return FALLBACK;
