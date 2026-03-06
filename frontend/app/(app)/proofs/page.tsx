@@ -75,7 +75,7 @@ export default async function ProofsPage({
           <h1 className="text-3xl font-semibold text-white sm:text-4xl">Settlement proofs & receipt ledger</h1>
           <p className="text-base text-slate-300 sm:text-lg">
             Every resolved market publishes a receipt that shows the outcome and payout summary. Filter by market or
-            request id to verify what was paid. Amounts are displayed in ZEN (18 decimals).
+            request id to verify what was paid.
           </p>
         </div>
         {error ? (

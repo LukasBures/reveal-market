@@ -265,7 +265,6 @@ export function ProofsClient({ initialReceipts, pageSize = 24, filters }: Props)
               >
                 Clear
               </button>
-              <span className="text-slate-400">Amounts are in ZEN (18 decimals).</span>
             </div>
           </form>
 

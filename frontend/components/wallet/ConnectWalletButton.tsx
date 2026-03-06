@@ -710,11 +710,6 @@ export function ConnectWalletButton() {
         className="inline-flex items-center gap-3 rounded-full bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-brand-500/40 transition hover:bg-brand-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-300"
       >
         {buttonLabel}
-        {displayAddress && displayChainName ? (
-          <span className="rounded-full bg-white/20 px-2 py-0.5 text-[11px] uppercase tracking-[0.3em] text-white/80">
-            {displayChainName}
-          </span>
-        ) : null}
       </button>
       {walletModal}
     </div>

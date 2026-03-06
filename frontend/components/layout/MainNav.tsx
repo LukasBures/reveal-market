@@ -19,7 +19,7 @@ const ConnectWalletButton = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="h-9 w-24 animate-pulse rounded-full bg-white/10" />
+      <div className="h-9 w-[130px] animate-pulse rounded-full bg-white/10" />
     ),
   }
 );
@@ -143,7 +143,7 @@ export function MainNav() {
             Dashboard
           </Link>
         </nav>
-        <div className="flex items-center gap-3 text-sm md:text-base">
+        <div className="flex min-w-[160px] items-center justify-end gap-3 text-sm sm:min-w-[200px] md:text-base">
           <button
             type="button"
             className="inline-flex items-center gap-2 rounded-full border border-white/20 px-4 py-2 text-xs font-semibold uppercase tracking-[0.4em] text-white/80 transition hover:border-white hover:text-white md:hidden"

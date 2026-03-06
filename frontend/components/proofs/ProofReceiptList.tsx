@@ -386,8 +386,7 @@ function formatZen(value?: string | null) {
   const base = 10n ** 18n;
   const integer = abs / base;
   const fraction = abs % base;
-  const precision = integer === 0n ? 6 : 4;
-  let fractionStr = fraction.toString().padStart(18, "0").slice(0, precision);
+  let fractionStr = fraction.toString().padStart(18, "0").slice(0, 4);
   fractionStr = fractionStr.replace(/0+$/, "");
   const integerStr = formatWhole(integer);
   const display = fractionStr ? `${integerStr}.${fractionStr}` : integerStr;
