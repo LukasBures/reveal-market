@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchPricingQuoteWithMeta,
+  fetchPricingPreview,
   FX_DEFAULT_PATH,
   type PricingQuote,
   submitTrade,
@@ -212,7 +213,7 @@ export function StakeQuoteCard({
     (!address ? "Connect wallet" : null) ??
     (!marketId ? "Market unavailable" : null) ??
     (chainMismatch ? `Switch to ${defaultChain.name}` : null) ??
-    (!quote?.quote_id ? "Waiting for quote..." : null) ??
+    (!quote ? "Waiting for quote..." : null) ??
     (quoteExpired ? "Quote expired. Refreshing..." : null) ??
     (capExhausted ? "Stake cap reached" : null) ??
     (stakeOutOfRange ? STAKE_RANGE_ERROR : null) ??
@@ -225,7 +226,7 @@ export function StakeQuoteCard({
     fxUnavailable ||
     !marketId ||
     !address ||
-    !quote?.quote_id ||
+    !quote ||
     quoteExpired ||
     quoteRefreshing ||
     stakeOutOfRange ||
@@ -425,7 +426,7 @@ export function StakeQuoteCard({
         setQuoteRefreshing(true);
       }
       try {
-        const payload = await fetchPricingQuoteWithMeta(cappedStake, {
+        const payload = await fetchPricingPreview(cappedStake, {
           marketId,
           walletAddress: address,
           marketAddress: normalizedMarketAddress,

@@ -102,13 +102,13 @@ describe("Trade status polling", () => {
     });
   });
 
-  it("omits market address when requesting quote without a market address", async () => {
+  it("omits market address when requesting preview without a market address", async () => {
     hooks.useConnection.mockReturnValue({ address: "0xabc", isConnected: true });
     hooks.useChainId.mockReturnValue(mockDefaultChain.id);
     hooks.useReadContract.mockReturnValue({ data: 0n });
     hooks.useWriteContract.mockReturnValue({ mutateAsync: vi.fn() });
     hooks.usePublicClient.mockReturnValue({ waitForTransactionReceipt: vi.fn() });
-    pricingMocks.fetchPricingQuoteWithMeta.mockResolvedValue({
+    pricingMocks.fetchPricingPreview.mockResolvedValue({
       stake_zen: 0.1,
       stake_wei: "100000000000000000",
       zen_usd: 1,
@@ -138,8 +138,8 @@ describe("Trade status polling", () => {
       <StakeQuoteCard marketId="m1" outcomes={["Yes", "No"]} outcomePrices={[0.5, 0.5]} />,
     );
 
-    await waitFor(() => expect(pricingMocks.fetchPricingQuoteWithMeta).toHaveBeenCalled());
-    const [, options] = pricingMocks.fetchPricingQuoteWithMeta.mock.calls[0];
+    await waitFor(() => expect(pricingMocks.fetchPricingPreview).toHaveBeenCalled());
+    const [, options] = pricingMocks.fetchPricingPreview.mock.calls[0];
     expect(options.marketAddress).toBeUndefined();
   });
 });
