@@ -44,6 +44,31 @@ const POSITION_LIFECYCLE_STAGES = [
   { key: "claimed", label: "Claimed", description: "Payout received" },
 ] as const;
 
+const STAGE_TOOLTIPS: Record<string, string> = {
+  committed:
+    "Your stake has been recorded on-chain as a private cryptographic commitment. The market is still open — others can still place bets, but your prediction stays hidden. No action needed from you yet.",
+  locked:
+    "Betting is now closed. The market's deadline has passed and no new stakes are accepted. The system is waiting for the oracle to report the real-world result. Your funds are safe.",
+  pending_resolution:
+    "The oracle has posted the result and winners are determined. A zero-knowledge proof is now being generated to verify every commitment was processed fairly — without revealing individual bets. This typically takes a few minutes.",
+  settled:
+    'The ZK proof has been verified on-chain — payouts are mathematically guaranteed. If you picked the winning outcome, click "Get payment data" then "Claim" to receive your winnings into your escrow balance.',
+  claimed:
+    "You successfully claimed your payout. The winnings have been added to your escrow balance. Use the Withdraw section at the top of this page to send funds to your wallet.",
+  cancelled:
+    "This market was voided before settlement. Any stake you committed will be returned. If you have questions, contact support.",
+};
+
+const STAT_TOOLTIPS = {
+  escrow:
+    "ZEN you have deposited into the escrow contract. This is the pool your stakes are drawn from and your winnings are returned to.",
+  staked:
+    "Total ZEN you have staked across all positions in the current filter view.",
+  toWin:
+    "Combined potential payout if all your currently open positions win.",
+  pnl: "Profit or loss vs. your total stake. Positive means you are ahead; negative means you have lost more than you have won so far.",
+};
+
 type PositionLifecycleKey =
   | typeof POSITION_LIFECYCLE_STAGES[number]["key"]
   | "cancelled";
@@ -68,6 +93,7 @@ const shortenHash = (hash: string) => {
     : normalized;
 };
 const MIN_CLAIM_GAS = 5_000_000n;
+const PAGE_SIZE = 10;
 const formatZenDown = (value: number, decimals = 4): string =>
   roundDown(value, decimals).toFixed(decimals);
 
@@ -86,6 +112,7 @@ function PositionStatusFlow({
   highlightMode,
   awaitingProof = false,
 }: PositionStatusFlowProps) {
+  const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
   const normalized = normalizePositionStatus(status);
   const stages =
     normalized === "cancelled"
@@ -158,6 +185,7 @@ function PositionStatusFlow({
         "mt-3 rounded-xl border bg-gradient-to-r from-slate-900/60 via-black/60 to-slate-900/40 p-3 transition-shadow relative overflow-hidden",
         outlineClass
       )}
+      onMouseLeave={() => setActiveTooltip(null)}
     >
       {highlightMode === "ongoing" ? (
         <div className="pointer-events-none absolute inset-0 bg-[length:240%_160%] opacity-35 blur-[1px] mix-blend-screen bg-[linear-gradient(120deg,rgba(123,240,94,0)_0%,rgba(123,240,94,0.22)_40%,rgba(123,240,94,0)_75%)] animate-[statusFlow_5.5s_linear_infinite]" />
@@ -201,9 +229,23 @@ function PositionStatusFlow({
                       : null
                   )}
                 >
-                  <span className="text-[11px] uppercase tracking-[0.2em]">
-                    {stage.label}
-                  </span>
+                  <div className="flex items-start justify-between gap-1">
+                    <span className="text-[11px] uppercase tracking-[0.2em]">{stage.label}</span>
+                    <button
+                      type="button"
+                      aria-label={`About the ${stage.label} phase`}
+                      onMouseEnter={() => setActiveTooltip(stage.key)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveTooltip((prev) => (prev === stage.key ? null : stage.key));
+                      }}
+                      className="shrink-0 cursor-pointer rounded-full text-current opacity-40 hover:opacity-80 transition-opacity focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50"
+                    >
+                      <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3" aria-hidden="true">
+                        <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1Zm0 3a.75.75 0 1 1 0 1.5A.75.75 0 0 1 8 4Zm-.25 3h1.5v4.5h-1.5V7Z"/>
+                      </svg>
+                    </button>
+                  </div>
                   <span className="text-[11px] text-slate-300 leading-snug min-h-[34px]">
                     {stage.description}
                   </span>
@@ -248,17 +290,25 @@ function PositionStatusFlow({
           })}
         </div>
       </div>
-      <p className="mt-2 text-[11px] text-slate-400">
-        {isCancelled
-          ? `Market cancelled${clippedReason ? ` — ${clippedReason}` : ""}.`
-          : isFinal
-          ? claimable
-            ? "All phases cleared — claim is open."
-            : "All phases cleared."
-          : awaitingProof
-          ? "Resolution set — proof in progress."
-          : `Arrows pulse toward ${nextLabel}.`}
-      </p>
+      {activeTooltip && STAGE_TOOLTIPS[activeTooltip] && (
+        <div className="mt-2 rounded-lg border border-white/10 bg-black/50 px-3 py-2 text-[11px] text-slate-300 leading-relaxed">
+          <span className="mr-1 font-semibold uppercase tracking-[0.15em] text-white/70">
+            {stages.find((s) => s.key === activeTooltip)?.label}:
+          </span>
+          {STAGE_TOOLTIPS[activeTooltip]}
+        </div>
+      )}
+      {(isCancelled || isFinal || awaitingProof) && (
+        <p className="mt-2 text-[11px] text-slate-400">
+          {isCancelled
+            ? `Market cancelled${clippedReason ? ` — ${clippedReason}` : ""}.`
+            : isFinal
+            ? claimable
+              ? "All phases cleared — claim is open."
+              : "All phases cleared."
+            : "Resolution set — proof in progress."}
+        </p>
+      )}
     </div>
   );
 }
@@ -290,6 +340,7 @@ export function DashboardClient() {
   >("all");
   const [sortBy, setSortBy] = useState<"recent" | "stake" | "closes">("recent");
   const [searchQuery, setSearchQuery] = useState("");
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const { claimTicket, error: claimError } = useClaimTicket();
   const { mutateAsync: writeContract } = useWriteContract();
   const publicClient = usePublicClient({ chainId });
@@ -304,6 +355,8 @@ export function DashboardClient() {
   const tokenAddress = ZEN_TOKEN_ADDRESS;
   const [depositInput, setDepositInput] = useState<string>("0.10");
   const [withdrawInput, setWithdrawInput] = useState<string>("0.00");
+  const [depositLoading, setDepositLoading] = useState(false);
+  const [withdrawLoading, setWithdrawLoading] = useState(false);
   const [escrowStatus, setEscrowStatus] = useState<{
     label: string;
     txHash?: string | null;
@@ -438,6 +491,7 @@ export function DashboardClient() {
       return;
     }
     const amountWei = BigInt(Math.floor(amountZen * 1e18));
+    setDepositLoading(true);
     try {
       if (!escrowAllowance || escrowAllowance < amountWei) {
         const approveHash = await writeContract({
@@ -473,6 +527,8 @@ export function DashboardClient() {
       await load(address);
     } catch (err) {
       setEscrowError(sanitizeError(err));
+    } finally {
+      setDepositLoading(false);
     }
   };
 
@@ -497,6 +553,7 @@ export function DashboardClient() {
       setEscrowError("Withdraw amount exceeds escrow balance.");
       return;
     }
+    setWithdrawLoading(true);
     try {
       const withdrawHash = await writeContract({
         address: escrowAddress as Address,
@@ -521,6 +578,8 @@ export function DashboardClient() {
       await load(address);
     } catch (err) {
       setEscrowError(sanitizeError(err));
+    } finally {
+      setWithdrawLoading(false);
     }
   };
 
@@ -540,6 +599,10 @@ export function DashboardClient() {
       void load(address);
     });
   }, [address, load]);
+
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [statusFilter, sortBy, searchQuery]);
 
   const ensureBundleSignature = async () => {
     if (!address) return null;
@@ -862,6 +925,16 @@ export function DashboardClient() {
         return b.createdAtTs - a.createdAtTs;
       });
   }, [derivedPositions, searchQuery, sortBy, statusFilter]);
+  const filterCounts = useMemo(
+    () => ({
+      all: derivedPositions.length,
+      open: derivedPositions.filter(({ position }) => position.status !== "settled").length,
+      settled: derivedPositions.filter(({ position }) => position.status === "settled").length,
+      claimable: derivedPositions.filter(({ position }) => Boolean(position.claimable)).length,
+    }),
+    [derivedPositions]
+  );
+  const visiblePositions = filteredPositions.slice(0, visibleCount);
   const totalStakeZen = filteredPositions.reduce(
     (acc, { position }) =>
       acc + (Number.isFinite(position.stake_zen) ? position.stake_zen : 0),
@@ -893,18 +966,36 @@ export function DashboardClient() {
   return (
     <div className="space-y-6">
       <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-4">
-        <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
-          Escrow
-        </p>
-        <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-white">
-          <span>
-            Balance: {escrowDisplay} ZEN{" "}
-            {ZEN_TOKEN_ADDRESS ? "" : "(ZEN token missing)"}
+        <div className="flex items-center justify-between">
+          <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
+            Escrow Balance
+          </p>
+          <details className="text-[11px] text-slate-600">
+            <summary className="cursor-pointer select-none hover:text-slate-400 transition-colors">
+              details
+            </summary>
+            <p className="mt-1 break-all text-slate-500">
+              {RELAYER_ESCROW_ADDRESS ?? "n/a"} &middot;{" "}
+              {chainMismatch ? (
+                <span className="text-rose-400">Wrong network</span>
+              ) : (
+                defaultChain.name
+              )}
+            </p>
+          </details>
+        </div>
+        <div className="mt-1 flex flex-wrap items-center gap-3">
+          <span className="text-2xl font-semibold text-white">
+            {escrowDisplay} ZEN
           </span>
-          <span className="break-all text-slate-400">
-            Escrow: {RELAYER_ESCROW_ADDRESS ?? "n/a"} | Chain:{" "}
-            {chainMismatch ? "Wrong network" : defaultChain.name}
-          </span>
+          {!ZEN_TOKEN_ADDRESS && (
+            <span className="text-xs text-amber-300">(ZEN token missing)</span>
+          )}
+          {chainMismatch && (
+            <span className="rounded-full border border-rose-400/30 bg-rose-500/10 px-2 py-0.5 text-[11px] text-rose-300">
+              Wrong network
+            </span>
+          )}
         </div>
         <div className="mt-3 grid gap-2 md:grid-cols-2">
           <div className="rounded-2xl border border-white/10 bg-gradient-to-br from-emerald-900/40 via-black/60 to-black/80 p-4 shadow-inner shadow-emerald-900/30">
@@ -920,23 +1011,40 @@ export function DashboardClient() {
               </span>
             </div>
             <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-              <input
-                type="number"
-                name="escrowDepositAmount"
-                value={depositInput}
-                onChange={(e) => setDepositInput(e.target.value)}
-                className="w-full rounded-lg border border-emerald-500/40 bg-slate-900/70 px-3 py-2 text-white shadow-sm shadow-emerald-900/30 focus:border-emerald-300 focus:outline-none"
-                step="0.01"
-                min="0"
-                aria-label="Deposit amount"
-              />
+              <div className="relative flex-1">
+                <input
+                  type="number"
+                  name="escrowDepositAmount"
+                  value={depositInput}
+                  onChange={(e) => setDepositInput(e.target.value)}
+                  className="w-full rounded-lg border border-emerald-500/40 bg-slate-900/70 px-3 py-2 pr-14 text-white shadow-sm shadow-emerald-900/30 focus:border-emerald-300 focus:outline-none"
+                  step="0.01"
+                  min="0"
+                  aria-label="Deposit amount"
+                />
+                {tokenBalance !== undefined && tokenBalance !== null && (
+                  <button
+                    type="button"
+                    onClick={() => setDepositInput(formatZenDown(Number(tokenBalance) / 1e18, 4))}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-300 hover:text-emerald-100 transition-colors"
+                  >
+                    Max
+                  </button>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={handleDeposit}
-                className="w-full whitespace-nowrap rounded-full bg-emerald-500 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white shadow-lg shadow-emerald-900/50 transition hover:-translate-y-[1px] hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-emerald-800/60 sm:w-auto"
-                disabled={Boolean(fundingBlockedReason)}
+                className="flex w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-full bg-emerald-500 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white shadow-lg shadow-emerald-900/50 transition hover:-translate-y-[1px] hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-emerald-800/60 sm:w-auto"
+                disabled={Boolean(fundingBlockedReason) || depositLoading}
                 title={depositCtaTitle}
               >
+                {depositLoading && (
+                  <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                  </svg>
+                )}
                 {depositCtaLabel}
               </button>
             </div>
@@ -990,21 +1098,33 @@ export function DashboardClient() {
               </span>
             </div>
             <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-              <input
-                type="number"
-                name="escrowWithdrawAmount"
-                value={withdrawInput}
-                onChange={(e) => setWithdrawInput(e.target.value)}
-                className="w-full rounded-lg border border-white/20 bg-slate-900/70 px-3 py-2 text-white shadow-sm shadow-black/40 focus:border-white/60 focus:outline-none"
-                step="0.01"
-                min="0"
-                aria-label="Withdraw amount"
-              />
+              <div className="relative flex-1">
+                <input
+                  type="number"
+                  name="escrowWithdrawAmount"
+                  value={withdrawInput}
+                  onChange={(e) => setWithdrawInput(e.target.value)}
+                  className="w-full rounded-lg border border-white/20 bg-slate-900/70 px-3 py-2 pr-14 text-white shadow-sm shadow-black/40 focus:border-white/60 focus:outline-none"
+                  step="0.01"
+                  min="0"
+                  aria-label="Withdraw amount"
+                />
+                {normalizedOnchainEscrow !== null && normalizedOnchainEscrow > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setWithdrawInput(formatZenDown(normalizedOnchainEscrow / 1e18, 4))}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-300 hover:text-white transition-colors"
+                  >
+                    Max
+                  </button>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={handleWithdraw}
-                className="w-full whitespace-nowrap rounded-full bg-white/15 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white shadow-lg shadow-black/50 transition hover:-translate-y-[1px] hover:bg-white/25 disabled:cursor-not-allowed disabled:bg-white/10 sm:w-auto"
+                className="flex w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-full bg-white/15 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white shadow-lg shadow-black/50 transition hover:-translate-y-[1px] hover:bg-white/25 disabled:cursor-not-allowed disabled:bg-white/10 sm:w-auto"
                 disabled={
+                  withdrawLoading ||
                   chainMismatch ||
                   !RELAYER_ESCROW_ADDRESS ||
                   !ZEN_TOKEN_ADDRESS ||
@@ -1013,6 +1133,12 @@ export function DashboardClient() {
                 }
                 title={chainMismatch ? `Switch to ${defaultChain.name}` : ""}
               >
+                {withdrawLoading && (
+                  <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                  </svg>
+                )}
                 Withdraw
               </button>
             </div>
@@ -1024,18 +1150,45 @@ export function DashboardClient() {
           {error}
         </div>
       ) : positionsLoading || loading ? (
-        <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-6 text-slate-200">
-          Loading positions...
+        <div className="space-y-3">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="h-32 animate-pulse rounded-2xl border border-white/10 bg-white/5" />
+          ))}
         </div>
       ) : positions.length === 0 ? (
-        <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-6 text-slate-200">
-          No positions yet.
+        <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-10 text-center">
+          <p className="mb-4 text-slate-400">No positions yet.</p>
+          <Link
+            href="/events"
+            className="rounded-full border border-emerald-400/30 bg-emerald-500/20 px-4 py-2 text-sm text-emerald-200 transition hover:bg-emerald-500/30"
+          >
+            Browse markets
+          </Link>
         </div>
       ) : (
         <div className="space-y-4">
           {bundleError && (
-            <div className="rounded-2xl border border-amber-400/40 bg-amber-500/10 p-3 text-amber-100">
-              {bundleError}
+            <div className="flex items-start justify-between gap-3 rounded-2xl border border-amber-400/40 bg-amber-500/10 p-3 text-amber-100">
+              <p className="flex-1 text-sm">{bundleError}</p>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  className="text-xs text-amber-300 underline underline-offset-2 hover:text-amber-100"
+                  onClick={() => { setBundleError(null); setBundleSignature(null); }}
+                >
+                  Retry
+                </button>
+                <button
+                  type="button"
+                  aria-label="Dismiss error"
+                  className="text-amber-400 transition-colors hover:text-amber-100"
+                  onClick={() => setBundleError(null)}
+                >
+                  <svg viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4" aria-hidden="true">
+                    <path d="M4.22 4.22a.75.75 0 0 1 1.06 0L8 6.94l2.72-2.72a.75.75 0 1 1 1.06 1.06L9.06 8l2.72 2.72a.75.75 0 1 1-1.06 1.06L8 9.06l-2.72 2.72a.75.75 0 0 1-1.06-1.06L6.94 8 4.22 5.28a.75.75 0 0 1 0-1.06Z"/>
+                  </svg>
+                </button>
+              </div>
             </div>
           )}
           <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-gradient-to-r from-slate-900/70 via-slate-900/40 to-slate-800/40 px-4 py-3 shadow-inner shadow-black/30">
@@ -1061,7 +1214,10 @@ export function DashboardClient() {
                         : "bg-white/10 text-white hover:bg-white/20"
                     )}
                   >
-                    {filter}
+                    {filter}{" "}
+                    <span className={clsx("font-normal", statusFilter === filter ? "text-black/50" : "text-white/40")}>
+                      ({filterCounts[filter]})
+                    </span>
                   </button>
                 )
               )}
@@ -1091,47 +1247,114 @@ export function DashboardClient() {
             </label>
           </div>
           <div className="grid gap-3 rounded-2xl border border-white/10 bg-gradient-to-r from-indigo-900/30 via-slate-900/60 to-slate-900/40 p-4 text-white shadow-inner shadow-black/30 sm:grid-cols-4">
-            <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-              <p className="text-[11px] uppercase tracking-[0.25em] text-slate-300">
-                Deposited in escrow
-              </p>
+            <div className="group relative rounded-xl border border-white/10 bg-white/5 p-3">
+              <div className="flex items-center gap-1">
+                <p className="text-[11px] uppercase tracking-[0.25em] text-slate-300">
+                  Deposited in escrow
+                </p>
+                <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3 shrink-0 text-slate-500 transition-colors group-hover:text-slate-300" aria-hidden="true">
+                  <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1Zm0 3a.75.75 0 1 1 0 1.5A.75.75 0 0 1 8 4Zm-.25 3h1.5v4.5h-1.5V7Z"/>
+                </svg>
+              </div>
+              <div className="pointer-events-none absolute bottom-full left-0 z-20 mb-1.5 w-56 rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-[11px] text-slate-300 leading-relaxed opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+                {STAT_TOOLTIPS.escrow}
+              </div>
               <p className="mt-1 text-2xl font-semibold text-white">
                 {totalEscrowZen !== null && Number.isFinite(totalEscrowZen)
                   ? `${formatZenDown(totalEscrowZen)} ZEN`
                   : "—"}
               </p>
             </div>
-            <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-              <p className="text-[11px] uppercase tracking-[0.25em] text-slate-300">
-                Total staked
-              </p>
+            <div className="group relative rounded-xl border border-white/10 bg-white/5 p-3">
+              <div className="flex items-center gap-1">
+                <p className="text-[11px] uppercase tracking-[0.25em] text-slate-300">
+                  Total staked
+                </p>
+                <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3 shrink-0 text-slate-500 transition-colors group-hover:text-slate-300" aria-hidden="true">
+                  <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1Zm0 3a.75.75 0 1 1 0 1.5A.75.75 0 0 1 8 4Zm-.25 3h1.5v4.5h-1.5V7Z"/>
+                </svg>
+              </div>
+              <div className="pointer-events-none absolute bottom-full left-0 z-20 mb-1.5 w-56 rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-[11px] text-slate-300 leading-relaxed opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+                {STAT_TOOLTIPS.staked}
+              </div>
               <p className="mt-1 text-2xl font-semibold text-white">
                 {formatZenDown(totalStakeZen)} ZEN
               </p>
             </div>
-            <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-              <p className="text-[11px] uppercase tracking-[0.25em] text-slate-300">
-                Total to win
-              </p>
+            <div className="group relative rounded-xl border border-white/10 bg-white/5 p-3">
+              <div className="flex items-center gap-1">
+                <p className="text-[11px] uppercase tracking-[0.25em] text-slate-300">
+                  Total to win
+                </p>
+                <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3 shrink-0 text-slate-500 transition-colors group-hover:text-slate-300" aria-hidden="true">
+                  <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1Zm0 3a.75.75 0 1 1 0 1.5A.75.75 0 0 1 8 4Zm-.25 3h1.5v4.5h-1.5V7Z"/>
+                </svg>
+              </div>
+              <div className="pointer-events-none absolute bottom-full left-0 z-20 mb-1.5 w-56 rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-[11px] text-slate-300 leading-relaxed opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+                {STAT_TOOLTIPS.toWin}
+              </div>
               <p className="mt-1 text-2xl font-semibold text-white">
                 {totalToWinZen > 0 ? `${formatZenDown(totalToWinZen)} ZEN` : "—"}
               </p>
             </div>
-            <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-              <p className="text-[11px] uppercase tracking-[0.25em] text-slate-300">
-                PnL / ROI
-              </p>
-              <p className="mt-1 text-2xl font-semibold text-white">
+            <div className="group relative rounded-xl border border-white/10 bg-white/5 p-3">
+              <div className="flex items-center gap-1">
+                <p className="text-[11px] uppercase tracking-[0.25em] text-slate-300">
+                  PnL / ROI
+                </p>
+                <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3 shrink-0 text-slate-500 transition-colors group-hover:text-slate-300" aria-hidden="true">
+                  <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1Zm0 3a.75.75 0 1 1 0 1.5A.75.75 0 0 1 8 4Zm-.25 3h1.5v4.5h-1.5V7Z"/>
+                </svg>
+              </div>
+              <div className="pointer-events-none absolute bottom-full left-0 z-20 mb-1.5 w-56 rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-[11px] text-slate-300 leading-relaxed opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+                {STAT_TOOLTIPS.pnl}
+              </div>
+              <p
+                className={clsx(
+                  "mt-1 text-2xl font-semibold",
+                  Number.isFinite(pnlZen)
+                    ? pnlZen >= 0
+                      ? "text-emerald-300"
+                      : "text-rose-300"
+                    : "text-white"
+                )}
+              >
                 {Number.isFinite(pnlZen)
                   ? `${pnlZen >= 0 ? "+" : ""}${formatZenDown(pnlZen)} ZEN`
                   : "—"}
               </p>
-              <p className="text-xs text-slate-400">
+              <p
+                className={clsx(
+                  "text-xs",
+                  roi !== null ? (roi >= 0 ? "text-emerald-400" : "text-rose-400") : "text-slate-400"
+                )}
+              >
                 {roi !== null ? `${(roi * 100).toFixed(1)}%` : "—"}
               </p>
             </div>
           </div>
-          {filteredPositions.map(
+          {(statusFilter !== "all" || searchQuery.trim().length > 0) && (
+            <p className="text-right text-[11px] text-slate-500">
+              Stats reflect current filter &middot; {filteredPositions.length} of {derivedPositions.length} positions
+            </p>
+          )}
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] text-slate-500">
+              Showing {Math.min(visibleCount, filteredPositions.length)} of {filteredPositions.length} positions
+            </p>
+            <button
+              type="button"
+              aria-label="Refresh positions"
+              onClick={() => address && void load(address)}
+              disabled={positionsLoading}
+              className="rounded-full p-1 text-slate-500 transition-colors hover:text-slate-300 disabled:opacity-40"
+            >
+              <svg viewBox="0 0 16 16" fill="currentColor" className={clsx("h-3.5 w-3.5", positionsLoading && "animate-spin")} aria-hidden="true">
+                <path d="M13.65 2.35A8 8 0 1 0 15 8h-1.5a6.5 6.5 0 1 1-1.12-3.65l-1.63 1.63A.5.5 0 0 0 11 7h4a.5.5 0 0 0 .5-.5v-4a.5.5 0 0 0-.85-.35l-1 1Z"/>
+              </svg>
+            </button>
+          </div>
+          {visiblePositions.map(
             ({
               position: p,
               bundle,
@@ -1183,20 +1406,32 @@ export function DashboardClient() {
                             </p>
                             <p className="text-xs text-slate-400">
                               Outcome: {outcomeLabel}
-                              {highlightMode === "none" ? (
-                                <span className="ml-2 inline-flex rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-300">
-                                  Lost
-                                </span>
-                              ) : null}
                             </p>
                           </div>
-                          <div className="text-right">
-                            <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
-                              Stake
-                            </p>
-                            <p className="font-mono text-white">
-                              {formatZenDown(p.stake_zen)} ZEN
-                            </p>
+                          <div className="flex flex-col items-end gap-1.5">
+                            {p.status === "cancelled" ? (
+                              <span className="rounded-full border border-amber-400/30 bg-amber-500/20 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-300">
+                                Void
+                              </span>
+                            ) : hasResolution && p.status !== "claimed" ? (
+                              isWinner ? (
+                                <span className="rounded-full border border-emerald-400/40 bg-emerald-500/20 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-300">
+                                  Won
+                                </span>
+                              ) : (
+                                <span className="rounded-full border border-rose-400/30 bg-rose-500/20 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-rose-300">
+                                  Lost
+                                </span>
+                              )
+                            ) : null}
+                            <div className="text-right">
+                              <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
+                                Stake
+                              </p>
+                              <p className="font-mono text-white">
+                                {formatZenDown(p.stake_zen)} ZEN
+                              </p>
+                            </div>
                           </div>
                           <div className="text-right">
                             <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
@@ -1249,22 +1484,31 @@ export function DashboardClient() {
                               p.closes_at ?? p.resolved_at ?? undefined
                             )}
                           </span>
-                          <span>
-                            Merkle root:{" "}
-                            {p.merkle_root
-                              ? `${p.merkle_root.slice(
-                                  0,
-                                  8
-                                )}...${p.merkle_root.slice(-6)}`
-                              : "—"}
-                          </span>
+                          {p.merkle_root && (
+                            <span>
+                              Merkle root: {p.merkle_root.slice(0, 8)}...{p.merkle_root.slice(-6)}
+                            </span>
+                          )}
+                          {p.claimed_at && (
+                            <span>
+                              Claimed: {formatDateTime(p.claimed_at)}
+                            </span>
+                          )}
                         </div>
+                        {p.status === "settled" && p.claimable && (
+                          <p className="mt-3 text-[11px] leading-relaxed text-slate-400">
+                            <span className="font-semibold text-slate-300">Ready to claim.</span>{" "}
+                            {bundle
+                              ? "Payment data loaded — submit the on-chain claim transaction below."
+                              : "Step 1: fetch your proof data from the server. Step 2: submit the claim transaction on-chain."}
+                          </p>
+                        )}
                         <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-200">
                           {p.status === "settled" && p.claimable ? (
                             bundle ? (
                               <button
                                 type="button"
-                                className="rounded-full bg-emerald-500 px-3 py-2 font-semibold text-white hover:bg-emerald-400 disabled:cursor-not-allowed sm:py-1"
+                                className="flex items-center gap-1.5 rounded-full bg-emerald-500 px-3 py-2 font-semibold text-white hover:bg-emerald-400 disabled:cursor-not-allowed sm:py-1"
                                 disabled={
                                   chainMismatch ||
                                   claimingTickets.has(bundleKey)
@@ -1273,6 +1517,12 @@ export function DashboardClient() {
                                   handleClaim(p.market_id, p.ticket_id)
                                 }
                               >
+                                {claimingTickets.has(bundleKey) && (
+                                  <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                                  </svg>
+                                )}
                                 {claimingTickets.has(bundleKey)
                                   ? "Claiming..."
                                   : "Claim"}
@@ -1280,7 +1530,7 @@ export function DashboardClient() {
                             ) : (
                               <button
                                 type="button"
-                                className="rounded-full bg-emerald-500 px-3 py-2 font-semibold text-white hover:bg-emerald-400 disabled:cursor-not-allowed sm:py-1"
+                                className="flex items-center gap-1.5 rounded-full bg-emerald-500 px-3 py-2 font-semibold text-white hover:bg-emerald-400 disabled:cursor-not-allowed sm:py-1"
                                 disabled={
                                   chainMismatch ||
                                   preparingBundles.has(bundleKey)
@@ -1289,6 +1539,12 @@ export function DashboardClient() {
                                   handlePrepareBundle(p.market_id, p.ticket_id)
                                 }
                               >
+                                {preparingBundles.has(bundleKey) && (
+                                  <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                                  </svg>
+                                )}
                                 {preparingBundles.has(bundleKey)
                                   ? "Preparing..."
                                   : "Get payment data"}
@@ -1301,22 +1557,24 @@ export function DashboardClient() {
                           >
                             View market
                           </Link>
-                          <Link
-                            className="rounded-full bg-white/10 px-3 py-2 text-white hover:bg-white/20 sm:py-1"
-                            href={
-                              p.merkle_root
-                                ? `/proofs?eventId=${encodeURIComponent(
-                                    p.market_id
-                                  )}`
-                                : p.proof_request_id
-                                ? `/proofs?requestId=${encodeURIComponent(
-                                    p.proof_request_id
-                                  )}`
-                                : "/proofs"
-                            }
-                          >
-                            View proofs
-                          </Link>
+                          {(p.proof_request_id ||
+                            p.merkle_root ||
+                            ["pending_resolution", "settled", "claimed"].includes(
+                              normalizePositionStatus(p.status)
+                            )) && (
+                            <Link
+                              className="rounded-full bg-white/10 px-3 py-2 text-white hover:bg-white/20 sm:py-1"
+                              href={
+                                p.merkle_root
+                                  ? `/proofs?eventId=${encodeURIComponent(p.market_id)}`
+                                  : p.proof_request_id
+                                  ? `/proofs?requestId=${encodeURIComponent(p.proof_request_id)}`
+                                  : "/proofs"
+                              }
+                            >
+                              View proofs
+                            </Link>
+                          )}
                           {p.tx_hash && txHref ? (
                             <a
                               className="rounded-full bg-white/10 px-3 py-2 text-white hover:bg-white/20 sm:py-1"
@@ -1363,6 +1621,17 @@ export function DashboardClient() {
                 ? claimError.message
                 : String(claimError)}
             </p>
+          )}
+          {visibleCount < filteredPositions.length && (
+            <div className="flex justify-center pt-2">
+              <button
+                type="button"
+                onClick={() => setVisibleCount((prev) => prev + PAGE_SIZE)}
+                className="rounded-full border border-white/15 bg-white/5 px-6 py-2 text-xs font-semibold uppercase tracking-wide text-slate-300 transition hover:bg-white/10 hover:text-white"
+              >
+                Load more ({filteredPositions.length - visibleCount} remaining)
+              </button>
+            </div>
           )}
         </div>
       )}
