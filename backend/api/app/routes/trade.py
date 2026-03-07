@@ -1114,7 +1114,13 @@ async def _maybe_create_market_onchain(session: AsyncSession, market_obj) -> tup
         account = load_account(raw_key_value)
         web3 = get_async_web3(str(rpc_url))
         factory = web3.eth.contract(address=to_checksum(settings.factory_address), abi=MARKET_FACTORY_ABI)
-        commit_deadline = int(time.time()) + int(settings.market_commit_lead_seconds)
+        closes_at = getattr(market_obj, "closes_at", None)
+        if closes_at is not None:
+            if isinstance(closes_at, datetime) and closes_at.tzinfo is None:
+                closes_at = closes_at.replace(tzinfo=UTC)
+            commit_deadline = int(closes_at.timestamp()) - 900
+        else:
+            commit_deadline = int(time.time()) + int(settings.market_commit_lead_seconds)
         params = (
             to_checksum(settings.oracle_address),
             to_checksum(settings.verifier_address),

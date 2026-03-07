@@ -100,7 +100,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         "rate_limit_enabled": True,
         "rate_limit_trusted_proxies": ["172.16.0.0/12", "127.0.0.1"],
         "run_migrations_on_startup": False,
-        "market_commit_lead_seconds": 86400,
+        "market_commit_lead_seconds": 7200,
         # --- Streamer ---
         "streamer_public": "https://stream.revealmarket.xyz",
         "streamer_internal": "http://streamer:8100",
@@ -114,7 +114,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         "worker_memory_trim_threshold_mb": 0,
         "worker_memory_abort_threshold_mb": 0,
         "polymarket_stream_persist": False,
-        "default_commit_lead_seconds": 86400,
+        "default_commit_lead_seconds": 7200,
         # --- Hedger ---
         "hedger_environment": "production",
         # --- Caddy ---

@@ -353,6 +353,7 @@ async def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, ca
     monkeypatch.setattr(db, "SessionLocal", session_factory, raising=False)
     monkeypatch.setattr(runtime_module.settings, "run_migrations_on_startup", False, raising=False)
 
+    future_close = datetime.now(UTC) + timedelta(hours=6)
     sample_markets = [
         MarketPayload(
             event_id="evt-1",
@@ -364,6 +365,7 @@ async def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, ca
             status="commit",
             outcomes=["Yes", "No"],
             outcome_prices=[0.4, 0.6],
+            closes_at=future_close,
         ),
         MarketPayload(
             event_id="evt-2",
@@ -375,6 +377,7 @@ async def test_process_once_persists_markets_and_emits_heartbeat(monkeypatch, ca
             status="commit",
             outcomes=["Up", "Down"],
             outcome_prices=[0.55, 0.45],
+            closes_at=future_close,
         ),
     ]
 

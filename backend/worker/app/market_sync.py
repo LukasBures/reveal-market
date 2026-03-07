@@ -101,6 +101,7 @@ class SyncSummary:
     lock_batches_submitted: int = 0
     resolutions_backfilled: int = 0
     failed_markets: int = 0
+    skipped: int = 0
     cache_invalidations: int = 0
     settlement_txs: int = 0
     polymarket_sync_attempted: bool = False
@@ -125,6 +126,7 @@ class SyncSummary:
             "lock_batches_submitted": self.lock_batches_submitted,
             "resolutions_backfilled": self.resolutions_backfilled,
             "market_errors": self.failed_markets,
+            "markets_skipped": self.skipped,
             "gamma_metadata_updates": self.gamma_metadata_updates,
         }
 
@@ -379,6 +381,21 @@ async def collect_market_changes_with_summary(
     if not markets:
         return summary
     existing_records = await _load_existing_markets(session, markets)
+    # Skip new markets that have no closes_at — they can't have a valid commit deadline
+    # and should not appear on the frontend.  Already-persisted markets are kept so that
+    # updates (e.g. CLOB overlay adding closes_at later) can still be applied.
+    pre_filter = len(markets)
+    markets = [m for m in markets if m.closes_at is not None or m.event_id in existing_records]
+    skipped_no_close = pre_filter - len(markets)
+    if skipped_no_close:
+        summary.skipped += skipped_no_close
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.persist.skipped_no_closes_at",
+            message="skipped new markets without closes_at",
+            count=skipped_no_close,
+        )
     existing_ids = [record.id for record in existing_records.values() if record.id is not None]
     commitment_counts: dict[int, int] = {}
     if existing_ids:

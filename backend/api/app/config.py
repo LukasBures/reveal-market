@@ -307,7 +307,7 @@ class Settings(BaseSettings):
         default=100_000_000_000_000_000, ge=1, description="Fixed ticket size (wei) used for commitWithAuthorization"
     )
     commit_cutoff_seconds: int = Field(
-        default=300, ge=0, description="Seconds before closes_at to halt new commits/quotes"
+        default=900, ge=0, description="Seconds before closes_at to halt new commits/quotes"
     )
     relayer_escrow_address: str | None = Field(
         default=None, description="RelayerEscrow contract address for balance lookups"
