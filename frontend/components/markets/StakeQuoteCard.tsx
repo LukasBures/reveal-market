@@ -215,11 +215,11 @@ export function StakeQuoteCard({
     (!marketId ? "Market unavailable" : null) ??
     (chainMismatch ? `Switch to ${defaultChain.name}` : null) ??
     (!quote ? "Waiting for quote..." : null) ??
-    (quoteExpired ? "Quote expired. Refreshing..." : null) ??
+    (quoteExpired ? "Price expired — refreshing..." : null) ??
     (capExhausted ? "Stake cap reached" : null) ??
     (stakeOutOfRange ? STAKE_RANGE_ERROR : null) ??
-    (fxUnavailable ? "FX unavailable" : null) ??
-    (fxStale ? "FX stale" : null) ??
+    (fxUnavailable ? "Pricing unavailable" : null) ??
+    (fxStale ? "Pricing data outdated" : null) ??
     null;
 
   const ctaDisabled =
@@ -248,7 +248,7 @@ export function StakeQuoteCard({
       normalized.includes("rejected the request") ||
       normalized.includes("user denied")
     ) {
-      return "User rejected the request.";
+      return "Transaction cancelled.";
     }
     return cleaned || "Trade failed";
   }, []);
@@ -368,7 +368,7 @@ export function StakeQuoteCard({
       if (!address) {
         setQuoteRefreshing(false);
         setQuote(null);
-        setError("Connect wallet to request a quote");
+        setError("Connect your wallet to get a price");
         return;
       }
       if (!marketId) {
@@ -394,13 +394,13 @@ export function StakeQuoteCard({
       if (capExhausted) {
         setQuoteRefreshing(false);
         setQuote(null);
-        setError("Stake cap exhausted for this market/user");
+        setError("Maximum position size reached");
         return;
       }
       if (fxUnavailable) {
         setQuoteRefreshing(false);
         setQuote(null);
-        setError("FX feed unavailable");
+        setError("Pricing feed unavailable");
         return;
       }
       if (!Number.isFinite(debouncedStake) || debouncedStake <= 0) {
@@ -408,14 +408,14 @@ export function StakeQuoteCard({
         return;
       }
       if (fxIsStale) {
-        setError("Pricing paused (FX stale)");
+        setError("Pricing temporarily paused");
         return;
       }
       const cappedStake = Math.min(TICKET_SIZE_ZEN, effectiveMaxStake);
       if (cappedStake !== TICKET_SIZE_ZEN) {
         setStakeZen(cappedStake);
         setStakeInput(cappedStake.toFixed(2));
-        setError(`Stake capped at ${cappedStake.toFixed(4)} ZEN`);
+        setError(`Position capped at ${cappedStake.toFixed(4)} ZEN`);
       } else if (debouncedStake !== TICKET_SIZE_ZEN) {
         setStakeZen(TICKET_SIZE_ZEN);
         setStakeInput(TICKET_SIZE_ZEN.toFixed(2));
@@ -558,7 +558,7 @@ export function StakeQuoteCard({
       return;
     }
     if (!address) {
-      setError("Connect wallet to request a quote");
+      setError("Connect your wallet to get a price");
       setTxError("Connect wallet before trading.");
       return;
     }
@@ -598,7 +598,7 @@ export function StakeQuoteCard({
       }
       const issuedExpiry = getQuoteExpiryMs(issuedQuote);
       if (!issuedExpiry || issuedExpiry <= Date.now()) {
-        setTxError("Quote expired. Refreshing...");
+        setTxError("Price expired — refreshing...");
         setRefreshNonce((prev) => prev + 1);
         return;
       }
@@ -607,7 +607,7 @@ export function StakeQuoteCard({
         return;
       }
       if (stakeZen !== issuedQuote.stake_zen) {
-        setTxError("Stake changed. Refresh the quote.");
+        setTxError("Amount changed — refresh the price.");
         return;
       }
       const signature = await signMessage({
@@ -629,13 +629,13 @@ export function StakeQuoteCard({
       const message = sanitizeTradeErrorMessage(err);
       const normalized = message.toLowerCase();
       if (normalized.includes("expired")) {
-        setTxError("Quote expired. Refreshing...");
+        setTxError("Price expired — refreshing...");
         setRefreshNonce((prev) => prev + 1);
       } else if (normalized.includes("consume") || normalized.includes("used") || normalized.includes("replay")) {
-        setTxError("Quote already consumed. Requesting a new one.");
+        setTxError("Quote already used — getting a new one.");
         setRefreshNonce((prev) => prev + 1);
       } else if (normalized.includes("insufficient_escrow_balance")) {
-        setTxError("Insufficient escrow balance. Deposit more in the dashboard.");
+        setTxError("Not enough escrow balance — add funds in the dashboard.");
       } else {
         setTxError(message);
       }
@@ -688,7 +688,7 @@ export function StakeQuoteCard({
         // best effort
       }
       if (!cancelled && relayerJobId && !txHash && pendingStart && Date.now() - pendingStart > 60_000) {
-        setTxError("Relayer is taking longer than expected. Please retry once.");
+        setTxError("Transaction is taking longer than usual. Please try again.");
       }
       if (!cancelled) {
         setTimeout(poll, 5000);

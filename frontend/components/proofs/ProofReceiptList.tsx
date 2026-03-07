@@ -61,9 +61,9 @@ function ProofReceiptCard({ receipt }: CardProps) {
         : null;
 
   const detailItems: DetailItem[] = [
-    { label: "Request id", value: receipt.requestId },
+    { label: "Request ID", value: receipt.requestId },
     { label: "Market address", value: receipt.marketAddress },
-    { label: "Settlement tx", value: settlementTxDisplay },
+    { label: "Settlement transaction", value: settlementTxDisplay },
     { label: "Proof hash", value: receipt.proofHash },
     { label: "Circuit hash", value: receipt.circuitHash },
     { label: "Prover build", value: receipt.proverVersion },

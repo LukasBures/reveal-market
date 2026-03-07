@@ -179,7 +179,7 @@ describe("TradeSubmission", () => {
         fxStale={true}
       />,
     );
-    expect(screen.getByText(/pricing paused due to stale fx/i)).toBeInTheDocument();
+    expect(screen.getByText(/pricing temporarily paused/i)).toBeInTheDocument();
   });
 
   it("shows cap exhausted warning", () => {
@@ -189,7 +189,7 @@ describe("TradeSubmission", () => {
         capExhausted={true}
       />,
     );
-    expect(screen.getByText(/stake cap reached/i)).toBeInTheDocument();
+    expect(screen.getByText(/maximum position size reached/i)).toBeInTheDocument();
   });
 
   // --- Progress indicator tests ---

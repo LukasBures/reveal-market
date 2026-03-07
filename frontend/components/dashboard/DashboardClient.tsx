@@ -38,7 +38,7 @@ const POSITION_LIFECYCLE_STAGES = [
   {
     key: "pending_resolution",
     label: "Resolved",
-    description: "Oracle & Proof",
+    description: "Verifying outcome",
   },
   { key: "settled", label: "Settled", description: "Payout path ready" },
   { key: "claimed", label: "Claimed", description: "Payout received" },
@@ -50,9 +50,9 @@ const STAGE_TOOLTIPS: Record<string, string> = {
   locked:
     "Betting is now closed. The market's deadline has passed and no new stakes are accepted. The system is waiting for the oracle to report the real-world result. Your funds are safe.",
   pending_resolution:
-    "The oracle has posted the result and winners are determined. A zero-knowledge proof is now being generated to verify every commitment was processed fairly — without revealing individual bets. This typically takes a few minutes.",
+    "The result has been posted and winners are determined. A zero-knowledge proof is being generated to verify every commitment was processed correctly — without revealing individual bets. This typically takes a few minutes.",
   settled:
-    'The ZK proof has been verified on-chain — payouts are mathematically guaranteed. If you picked the winning outcome, click "Get payment data" then "Claim" to receive your winnings directly to your wallet.',
+    'The ZK proof has been verified on-chain — payouts are mathematically guaranteed. If you picked the winning outcome, click "Prepare to claim" then "Claim" to receive your winnings directly to your wallet.',
   claimed:
     "You successfully claimed your payout. The winnings were sent directly to your wallet address as an ERC20 transfer.",
   cancelled:
@@ -198,7 +198,7 @@ function PositionStatusFlow({
             : isFinal
             ? "All phases complete"
             : awaitingProof
-            ? "Awaiting proof"
+            ? "Generating proof"
             : "Flowing"}
         </span>
       </div>
@@ -1441,7 +1441,7 @@ export function DashboardClient() {
                               {toWinZen !== null
                                 ? `${formatZenDown(toWinZen)} ZEN`
                                 : p.claimable
-                                ? "Get payment data"
+                                ? "Prepare to claim"
                                 : "—"}
                             </p>
                             {p.claimable && toWinZen === null ? (
@@ -1547,7 +1547,7 @@ export function DashboardClient() {
                                 )}
                                 {preparingBundles.has(bundleKey)
                                   ? "Preparing..."
-                                  : "Get payment data"}
+                                  : "Prepare to claim"}
                               </button>
                             )
                           ) : null}

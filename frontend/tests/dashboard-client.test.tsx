@@ -167,7 +167,7 @@ describe("DashboardClient", () => {
     const getPaymentButton = screen
       .getAllByRole("button")
       .find(
-        (btn) => btn.textContent?.trim().toLowerCase() === "get payment data",
+        (btn) => btn.textContent?.trim().toLowerCase() === "prepare to claim",
       );
     expect(getPaymentButton).toBeTruthy();
     fireEvent.click(getPaymentButton!);

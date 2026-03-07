@@ -6,12 +6,13 @@ import { JsonLd } from "@/components/seo/JsonLd";
 export const metadata: Metadata = buildMetadata({
   title: "About Reveal Market",
   description:
-    "Reveal Market pairs zero-knowledge prediction rails with institution-ready infrastructure and a clear roadmap.",
+    "Reveal Market is a private prediction market platform built for serious traders. Commits stay private while markets are live, and every settlement is verified on-chain.",
   path: "/about",
   keywords: [
     "about reveal market",
-    "prediction market team",
-    "institutional infrastructure",
+    "private prediction markets",
+    "commit reveal",
+    "on-chain settlement",
   ],
   type: "article",
 });
@@ -24,32 +25,31 @@ export default function AboutPage() {
   const articleSchema = buildArticleJsonLd({
     title: "About Reveal Market",
     description:
-      "Reveal Market pairs zero-knowledge prediction rails with institution-ready infrastructure and a clear roadmap.",
+      "Reveal Market is a private prediction market platform built for serious traders. Commits stay private while markets are live, and every settlement is verified on-chain.",
     path: "/about",
   });
   return (
     <>
       <div className="mx-auto max-w-7xl px-4 py-12 pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] sm:py-16">
         <p className="text-xs uppercase tracking-[0.35em] text-slate-400">About</p>
-        <h1 className="mt-2 text-3xl font-semibold text-white sm:text-4xl">Built for high-signal traders & builders.</h1>
+        <h1 className="mt-2 text-3xl font-semibold text-white sm:text-4xl">Built for serious traders and on-chain builders.</h1>
         <p className="mt-4 text-base text-slate-300 sm:text-lg">
-          Reveal Market couples a hardened FastAPI backend, async ingestion worker, Redis edge caching, and Foundry-based
-          smart contracts. Our commit-and-reveal design keeps alpha private until settlement, while zk-proof verification
-          ensures payouts remain trustless.
+          Reveal Market uses a commit-and-reveal design that keeps your positions private until a market settles. Every
+          payout is verified by a zero-knowledge proof, so outcomes are trustless and receipts are public.
         </p>
         <div className="mt-10 grid gap-6 md:grid-cols-2">
           <div className="rounded-2xl border border-white/10 p-5">
             <h2 className="text-xl font-semibold text-white">What’s live</h2>
             <ul className="mt-4 list-disc space-y-2 pl-5 text-slate-300">
-              <li>FastAPI read/write surface with Redis-backed caching.</li>
-              <li>Worker daemon syncing external feeds alongside on-chain deployments.</li>
-              <li>zk-powered RevealMarket + MarketFactory contracts.</li>
+              <li>Fast, reliable market data with real-time updates.</li>
+              <li>Live event feeds synced from external sources to on-chain markets.</li>
+              <li>Zero-knowledge proof contracts for trustless, verifiable settlement.</li>
             </ul>
           </div>
           <div className="rounded-2xl border border-white/10 p-5">
             <h2 className="text-xl font-semibold text-white">What’s next</h2>
             <ul className="mt-4 list-disc space-y-2 pl-5 text-slate-300">
-              <li>Wallet-native onboarding with Wagmi + RainbowKit.</li>
+              <li>Seamless wallet onboarding for new participants.</li>
               <li>Horizen and Polygon deployment presets.</li>
               <li>Full docs library at revealmarket.xyz/docs.</li>
             </ul>

@@ -26,7 +26,7 @@ export default function OgImage() {
           REVEAL MARKET
         </div>
         <div style={{ fontSize: 56, fontWeight: 600, lineHeight: 1.1 }}>
-          Trustless commit-reveal markets.
+          Private prediction markets.
         </div>
         <div style={{ marginTop: 24, fontSize: 28, opacity: 0.8 }}>
           Private while live. Provable at the end.

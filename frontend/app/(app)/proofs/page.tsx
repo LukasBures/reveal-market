@@ -71,11 +71,11 @@ export default async function ProofsPage({
     <>
       <div className="mx-auto max-w-7xl px-4 py-12 pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] sm:py-16">
         <div className="space-y-3">
-          <p className="text-xs uppercase tracking-[0.35em] text-slate-400">Proof ledger</p>
+          <p className="text-xs uppercase tracking-[0.35em] text-slate-400">Proof receipts</p>
           <h1 className="text-3xl font-semibold text-white sm:text-4xl">Settlement proofs & receipt ledger</h1>
           <p className="text-base text-slate-300 sm:text-lg">
             Every resolved market publishes a receipt that shows the outcome and payout summary. Filter by market or
-            request id to verify what was paid.
+            request ID to verify what was paid.
           </p>
         </div>
         {error ? (

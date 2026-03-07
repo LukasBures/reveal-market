@@ -589,7 +589,7 @@ export function ConnectWalletButton() {
                     <p className="text-xs uppercase tracking-[0.3em] text-white/50">Terms and Conditions agreement</p>
                   </div>
                   <p className="text-sm text-white/70">
-                    By connecting your wallet, you acknowledge that you have read and agree to the{" "}
+                    By connecting, you agree to the{" "}
                     <Link
                       href="/terms"
                       className="text-brand-300 underline underline-offset-4"
@@ -609,7 +609,7 @@ export function ConnectWalletButton() {
                     >
                       Privacy Policy
                     </Link>
-                    , and that you understand the protocol documentation and associated risks.
+                    {" "}and acknowledge the risks of using experimental blockchain software.
                   </p>
                   <label className="flex items-start gap-3 text-sm text-white/80">
                     <input

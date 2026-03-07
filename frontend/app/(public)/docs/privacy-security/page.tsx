@@ -22,7 +22,7 @@ export default function PrivacySecurityPage() {
       <h1 className="text-4xl font-semibold text-white">Privacy & Security</h1>
       <p className="text-lg text-slate-300">
         Markets stay private while they&apos;re live. When they settle, we publish receipts so you can see what won and
-        why. Access uses passcodes during the MVP, and ops can pause or close boards when needed.
+        why. Access uses passcodes during the MVP, and markets can be paused or closed when needed.
       </p>
       <ul className="list-disc space-y-3 pl-6 text-slate-200">
         <li>
@@ -39,8 +39,8 @@ export default function PrivacySecurityPage() {
         </li>
       </ul>
       <p className="text-slate-200">
-        Boards show status and pauses before you commit, reinforcing that private prediction markets remain transparent
-        when it matters. Access gating keeps orderflow tight until receipts publish.
+        Markets show status and pause states before you commit, keeping things transparent when it matters. Access
+        controls keep order flow private until receipts publish.
       </p>
       <p className="text-slate-200">
         For access questions, incident reports, or compliance needs, reach out via the{" "}

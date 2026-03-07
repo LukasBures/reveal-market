@@ -97,7 +97,7 @@ export const metadata: Metadata = {
     template: "%s | Reveal Market",
   },
   description: "Private prediction markets that keep entries private while events play out and publish clear settlement receipts.",
-  keywords: ["reveal market", "prediction markets", "private markets", "institutional trading"],
+  keywords: ["reveal market", "prediction markets", "private markets", "commit reveal", "settlement receipts", "zk proofs", "verified payouts"],
   robots: {
     index: true,
     follow: true,

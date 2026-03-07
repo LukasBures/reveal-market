@@ -71,8 +71,7 @@ export default async function MarketsSearchPage({ searchParams }: PageProps) {
           outcomes post.
         </p>
         <p className="text-sm text-white/70">
-          Tip: type at least two characters. Filters apply to private events with fixed ticket size and claim after
-          settlement.
+          Type at least 2 characters to search. Filters apply to live and resolved markets.
         </p>
       </div>
       <div className="mt-8">

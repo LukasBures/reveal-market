@@ -228,12 +228,12 @@ export function TradeSubmission({
       {stakeError && <p className="text-xs text-rose-300">{stakeError}</p>}
       {fxStale && (
         <p className="text-[11px] uppercase tracking-[0.2em] text-amber-300">
-          Pricing paused due to stale FX. Please retry in a moment.
+          Pricing temporarily paused. Please retry in a moment.
         </p>
       )}
       {capExhausted && (
         <p className="text-[11px] uppercase tracking-[0.2em] text-amber-200">
-          Stake cap reached for this market/user. Try again later.
+          Maximum position size reached for this market. Try again later.
         </p>
       )}
       {chainMismatch && (
