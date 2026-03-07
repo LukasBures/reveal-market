@@ -7,7 +7,7 @@ const mockDefaultChain = vi.hoisted(
   () =>
     ({
       id: 2651420,
-      name: "Horizen Testnet",
+      name: "Horizen",
       nativeCurrency: { name: "Zen", symbol: "ZEN", decimals: 18 },
       rpcUrls: {
         default: { http: ["https://horizen-testnet.rpc.caldera.xyz/http"] },
@@ -105,6 +105,6 @@ describe("Escrow funding guard", () => {
 
     const switchButton = screen.getByRole("button", { name: /switch to horizen/i });
     expect(switchButton).toBeDisabled();
-    expect(screen.getByText(/switch to horizen testnet to trade/i)).toBeInTheDocument();
+    expect(screen.getByText(/switch to horizen to trade/i)).toBeInTheDocument();
   });
 });

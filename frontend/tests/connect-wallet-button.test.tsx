@@ -49,7 +49,7 @@ const injectedConnector = createConnector("injected", "Injected");
 const coinbaseConnector = createConnector("coinbaseWalletSDK", "Coinbase Wallet");
 const walletConnectConnector = createConnector("walletConnect", "WalletConnect");
 const hoistedDefaults = vi.hoisted(() => ({
-  defaultChain: { id: 2651420, name: "Horizen Testnet" } as const,
+  defaultChain: { id: 2651420, name: "Horizen" } as const,
 }));
 
 let currentAccountState: WagmiAccountState;

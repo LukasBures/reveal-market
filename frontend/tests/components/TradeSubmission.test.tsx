@@ -20,7 +20,7 @@ const defaultProps = {
   fxStale: false,
   capExhausted: false,
   chainMismatch: false,
-  chainName: "Horizen Testnet",
+  chainName: "Horizen",
   expectedChainId: 2651420,
   tradingDisabled: false,
   tradingReason: null,
@@ -156,7 +156,7 @@ describe("TradeSubmission", () => {
       />,
     );
     expect(
-      screen.getByText(/switch to horizen testnet \(chain 2651420\) to trade/i),
+      screen.getByText(/switch to horizen \(chain 2651420\) to trade/i),
     ).toBeInTheDocument();
   });
 

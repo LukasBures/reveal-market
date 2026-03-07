@@ -15,7 +15,7 @@ const globalState = globalThis as typeof globalThis & {
 };
 
 const EXPECTED_CHAIN_ID = 2651420;
-const FALLBACK_CHAIN_NAME = "Horizen Testnet";
+const FALLBACK_CHAIN_NAME = "Horizen";
 const FALLBACK_RPC_URL = "https://horizen-testnet.rpc.caldera.xyz/http";
 const FALLBACK_EXPLORER = "https://horizen-testnet.explorer.caldera.xyz";
 
