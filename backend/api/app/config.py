@@ -324,11 +324,6 @@ class Settings(BaseSettings):
     market_protocol_liability_cap_wei: int = Field(
         default=0, ge=0, description="Protocol liability cap per market (wei); 0 = unlimited"
     )
-    market_commit_lead_seconds: int = Field(
-        default_factory=lambda: int(PRESET.get("market_commit_lead_seconds", 86400)),
-        ge=60,
-        description="Seconds from now to set commit deadline when auto-creating markets",
-    )
     market_reveal_lead_seconds: int = Field(
         default=172800,
         ge=60,

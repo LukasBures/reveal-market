@@ -285,9 +285,6 @@ class Settings(BaseSettings):
     worsen_percent: float = Field(default=0.03, ge=0, lt=0.25)
     lp_share_percent: float = Field(default=0.18, ge=0, lt=0.5)
     commit_cutoff_seconds: int = Field(default=900, ge=0)
-    default_commit_lead_seconds: int = Field(
-        default_factory=lambda: int(PRESET.get("default_commit_lead_seconds", 86400)), ge=60
-    )
     default_reveal_lead_seconds: int = Field(default=172800, ge=120)
     max_web3_retries: int = Field(default=3, ge=1)
     resolution_refresh_interval_seconds: int = Field(default=300, ge=60)

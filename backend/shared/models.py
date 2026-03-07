@@ -319,6 +319,7 @@ class SettlementSubmissionStatus(StrEnum):
     QUEUED = "queued"
     PROCESSING = "processing"
     SUBMITTED = "submitted"
+    CONFIRMED = "confirmed"
     FAILED = "failed"
 
 
@@ -330,7 +331,7 @@ class Settlement(Base):
             name="ck_settlements_proof_status",
         ),
         CheckConstraint(
-            "submission_status IN ('none','queued','processing','submitted','failed')",
+            "submission_status IN ('none','queued','processing','submitted','confirmed','failed')",
             name="ck_settlements_submission_status",
         ),
     )

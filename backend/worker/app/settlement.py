@@ -323,7 +323,7 @@ async def _fetch_onchain_snapshot(web3: AsyncWeb3, market_address: str) -> dict[
     try:
         result_posted = bool(await contract.functions.resultPosted().call())
     except Exception:
-        result_posted = winning_outcome_id is not None
+        result_posted = int(winning_outcome_id) > 0 if winning_outcome_id is not None else False
     batch_roots: list[str] = []
     batch_counts: list[int] = []
     try:
@@ -339,6 +339,13 @@ async def _fetch_onchain_snapshot(web3: AsyncWeb3, market_address: str) -> dict[
             results: list[tuple[str, int] | BaseException] = await asyncio.gather(*tasks, return_exceptions=True)
             for result in results:
                 if isinstance(result, BaseException):
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        event="worker.settlement.batch_fetch_failed",
+                        message="failed to fetch batch root",
+                        error=str(result),
+                    )
                     continue
                 root_value, count_value = result
                 batch_roots.append(root_value)
@@ -1198,11 +1205,28 @@ async def _build_merkle_proof_for_commitment(
         computed_root, paths = build_merkle_root_and_paths(batch_leaves)
         expected_root = bytes.fromhex(str(batch_roots[batch_index]).removeprefix("0x"))
         if computed_root != expected_root:
+            log_event(
+                logger,
+                logging.WARNING,
+                event="worker.settlement.merkle_root_mismatch",
+                message="computed merkle root does not match on-chain root",
+                batch_index=batch_index,
+                computed=computed_root.hex(),
+                expected=expected_root.hex(),
+            )
             return []
         proof = ["0x" + sibling.hex() for sibling in paths[index_in_batch]]
         await shared_repository.replace_merkle_path(session, commitment.id, proof)
         return proof
-    except Exception:
+    except Exception as exc:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.settlement.merkle_proof_error",
+            message="failed to compute merkle proof",
+            batch_index=batch_index,
+            error=str(exc),
+        )
         return []
 
 
@@ -1425,6 +1449,9 @@ async def run_settlement_jobs(summary, redis_client: Redis | None, market_id: st
                 winning_outcome_id = settlement.winning_outcome_id
                 if winning_outcome_id is None:
                     winning_outcome_id = await _resolve_winning_outcome(session, market)
+                    if winning_outcome_id is not None:
+                        settlement.winning_outcome_id = winning_outcome_id
+                        session.add(settlement)
                 if winning_outcome_id is None:
                     continue
                 oracle_addr = None
@@ -1590,6 +1617,7 @@ async def run_settlement_jobs(summary, redis_client: Redis | None, market_id: st
                     continue
 
                 settlement.settlement_block_number = block_number
+                settlement.submission_status = shared_models.SettlementSubmissionStatus.CONFIRMED.value
                 settlement.submission_error = None
                 _mark_dirty()
                 session.add(settlement)

@@ -988,6 +988,13 @@ async def _reserve_ticket_id(market_address: str, tentative_next: int) -> int:
 async def _record_commit_nonce(nonce: int) -> None:
     cache = await get_cache_client()
     if cache is None:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="trade.commit.nonce_cache_unavailable",
+            message="redis unavailable; commit nonce dedup skipped",
+            nonce=nonce,
+        )
         return
     key = f"commit_nonce:{nonce}"
     try:
@@ -995,7 +1002,7 @@ async def _record_commit_nonce(nonce: int) -> None:
     except Exception as exc:  # pragma: no cover - best-effort guard
         log_event(
             logger,
-            logging.DEBUG,
+            logging.WARNING,
             event="trade.commit.nonce_cache_failed",
             message="failed to record commit nonce",
             nonce=nonce,
@@ -1115,12 +1122,19 @@ async def _maybe_create_market_onchain(session: AsyncSession, market_obj) -> tup
         web3 = get_async_web3(str(rpc_url))
         factory = web3.eth.contract(address=to_checksum(settings.factory_address), abi=MARKET_FACTORY_ABI)
         closes_at = getattr(market_obj, "closes_at", None)
-        if closes_at is not None:
-            if isinstance(closes_at, datetime) and closes_at.tzinfo is None:
-                closes_at = closes_at.replace(tzinfo=UTC)
-            commit_deadline = int(closes_at.timestamp()) - 900
-        else:
-            commit_deadline = int(time.time()) + int(settings.market_commit_lead_seconds)
+        if closes_at is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="market_missing_closes_at",
+            )
+        if isinstance(closes_at, datetime) and closes_at.tzinfo is None:
+            closes_at = closes_at.replace(tzinfo=UTC)
+        commit_deadline = int(closes_at.timestamp()) - int(settings.commit_cutoff_seconds)
+        if commit_deadline <= int(time.time()):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="market_closes_too_soon",
+            )
         params = (
             to_checksum(settings.oracle_address),
             to_checksum(settings.verifier_address),
@@ -1310,7 +1324,7 @@ async def _build_merkle_proof_for_commitment(
 
     if not batch_roots and settlement.merkle_root and not _is_empty_hex(settlement.merkle_root):
         batch_roots = [settlement.merkle_root]
-        batch_counts = [settlement.commitments_count]
+        batch_counts = [settlement.commitments_count or 0]
     if not batch_roots:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="merkle_root_missing")
     if commitment.leaf_index is None:
@@ -1771,6 +1785,13 @@ async def trade_commit(
 ) -> schemas.TradeCommitResponse:
     """Consume a pricing quote, build CommitAuth, and forward to the relayer."""
 
+    # Lightweight Redis lock to prevent the same quote being committed concurrently (TOCTOU).
+    quote_lock_key = f"quote:lock:{payload.quote_id}"
+    cache = await get_cache_client()
+    if cache:
+        acquired = await _resolve_awaitable(cache.set(quote_lock_key, "1", ex=30, nx=True))
+        if not acquired:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="quote_already_consumed")
     db_quote, quote = await _get_quote(session, payload.quote_id)
     if not wallet_signature:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="wallet_signature_required")
@@ -2372,14 +2393,18 @@ async def trade_claim(
     ticket_id = commitment.leaf_index
     if not internal_request:
         _verify_claim_signature(payload.wallet_address, market.event_id, ticket_id, cast(str, wallet_signature))
-    if commitment.claimed_at is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="ticket_already_claimed")
     claimed_map = await _fetch_claimed_tickets(market.market_address, [ticket_id])
     if claimed_map.get(int(ticket_id)):
-        commitment.claimed_at = datetime.now(tz=UTC)
+        if commitment.claimed_at is None:
+            commitment.claimed_at = datetime.now(tz=UTC)
+            session.add(commitment)
+            await session.flush()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="ticket_already_claimed")
+    if commitment.claimed_at is not None:
+        # On-chain says not claimed — clear stale claimed_at from a failed relayer job
+        commitment.claimed_at = None
         session.add(commitment)
         await session.flush()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="ticket_already_claimed")
     merkle_proof = [row.sibling_hash for row in path_rows] if path_rows else []
     if not merkle_proof:
         merkle_proof = await _build_merkle_proof_for_commitment(session, market, settlement, commitment)
@@ -2387,10 +2412,15 @@ async def trade_claim(
     batch_counts = _parse_json_list(getattr(settlement, "batch_counts", None))
     if not batch_roots and settlement.merkle_root and not _is_empty_hex(settlement.merkle_root):
         batch_roots = [settlement.merkle_root]
-        batch_counts = [settlement.commitments_count]
+        batch_counts = [settlement.commitments_count or 0]
     if not settings.relayer_base_url:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="relayer_unconfigured")
     claim_lock_key = await _claim_rate_and_lock(market.event_id, payload.wallet_address, ticket_id)
+    if claim_lock_key is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="claim_lock_unavailable",
+        )
     relayer_payload = {
         "user": payload.wallet_address,
         "market": market.market_address,
@@ -2398,9 +2428,9 @@ async def trade_claim(
         "outcome_id": winning_outcome,
         "amount": int(commitment.amount_wei),
         "payout": int(commitment.payout_wei),
-        "salt": commitment.salt,
+        "salt": commitment.salt or "0x0",
         "merkle_proof": merkle_proof,
-        "merkle_root": settlement.merkle_root,
+        "merkle_root": _batch_root_for_ticket(settlement, ticket_id) or settlement.merkle_root,
         "batch_roots": batch_roots,
         "batch_counts": batch_counts,
         "commitments_count": settlement.commitments_count,
@@ -2426,6 +2456,9 @@ async def trade_claim(
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
         tx_hash = _extract_tx_hash(result) or _extract_job_id(result) or relayer_job or ""
+        commitment.claimed_at = datetime.now(tz=UTC)
+        session.add(commitment)
+        await session.flush()
         return schemas.TradeClaimResponse(
             tx_hash=str(tx_hash),
             market_id=market.event_id,

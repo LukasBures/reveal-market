@@ -47,7 +47,6 @@ PRESETS: dict[str, dict[str, Any]] = {
         "rate_limit_enabled": False,
         "rate_limit_trusted_proxies": ["127.0.0.1"],
         "run_migrations_on_startup": True,
-        "market_commit_lead_seconds": 360,
         # --- Streamer ---
         "streamer_public": "http://localhost:8100",
         "streamer_internal": "http://streamer:8100",
@@ -62,7 +61,6 @@ PRESETS: dict[str, dict[str, Any]] = {
         "worker_memory_trim_threshold_mb": 1400,
         "worker_memory_abort_threshold_mb": 1700,
         "polymarket_stream_persist": True,
-        "default_commit_lead_seconds": 360,
         # --- Hedger ---
         "hedger_environment": "dev",
         # --- Caddy ---
@@ -100,7 +98,6 @@ PRESETS: dict[str, dict[str, Any]] = {
         "rate_limit_enabled": True,
         "rate_limit_trusted_proxies": ["172.16.0.0/12", "127.0.0.1"],
         "run_migrations_on_startup": False,
-        "market_commit_lead_seconds": 7200,
         # --- Streamer ---
         "streamer_public": "https://stream.revealmarket.xyz",
         "streamer_internal": "http://streamer:8100",
@@ -114,7 +111,6 @@ PRESETS: dict[str, dict[str, Any]] = {
         "worker_memory_trim_threshold_mb": 0,
         "worker_memory_abort_threshold_mb": 0,
         "polymarket_stream_persist": False,
-        "default_commit_lead_seconds": 7200,
         # --- Hedger ---
         "hedger_environment": "production",
         # --- Caddy ---

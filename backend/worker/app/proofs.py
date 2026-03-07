@@ -848,6 +848,19 @@ async def maybe_generate_settlement_proof(
                         circuit_hash=response.circuit_hash,
                         generated_at=response.generated_at,
                     )
+        await clear_failure(redis_client, retry_key)
+        for payload, response, _proof_hash in results:
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="worker.proof.generated",
+                message="cached settlement proof receipt",
+                event_id=market_event_id,
+                condition_id=normalized_condition or condition_id or market_snapshot.get("condition_id"),
+                prover_version=response.prover_version,
+                nonce=getattr(response, "request_id", None),
+                batch_index=payload.get("batchIndex"),
+            )
     except Exception as exc:  # pragma: no cover - best effort
         log_event(
             logger,
@@ -859,19 +872,6 @@ async def maybe_generate_settlement_proof(
         )
 
     await _notify_status_change()
-    await clear_failure(redis_client, retry_key)
-    for payload, response, _proof_hash in results:
-        log_event(
-            logger,
-            logging.DEBUG,
-            event="worker.proof.generated",
-            message="cached settlement proof receipt",
-            event_id=market_event_id,
-            condition_id=normalized_condition or condition_id or market_snapshot.get("condition_id"),
-            prover_version=response.prover_version,
-            nonce=getattr(response, "request_id", None),
-            batch_index=payload.get("batchIndex"),
-        )
     return True
 
 
