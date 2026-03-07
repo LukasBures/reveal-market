@@ -25,6 +25,10 @@ def validate_required_secrets() -> None:
         missing.append("RM_RELAYER_BASE_URL")
     if settings.rpc_url is None:
         missing.append("RM_RPC_URL")
+    # Item 2: relayer webhook secret must be set so fabricated settlement
+    # confirmations cannot be POSTed to the webhook endpoint.
+    if not settings.relayer_webhook_secret:
+        missing.append("RM_RELAYER_WEBHOOK_SECRET")
     if missing:
         log_event(
             logger,
@@ -34,3 +38,16 @@ def validate_required_secrets() -> None:
             missing=missing,
         )
         raise RuntimeError(f"missing required secrets for production: {', '.join(missing)}")
+
+    # Item 3: rate limiting must be enabled so pricing/commit endpoints cannot
+    # be abused. The prod preset sets this to True; warn loudly if overridden.
+    if not settings.rate_limit_enabled:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="startup.validation.rate_limit_disabled",
+            message=(
+                "RM_RATE_LIMIT_ENABLED is False in production — "
+                "pricing and commit endpoints are unprotected against abuse"
+            ),
+        )

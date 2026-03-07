@@ -989,14 +989,20 @@ async def _reserve_ticket_id(market_address: str, tentative_next: int) -> int:
 async def _record_commit_nonce(nonce: int) -> None:
     cache = await get_cache_client()
     if cache is None:
+        # Item 4: Reject rather than silently bypass dedup when Redis is down.
+        # Silently skipping opens a replay window — duplicate commits reach the
+        # relayer and waste gas. A 503 is honest and retryable.
         log_event(
             logger,
-            logging.WARNING,
+            logging.ERROR,
             event="trade.commit.nonce_cache_unavailable",
-            message="redis unavailable; commit nonce dedup skipped",
+            message="redis unavailable; rejecting commit to prevent nonce replay window",
             nonce=nonce,
         )
-        return
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="cache_unavailable_retry",
+        )
     key = f"commit_nonce:{nonce}"
     try:
         added = await _resolve_awaitable(cache.set(key, "1", ex=int(settings.commit_nonce_ttl_seconds), nx=True))
