@@ -439,8 +439,8 @@ jobs:
       (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     env:
-      TESTNET_RPC_URL: ${{ vars.RM_RPC_URL }}
-      REVEAL_MARKET_ADDRESS: ${{ vars.RM_VERIFIER_ADDRESS }}
+      RM_RPC_URL: ${{ vars.RM_RPC_URL }}
+      RM_VERIFIER_ADDRESS: ${{ vars.RM_VERIFIER_ADDRESS }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
         with:
@@ -453,7 +453,7 @@ jobs:
 
       - name: Verify circuit hash alignment
         run: |
-          if [ -z "${TESTNET_RPC_URL}" ] || [ -z "${REVEAL_MARKET_ADDRESS}" ]; then
+          if [ -z "${RM_RPC_URL}" ] || [ -z "${RM_VERIFIER_ADDRESS}" ]; then
             echo "::warning::RM_RPC_URL or RM_VERIFIER_ADDRESS repo var not set — skipping circuit hash check"
             exit 0
           fi
@@ -468,8 +468,8 @@ jobs:
             exit 1
           fi
           ONCHAIN_HASH=$(cast call \
-            --rpc-url "${TESTNET_RPC_URL}" \
-            "${REVEAL_MARKET_ADDRESS}" \
+            --rpc-url "${RM_RPC_URL}" \
+            "${RM_VERIFIER_ADDRESS}" \
             "circuitHash()(bytes32)" 2>/dev/null || echo "")
           if [ -z "${ONCHAIN_HASH}" ]; then
             echo "::error::Failed to read circuitHash() from deployed contract"
