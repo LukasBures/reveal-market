@@ -349,7 +349,7 @@ async def _fetch_onchain_snapshot(web3: AsyncWeb3, market_address: str) -> dict[
     return {
         "commitments_count": int(next_ticket_id),
         "phase": int(phase_value),
-        "winning_outcome_id": int(winning_outcome_id) if winning_outcome_id is not None else None,
+        "winning_outcome_id": int(winning_outcome_id) if (result_posted and winning_outcome_id is not None) else None,
         "total_escrow": int(total_escrow),
         "total_liability": int(total_liability),
         "pool_total_yes": int(pool_total_yes),
