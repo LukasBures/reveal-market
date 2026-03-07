@@ -423,6 +423,69 @@ jobs:
         run: ./run_tests.sh -v
 
   # ──────────────────────────────────────────────
+  # Item 8: Circuit hash alignment check
+  # Verifies the prover artifact circuit hash matches the on-chain verifier
+  # before any deploy proceeds. Requires secrets: TESTNET_RPC_URL,
+  # REVEAL_MARKET_ADDRESS. Missing secrets produce a warning, not a failure,
+  # so the check degrades gracefully until secrets are provisioned.
+  # ──────────────────────────────────────────────
+
+  circuit-hash-check:
+    needs: [prover]
+    if: |
+      always() &&
+      needs.prover.result != 'failure' &&
+      needs.prover.result != 'cancelled' &&
+      (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    env:
+      TESTNET_RPC_URL: ${{ secrets.TESTNET_RPC_URL }}
+      REVEAL_MARKET_ADDRESS: ${{ secrets.REVEAL_MARKET_ADDRESS }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+        with:
+          submodules: false
+
+      - name: Install Foundry (cast)
+        uses: foundry-rs/foundry-toolchain@82d8c5f9083b02d56a14abc1784eb8acb1a4be71  # v1.2.0
+        with:
+          version: stable
+
+      - name: Verify circuit hash alignment
+        run: |
+          if [ -z "${TESTNET_RPC_URL}" ] || [ -z "${REVEAL_MARKET_ADDRESS}" ]; then
+            echo "::warning::TESTNET_RPC_URL or REVEAL_MARKET_ADDRESS secret not set — skipping circuit hash check"
+            exit 0
+          fi
+          MANIFEST="prover/artifacts/settlement_hashes.json"
+          if [ ! -f "${MANIFEST}" ]; then
+            echo "::warning::Prover artifact manifest not found — skipping circuit hash check"
+            exit 0
+          fi
+          ARTIFACT_HASH=$(jq -r '.circuit_hash // .circuitHash // empty' "${MANIFEST}")
+          if [ -z "${ARTIFACT_HASH}" ]; then
+            echo "::error::circuit_hash not found in ${MANIFEST}"
+            exit 1
+          fi
+          ONCHAIN_HASH=$(cast call \
+            --rpc-url "${TESTNET_RPC_URL}" \
+            "${REVEAL_MARKET_ADDRESS}" \
+            "circuitHash()(bytes32)" 2>/dev/null || echo "")
+          if [ -z "${ONCHAIN_HASH}" ]; then
+            echo "::error::Failed to read circuitHash() from deployed contract"
+            exit 1
+          fi
+          ARTIFACT_NORM=$(echo "${ARTIFACT_HASH}" | tr '[:upper:]' '[:lower:]')
+          ONCHAIN_NORM=$(echo "${ONCHAIN_HASH}" | tr '[:upper:]' '[:lower:]')
+          echo "Artifact hash : ${ARTIFACT_NORM}"
+          echo "On-chain hash : ${ONCHAIN_NORM}"
+          if [ "${ARTIFACT_NORM}" != "${ONCHAIN_NORM}" ]; then
+            echo "::error::Circuit hash MISMATCH — deploy blocked."
+            exit 1
+          fi
+          echo "Circuit hash aligned."
+
+  # ──────────────────────────────────────────────
   # Deploy to production
   # ──────────────────────────────────────────────
 
@@ -436,6 +499,7 @@ jobs:
       - contracts-zen
       - frontend
       - prover
+      - circuit-hash-check
 
     # Deploy on main push, or manual trigger. Skipped jobs (path filtering,
     # skip_tests) are allowed; failures and cancellations block.

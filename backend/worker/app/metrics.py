@@ -199,6 +199,15 @@ MARKET_UPSERT_COUNTER = _safe_counter(
     ["operation"],
 )
 
+# Item 7: Tracks markets that have a resolved outcome but no confirmed on-chain
+# settlement transaction after a grace period. A non-zero value means users
+# cannot claim — triggers MarketsPendingSettlementStale alert.
+SETTLEMENT_STALE_GAUGE = _safe_gauge(
+    "worker_markets_pending_settlement_total",
+    "Markets with a resolved outcome and no confirmed settlement tx (stale > 4h)",
+    [],
+)
+
 
 def record_retention_metrics(category_counts: dict[str, int]) -> None:
     """Increment retention gauge per category so ops can track expired markets by cohort."""

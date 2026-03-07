@@ -8,7 +8,7 @@ import logging
 import secrets
 import time
 from collections.abc import Awaitable, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from eth_account import Account
@@ -32,7 +32,7 @@ from . import runtime
 from .cache_ops import invalidate_cache_tags
 from .database import session_scope
 from .merkle import build_merkle_root_and_paths
-from .metrics import LOCK_BATCHES_COUNTER, RELAYER_QUEUE_COUNTER
+from .metrics import LOCK_BATCHES_COUNTER, RELAYER_QUEUE_COUNTER, SETTLEMENT_STALE_GAUGE
 from .retry import clear_failure, failure_key, record_failure, should_attempt
 
 logger = runtime.logger  # type: ignore[has-type]
@@ -1357,8 +1357,51 @@ async def _enqueue_relayer_claims(
     return enqueued
 
 
+async def _update_settlement_stale_gauge() -> None:
+    """Item 7: Count settlements with a resolved outcome but no confirmed tx after 4 hours.
+
+    A non-zero value means users cannot claim their winnings — triggers the
+    MarketsPendingSettlementStale Prometheus alert.
+    """
+    try:
+        async with session_scope() as session:
+            from sqlalchemy import func as sa_func
+
+            cutoff = datetime.now(UTC) - timedelta(hours=4)
+            # Markets with a known winner but no confirmed settlement tx and
+            # no progress in the last 4 hours.
+            stmt = (
+                select(sa_func.count())
+                .select_from(shared_models.Settlement)
+                .where(
+                    and_(
+                        shared_models.Settlement.winning_outcome_id.is_not(None),
+                        shared_models.Settlement.settlement_tx_hash.is_(None),
+                        shared_models.Settlement.submission_status
+                        != shared_models.SettlementSubmissionStatus.CONFIRMED.value,
+                        shared_models.Settlement.updated_at < cutoff,
+                    )
+                )
+            )
+            result = await session.execute(stmt)
+            count = result.scalar_one_or_none() or 0
+            SETTLEMENT_STALE_GAUGE.labels().set(count)
+    except Exception as exc:  # pragma: no cover - best-effort metric
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.settlement.stale_gauge_error",
+            message="failed to update settlement stale gauge",
+            error=str(exc),
+        )
+
+
 async def run_settlement_jobs(summary, redis_client: Redis | None, market_id: str | None = None) -> int:
     """Submit settlement proofs on-chain for markets with generated proofs and no tx hash."""
+
+    # Item 7: Update stale-settlement gauge so Prometheus can alert when markets
+    # have a resolved outcome but no on-chain settlement tx for >4 hours.
+    await _update_settlement_stale_gauge()
 
     relayer_enabled = bool(runtime.settings.relayer_queue_enabled and runtime.settings.relayer_base_url)
     signer_secret = runtime.settings.settlement_signer_private_key

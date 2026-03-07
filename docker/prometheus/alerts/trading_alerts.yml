@@ -110,3 +110,15 @@ groups:
         annotations:
           summary: "Hedger ZEN float balance is low"
           description: "Float balance: {{ $value }} ZEN."
+
+      # Item 7: Alert when markets are resolved but settlement tx was never submitted.
+      # A non-zero value means users cannot claim — the worker's stale gauge is
+      # updated each settlement loop cycle.
+      - alert: MarketsPendingSettlementStale
+        expr: worker_markets_pending_settlement_total > 0
+        for: 30m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Markets resolved but not settled on-chain"
+          description: "{{ $value }} market(s) have had a resolved outcome for >4h with no confirmed settlement tx. Users cannot claim until settled."
