@@ -1160,7 +1160,7 @@ async def _build_merkle_proof_for_commitment(
     batch_counts = _parse_json_list(getattr(settlement, "batch_counts", None))
     if not batch_roots and settlement.merkle_root and not _is_empty_hex(settlement.merkle_root):
         batch_roots = [settlement.merkle_root]
-        batch_counts = [settlement.commitments_count]
+        batch_counts = [settlement.commitments_count or 0]
     if not batch_roots or not batch_counts or len(batch_roots) != len(batch_counts):
         return []
     if commitment.leaf_index is None:
@@ -1274,6 +1274,7 @@ async def _build_relayer_claim_payloads(
                 "ticket_id": commitment.leaf_index,
                 "outcome_id": winning_outcome,
                 "amount": int(commitment.amount_wei),
+                "payout": int(commitment.payout_wei),
                 "salt": commitment.salt or "0x0",
                 "merkle_proof": merkle_proof,
                 "merkle_root": batch_root,
@@ -1548,6 +1549,48 @@ async def run_settlement_jobs(summary, redis_client: Redis | None, market_id: st
                     )
                     await _mark_failure("missing_proof_receipt")
                     continue
+                # If a previous submission left a tx hash, check its receipt before resubmitting.
+                if settlement.settlement_tx_hash:
+                    try:
+                        block_number = await _wait_for_submission_receipt(
+                            web3,
+                            settlement.settlement_tx_hash,
+                            action="verify_and_settle_batched_retry_check",
+                        )
+                        settlement.settlement_block_number = block_number
+                        settlement.submission_status = shared_models.SettlementSubmissionStatus.CONFIRMED.value
+                        settlement.submission_error = None
+                        _mark_dirty()
+                        session.add(settlement)
+                        await session.commit()
+                        await clear_failure(redis_client, retry_key)
+                        submitted += 1
+                        log_event(
+                            logger,
+                            logging.INFO,
+                            event="worker.settlement.tx_confirmed_on_retry",
+                            message="previous settlement tx confirmed on retry check",
+                            market_id=getattr(market, "event_id", None),
+                            tx_hash=settlement.settlement_tx_hash,
+                            block_number=block_number,
+                        )
+                        if relayer_enabled:
+                            enqueued = await _enqueue_relayer_claims(redis_client, market, settlement)
+                            submitted += enqueued
+                        continue
+                    except Exception as exc:
+                        log_event(
+                            logger,
+                            logging.WARNING,
+                            event="worker.settlement.previous_tx_failed",
+                            message="previous settlement tx not confirmed; resubmitting",
+                            market_id=getattr(market, "event_id", None),
+                            tx_hash=settlement.settlement_tx_hash,
+                            error=str(exc),
+                        )
+                        settlement.settlement_tx_hash = None
+                        session.add(settlement)
+
                 try:
                     await _maybe_post_result(
                         web3,

@@ -181,7 +181,8 @@ async def _enqueue_claim_proof_jobs(
             )
 
 
-async def _fetch_claimed_tickets(market_address: str, ticket_ids: list[int]) -> dict[int, bool]:
+async def _fetch_claimed_tickets(market_address: str, ticket_ids: list[int]) -> dict[int, bool] | None:
+    """Return claimed status per ticket, or ``None`` when the RPC check fails."""
     if not settings.rpc_url or not ticket_ids:
         return {}
     try:
@@ -192,13 +193,13 @@ async def _fetch_claimed_tickets(market_address: str, ticket_ids: list[int]) -> 
     except Exception as exc:  # pragma: no cover - best-effort chain checks
         log_event(
             logger,
-            logging.DEBUG,
+            logging.WARNING,
             event="trade.claimed_tickets.fetch_failed",
             message="failed to fetch claimed tickets from chain",
             market_address=market_address,
             error=str(exc),
         )
-        return {}
+        return None
     claimed: dict[int, bool] = {}
     for ticket_id, result in zip(ticket_ids, results, strict=False):
         if isinstance(result, BaseException):
@@ -1916,6 +1917,11 @@ async def trade_commit(
     protocol_topup_wei = max(0, payout_wei - net_amount_wei)
     await _assert_protocol_pool_headroom(market_onchain_id, market_address, protocol_topup_wei)
 
+    if market_onchain_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="market_onchain_id_unavailable",
+        )
     leaf_value = compute_leaf(ticket_id, outcome_id, net_amount_wei, payout_wei, user_address, salt_hex)
     commitment = int_to_hex32(leaf_value)
 
@@ -1926,7 +1932,7 @@ async def trade_commit(
         ["address", "uint256", "uint256", "bytes32", "address", "uint256", "uint256", "uint256", "uint256"],
         [
             Web3.to_checksum_address(market_address),
-            int(market_onchain_id or 0),
+            int(market_onchain_id),
             ticket_id,
             bytes.fromhex(_strip_hex(commitment)),
             user_address,
@@ -2394,7 +2400,16 @@ async def trade_claim(
     if not internal_request:
         _verify_claim_signature(payload.wallet_address, market.event_id, ticket_id, cast(str, wallet_signature))
     claimed_map = await _fetch_claimed_tickets(market.market_address, [ticket_id])
-    if claimed_map.get(int(ticket_id)):
+    if claimed_map is None:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="trade.claim.rpc_check_skipped",
+            message="RPC claimed-ticket check failed; proceeding with claim",
+            market_address=market.market_address,
+            ticket_id=ticket_id,
+        )
+    if claimed_map is not None and claimed_map.get(int(ticket_id)):
         if commitment.claimed_at is None:
             commitment.claimed_at = datetime.now(tz=UTC)
             session.add(commitment)
@@ -2440,6 +2455,7 @@ async def trade_claim(
         "total_liability": settlement.total_liability,
         "rake_bps": settlement.rake_bps,
         "proof_request_id": settlement.proof_request_id,
+        "event_id": market.event_id,
     }
     relayer_job = None
     try:
