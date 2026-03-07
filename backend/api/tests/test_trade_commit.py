@@ -925,8 +925,13 @@ def test_commit_skips_escrow_when_check_disabled(client, db_session, monkeypatch
 # ---------------------------------------------------------------------------
 
 
-def test_commit_quote_lock_persists_after_failure(client, db_session, monkeypatch):
-    """After relayer failure (502), quote lock remains set; immediate retry gets 409."""
+def test_commit_quote_lock_released_on_relayer_failure(client, db_session, monkeypatch):
+    """After relayer failure (queue disabled), lock is released so the user can retry.
+
+    Before this fix, the lock persisted for 30 s and the user had to fetch a new quote.
+    Now the lock is deleted when we re-raise, so a second attempt with the same quote_id
+    hits the relayer again (not a 409).
+    """
     user = Account.create()
     market = _seed_commit_market(db_session, event_id="mkt-lock-fail")
     settings = runtime.settings
@@ -961,14 +966,14 @@ def test_commit_quote_lock_persists_after_failure(client, db_session, monkeypatc
     )
     assert resp1.status_code == 502
 
-    # Lock was set on first call and not released; second attempt hits it
+    # Lock was released on failure; immediate retry reaches the relayer again (not 409)
     resp2 = client.post(
         "/trade/commit",
         json={"quote_id": "q-lock-fail"},
         headers={"X-Wallet-Signature": sig},
     )
-    assert resp2.status_code == 409
-    assert resp2.json()["detail"] == "quote_already_consumed"
+    assert resp2.status_code == 502  # relayer still failing — but NOT 409 "quote_already_consumed"
+    assert resp2.json().get("detail") != "quote_already_consumed"
 
 
 # ---------------------------------------------------------------------------

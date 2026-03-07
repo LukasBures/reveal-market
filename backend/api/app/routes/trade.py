@@ -1973,6 +1973,10 @@ async def trade_commit(
             relayer_status = "queued"
             relayer_result = {}
         else:
+            # Release the lock so the caller can retry: the relayer failed and the
+            # commitment was not persisted, so retrying with the same quote is safe.
+            if cache:
+                await _resolve_awaitable(cache.delete(quote_lock_key))
             raise exc
 
     tx_hash = _extract_tx_hash(relayer_result)
