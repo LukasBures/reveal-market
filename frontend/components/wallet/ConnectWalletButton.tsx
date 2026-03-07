@@ -702,6 +702,10 @@ export function ConnectWalletButton() {
         )
       : null;
 
+  if (!isMounted) {
+    return <div className="h-9 w-[130px] animate-pulse rounded-full bg-white/10" />;
+  }
+
   return (
     <div>
       <button
