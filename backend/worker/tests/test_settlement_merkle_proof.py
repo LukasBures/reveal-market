@@ -70,3 +70,61 @@ async def test_build_merkle_proof_recomputes_and_persists_paths():
             )
         ).all()
         assert rows
+
+
+# ---------------------------------------------------------------------------
+# Regression: Bug 4 — batch_counts must use ``or 0`` for None commitments_count
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_merkle_proof_returns_empty_when_commitments_count_is_none():
+    """When settlement.commitments_count is None and batch_roots is absent,
+    the proof builder should return an empty list (not crash).
+
+    Before the fix, worker used ``[settlement.commitments_count]`` which
+    produced ``[None]``, diverging from the API's ``[... or 0]`` fallback.
+    """
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    session_factory = async_sessionmaker(bind=engine, future=True, expire_on_commit=False)
+
+    valid_root = "0x" + "ab" * 32
+
+    async with session_factory() as session:
+        market = Market(
+            id=1,
+            event_id="batch-cnt",
+            title="Batch Count Test",
+            oracle="0x" + "1" * 40,
+            market_address="0x" + "1" * 40,
+            status="commit",
+        )
+        settlement = Settlement(
+            id=1,
+            market_id=1,
+            merkle_root=valid_root,
+            commitments_count=None,  # <-- the scenario under test
+            batch_roots=None,
+            batch_counts=None,
+        )
+        commitment = Commitment(
+            id=1,
+            market_id=1,
+            user_address="0x" + "2" * 40,
+            outcome_id=0,
+            amount_wei=10,
+            payout_wei=10,
+            salt="0x" + "3" * 64,
+            ticket_hash="0x" + "4" * 64,
+            leaf="0x" + "4" * 64,
+            leaf_index=0,
+        )
+        session.add_all([market, settlement, commitment])
+        await session.commit()
+
+    async with session_factory() as session:
+        proof = await _build_merkle_proof_for_commitment(session, 1, settlement, commitment)
+        # count=0 → count <= 0 → returns empty list
+        assert proof == []

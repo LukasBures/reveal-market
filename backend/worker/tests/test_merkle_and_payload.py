@@ -92,3 +92,79 @@ def test_build_prover_payload_missing_data(session):
     session.commit()
     with pytest.raises(SettlementDataMissingError):
         build_prover_payload(session, 1)
+
+
+# ---------------------------------------------------------------------------
+# Regression: Bug 1 — worker claim payload must include ``payout``
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_worker_claim_payload_includes_payout():
+    """_build_relayer_claim_payloads must include the ``payout`` field.
+
+    The relayer requires ``payout`` via ``_require_field``.  Without it every
+    worker-initiated auto-claim is rejected.
+    """
+    from unittest.mock import AsyncMock, patch
+
+    from shared.models import Base, Commitment, Market, Settlement
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    session_factory = async_sessionmaker(bind=engine, future=True, expire_on_commit=False)
+
+    leaf_hex = "0x" + "ab" * 32
+    leaf_bytes = bytes.fromhex(leaf_hex[2:])
+    root, paths = build_merkle_root_and_paths([leaf_bytes])
+    merkle_root = "0x" + root.hex()
+    dummy_proof = ["0x" + sibling.hex() for sibling in paths[0]]
+
+    async with session_factory() as session:
+        market = Market(
+            id=1,
+            event_id="payout-test",
+            title="Payout Test",
+            oracle="0x" + "1" * 40,
+            market_address="0x" + "2" * 40,
+            status="commit",
+        )
+        settlement = Settlement(
+            id=1,
+            market_id=1,
+            merkle_root=merkle_root,
+            commitments_count=1,
+            winning_outcome_id=0,
+        )
+        commitment = Commitment(
+            id=1,
+            market_id=1,
+            user_address="0x" + "3" * 40,
+            outcome_id=0,
+            amount_wei=1_000_000_000_000_000_000,
+            payout_wei=1_500_000_000_000_000_000,
+            salt="0x" + "4" * 64,
+            ticket_hash=leaf_hex,
+            leaf=leaf_hex,
+            leaf_index=0,
+        )
+        session.add_all([market, settlement, commitment])
+        await session.commit()
+
+    with patch(
+        "app.settlement._build_merkle_proof_for_commitment",
+        new_callable=AsyncMock,
+        return_value=dummy_proof,
+    ):
+        from app.settlement import _build_relayer_claim_payloads
+
+        async with session_factory() as session:
+            payloads = await _build_relayer_claim_payloads(session, market, settlement)
+
+    assert len(payloads) == 1
+    payload = payloads[0]
+    assert "payout" in payload, "worker claim payload must include 'payout'"
+    assert payload["payout"] == 1_500_000_000_000_000_000
+    assert payload["amount"] == 1_000_000_000_000_000_000

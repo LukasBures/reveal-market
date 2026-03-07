@@ -960,3 +960,190 @@ async def test_sync_market_factory_params_rejects_circuit_hash(monkeypatch, test
 
     assert exc.value.status_code == 409
     assert exc.value.detail == "circuit_hash_mismatch"
+
+
+# ---------------------------------------------------------------------------
+# Regression: Bug 2 — commit must reject None market_onchain_id
+# ---------------------------------------------------------------------------
+
+
+def test_commit_rejects_none_market_onchain_id(client, db_session, monkeypatch):
+    """When _ensure_market_or_create returns None for onchain_id, the commit
+    endpoint must return 503 instead of silently signing with market_id=0."""
+
+    signer = Account.create()
+    auth_signer = Account.create()
+    user = Account.create()
+    market = _seed_market(db_session, event_id="onchain-none", address="0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+    settings = runtime.settings
+    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
+    monkeypatch.setattr(settings, "max_stake_zen", 1, raising=False)
+    monkeypatch.setattr(settings, "max_user_stake_per_market_zen", 10, raising=False)
+    monkeypatch.setattr(settings, "max_market_stake_zen", 100, raising=False)
+    monkeypatch.setattr(settings, "haircut_percent", 0.12, raising=False)
+    monkeypatch.setattr(settings, "pricing_edge_percent", 0.05, raising=False)
+    monkeypatch.setattr(
+        settings, "authorization_signer_private_key", SecretStr(auth_signer._private_key.hex()), raising=False
+    )
+    monkeypatch.setattr(settings, "authorization_signer", auth_signer.address, raising=False)
+    monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
+
+    async def _fx_quote(*_args, **_kwargs):
+        return FxQuoteResponse(zen_usd=Decimal("1.25"), stale=False, received_at=None)
+
+    monkeypatch.setattr("app.routes.pricing.fetch_fx_quote", _fx_quote)
+    monkeypatch.setattr("app.routes.pricing._fetch_streamer_price", _streamer_price)
+
+    # Return valid address but None onchain_id
+    async def _ensure_market(_session, _market_id, _expected, *, allow_create=False):
+        return market.id, market.market_address, None
+
+    monkeypatch.setattr("app.routes.trade._ensure_market", _ensure_market)
+    monkeypatch.setattr("app.routes.trade._ensure_market_or_create", _ensure_market)
+
+    async def _sync_factory(*_args, **_kwargs):
+        return 0
+
+    monkeypatch.setattr("app.routes.trade._sync_market_factory_params", _sync_factory)
+
+    async def _next_ticket_id(*_args, **_kwargs):
+        return 0
+
+    monkeypatch.setattr("app.routes.trade._next_ticket_id_onchain", _next_ticket_id)
+
+    async def _escrow_balance(_wallet: str):
+        return 4242
+
+    monkeypatch.setattr("app.routes.trade._fetch_escrow_balance", _escrow_balance)
+
+    # Create quote
+    quote_resp = client.post(
+        "/pricing/quote",
+        json={
+            "stake_zen": 0.1,
+            "wallet_address": user.address,
+            "market_address": market.market_address,
+            "outcome_id": 0,
+            "market_id": market.event_id,
+            "user_id": user.address,
+        },
+    )
+    assert quote_resp.status_code == 200
+    quote = quote_resp.json()
+
+    commit_signature = Account.sign_message(
+        encode_defunct(text=_build_commit_message(quote, user.address)),
+        user._private_key,
+    ).signature.hex()
+
+    resp = client.post(
+        "/trade/commit",
+        json={"quote_id": quote["quote_id"]},
+        headers={"X-Wallet-Signature": commit_signature},
+    )
+    assert resp.status_code == 503
+    assert resp.json()["detail"] == "market_onchain_id_unavailable"
+
+
+# ---------------------------------------------------------------------------
+# Regression: Bug 3 — _fetch_claimed_tickets returns None on RPC failure
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_fetch_claimed_tickets_returns_none_on_rpc_failure(monkeypatch):
+    """On RPC failure, _fetch_claimed_tickets must return None (not {})."""
+    monkeypatch.setattr(trade_routes.settings, "rpc_url", "http://localhost:1234", raising=False)
+
+    def _raise_web3(*_args, **_kwargs):
+        raise ConnectionError("RPC unreachable")
+
+    monkeypatch.setattr("app.routes.trade.get_async_web3", _raise_web3)
+
+    result = await trade_routes._fetch_claimed_tickets("0x" + "1" * 40, [0, 1])
+    assert result is None, "_fetch_claimed_tickets must return None on RPC failure, not {}"
+
+
+# ---------------------------------------------------------------------------
+# Regression: Bug 6 — API claim payload must include event_id
+# ---------------------------------------------------------------------------
+
+
+def test_claim_payload_includes_event_id(client, db_session, monkeypatch):
+    """The relayer claim payload built by the API must include ``event_id``
+    to match the worker's payload structure."""
+
+    user = Account.create()
+    market = _seed_market(db_session, event_id="event-id-test", address="0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB")
+    commitment_hex = "0x" + "66" * 32
+    leaf_bytes = bytes.fromhex(commitment_hex[2:])
+    root_bytes, _ = build_merkle_root_and_paths([leaf_bytes])
+    merkle_root = "0x" + root_bytes.hex()
+
+    db_session.add(
+        models.Commitment(
+            market_id=market.id,
+            user_address=user.address.lower(),
+            outcome_id=0,
+            amount_wei=100,
+            payout_wei=150,
+            salt="0x0",
+            ticket_hash=commitment_hex.lower(),
+            leaf=commitment_hex.lower(),
+            leaf_index=0,
+        )
+    )
+    db_session.add(
+        models.Settlement(
+            id=100,
+            market_id=market.id,
+            merkle_root=merkle_root,
+            commitments_count=1,
+            winning_outcome_id=0,
+            proof_status=models.SettlementProofStatus.GENERATED.value,
+            created_at=datetime.now(tz=UTC),
+        )
+    )
+    db_session.commit()
+
+    settings = runtime.settings
+    monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
+    tx_hash = "0x" + "dd" * 32
+
+    captured_payload = {}
+
+    class _CapturingClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, _url, *, json=None, **_kwargs):
+            captured_payload.update(json or {})
+            return self
+
+        @property
+        def status_code(self):
+            return 200
+
+        def json(self):
+            return {"txHash": tx_hash}
+
+        @property
+        def text(self):
+            return "ok"
+
+    async def _http_client_stub(*_args, **_kwargs):
+        return _CapturingClient()
+
+    monkeypatch.setattr("app.routes.trade.get_http_client", _http_client_stub)
+
+    resp = client.post(
+        "/trade/claim",
+        json={"market_id": market.event_id, "wallet_address": user.address},
+    )
+    assert resp.status_code == 200
+    assert "event_id" in captured_payload, "claim payload must include 'event_id'"
+    assert captured_payload["event_id"] == "event-id-test"

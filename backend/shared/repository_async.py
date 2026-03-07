@@ -715,13 +715,23 @@ async def list_settlements_pending_tx(
 ) -> list[tuple[models.Settlement, models.Market]]:
     """Return settlements with generated proofs that have not been submitted on-chain."""
 
-    statuses = [
+    # Settlements that have never been submitted (tx_hash is NULL).
+    fresh_statuses = [
         models.SettlementSubmissionStatus.NONE.value,
         models.SettlementSubmissionStatus.QUEUED.value,
     ]
+    status_filters: list[ColumnElement[bool]] = [
+        and_(
+            models.Settlement.submission_status.in_(fresh_statuses),
+            models.Settlement.settlement_tx_hash.is_(None),
+        )
+    ]
+    # FAILED settlements may already have a tx_hash from a previous attempt;
+    # the caller re-checks that receipt before resubmitting.
     if include_failed:
-        statuses.append(models.SettlementSubmissionStatus.FAILED.value)
-    status_filters: list[ColumnElement[bool]] = [models.Settlement.submission_status.in_(statuses)]
+        status_filters.append(
+            models.Settlement.submission_status == models.SettlementSubmissionStatus.FAILED.value,
+        )
     if processing_stale_seconds > 0:
         stale_cutoff = datetime.now(tz=UTC) - timedelta(seconds=int(processing_stale_seconds))
         status_filters.append(
@@ -736,7 +746,6 @@ async def list_settlements_pending_tx(
         .where(
             models.Settlement.proof_status == models.SettlementProofStatus.GENERATED.value,
             or_(*status_filters),
-            models.Settlement.settlement_tx_hash.is_(None),
         )
     )
     if market_event_id:

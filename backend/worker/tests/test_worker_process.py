@@ -1730,3 +1730,124 @@ async def test_proof_queue_worker_drops_invalid_payload(monkeypatch):
     assert await redis_client.llen(queue_key) == 0
     assert gauge.last_value() == 0
     assert redis_client.store.get(runtime_module.settings.proof_queue_dead_letter_key)  # DLQ entry exists
+
+
+# ---------------------------------------------------------------------------
+# Regression: Bug 5 — settlement retry must check previous tx receipt
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_settlement_retry_confirms_existing_tx_without_resubmitting(monkeypatch):
+    """When a FAILED settlement has settlement_tx_hash set and the previous tx
+    was mined, the retry should mark it CONFIRMED without resubmitting."""
+
+    from unittest.mock import AsyncMock
+
+    import app.settlement as settlement_module
+
+    redis_client = DummyRedis()
+    signer_key = "0x" + "ab" * 32
+
+    monkeypatch.setattr(runtime_module.settings, "relayer_queue_enabled", False, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "relayer_base_url", "", raising=False)
+    monkeypatch.setattr(
+        runtime_module.settings,
+        "settlement_signer_private_key",
+        SecretStr(signer_key),
+        raising=False,
+    )
+    monkeypatch.setattr(runtime_module.settings, "rpc_url", "http://localhost:8545", raising=False)
+    monkeypatch.setattr(runtime_module.settings, "settlement_rpc_url", None, raising=False)
+
+    engine, session_factory = await create_async_in_memory_db()
+    monkeypatch.setattr(db, "engine", engine, raising=False)
+    monkeypatch.setattr(db, "SessionLocal", session_factory, raising=False)
+
+    # The batch root as a hex value; its decimal is used in public_signals[0]
+    batch_root_hex = "0x000000000000000000000000000000000000000000000000000000000000000a"
+    batch_root_decimal = str(int(batch_root_hex, 16))  # "10"
+    prev_tx_hash = "0x" + "ff" * 32
+
+    async with session_factory() as session:
+        market = Market(
+            event_id="retry-confirm",
+            title="Retry Confirm",
+            oracle="polymarket",
+            status="settled",
+            resolution_status="final",
+            market_address="0x0000000000000000000000000000000000000099",
+            resolved_at=datetime.now(UTC),
+        )
+        session.add(market)
+        await session.flush()
+
+        settlement = Settlement(
+            id=1,
+            market_id=market.id,
+            proof_status="generated",
+            submission_status="failed",
+            submission_error="receipt_wait_failed:timeout",
+            settlement_tx_hash=prev_tx_hash,
+            settlement_submitted_at=datetime.now(UTC),
+            winning_outcome_id=1,
+            merkle_root=batch_root_hex,
+            commitments_count=1,
+            batch_roots=[batch_root_hex],
+            batch_counts=[1],
+        )
+        session.add(settlement)
+
+        # SettlementReceipt with proof matching the batch root signal
+        receipt = shared_models.SettlementReceipt(
+            market_id=market.id,
+            request_id="proof-req-1",
+            proof='{"pi_a":[],"pi_b":[],"pi_c":[]}',
+            public_signals=[int(batch_root_decimal), 1, 2, 3],
+        )
+        session.add(receipt)
+        await session.commit()
+        market_id = market.id
+
+    # Mock web3 — just needs to be non-None
+    mock_web3 = AsyncMock()
+    monkeypatch.setattr(settlement_module, "get_async_web3", lambda *_args, **_kw: mock_web3)
+
+    # Mock oracle check to pass (return None so the check is skipped)
+    from unittest.mock import MagicMock
+
+    mock_contract = MagicMock()
+    mock_contract.functions.oracle.return_value.call = AsyncMock(return_value=None)
+    monkeypatch.setattr(settlement_module, "_build_market_contract", lambda *_args, **_kw: mock_contract)
+
+    # Mock _wait_for_submission_receipt to succeed (previous tx was mined)
+    mock_wait = AsyncMock(return_value=12345)
+    monkeypatch.setattr(settlement_module, "_wait_for_submission_receipt", mock_wait)
+
+    # Mock _submit_verify_and_settle_batched — should NOT be called
+    mock_submit = AsyncMock()
+    monkeypatch.setattr(settlement_module, "_submit_verify_and_settle_batched", mock_submit)
+
+    # Mock _maybe_post_result — should NOT be called
+    mock_post_result = AsyncMock()
+    monkeypatch.setattr(settlement_module, "_maybe_post_result", mock_post_result)
+
+    temp_summary = market_sync.SyncSummary()
+    submitted = await settlement_module.run_settlement_jobs(temp_summary, redis_client)
+
+    # The previous tx was confirmed — should NOT resubmit
+    mock_wait.assert_called_once()
+    mock_submit.assert_not_called()
+    mock_post_result.assert_not_called()
+    assert submitted >= 1
+
+    # Verify settlement is now CONFIRMED in the DB
+    async with session_factory() as session:
+        db_settlement = (
+            await session.execute(
+                select(shared_models.Settlement).where(shared_models.Settlement.market_id == market_id)
+            )
+        ).scalar_one()
+        assert db_settlement.submission_status == shared_models.SettlementSubmissionStatus.CONFIRMED.value
+        assert db_settlement.settlement_block_number == 12345
+        assert db_settlement.submission_error is None

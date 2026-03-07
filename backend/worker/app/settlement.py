@@ -23,6 +23,7 @@ from shared.onchain.abi import REVEAL_MARKET_ABI
 from shared.poseidon import BATCH_SIZE
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import undefer
 from web3 import AsyncWeb3
 from web3.contract.async_contract import AsyncContract
 from web3.types import TxParams, Wei
@@ -1512,9 +1513,9 @@ async def run_settlement_jobs(summary, redis_client: Redis | None, market_id: st
                 receipts = list(
                     (
                         await session.execute(
-                            select(shared_models.SettlementReceipt).where(
-                                shared_models.SettlementReceipt.market_id == settlement.market_id
-                            )
+                            select(shared_models.SettlementReceipt)
+                            .where(shared_models.SettlementReceipt.market_id == settlement.market_id)
+                            .options(undefer(shared_models.SettlementReceipt.proof))
                         )
                     ).scalars()
                 )
