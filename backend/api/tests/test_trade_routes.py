@@ -1147,3 +1147,410 @@ def test_claim_payload_includes_event_id(client, db_session, monkeypatch):
     assert resp.status_code == 200
     assert "event_id" in captured_payload, "claim payload must include 'event_id'"
     assert captured_payload["event_id"] == "event-id-test"
+
+
+# ---------------------------------------------------------------------------
+# trade_claim edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_claim_rejects_missing_market_id(client):
+    """POST /trade/claim with no market_id or event_id → 400 market_id_required."""
+    resp = client.post("/trade/claim", json={"wallet_address": "0x" + "1" * 40})
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "market_id_required"
+
+
+def test_claim_rejects_market_not_found(client):
+    """Non-existent market_id → 404 market_not_found."""
+    resp = client.post(
+        "/trade/claim",
+        json={"market_id": "no-such-market-xyz", "wallet_address": "0x" + "1" * 40},
+    )
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "market_not_found"
+
+
+def test_claim_rejects_settlement_missing_winning_outcome(client, db_session, monkeypatch):
+    """Settlement exists but winning_outcome_id=None and backfill finds nothing → 409 market_not_settled."""
+    from unittest.mock import AsyncMock
+
+    market = _seed_market(db_session, event_id="no-winner", address="0x" + "C" * 40)
+    db_session.add(
+        models.Settlement(
+            market_id=market.id,
+            winning_outcome_id=None,
+            merkle_root=None,
+            proof_status=models.SettlementProofStatus.PENDING.value,
+            created_at=datetime.now(tz=UTC),
+        )
+    )
+    db_session.commit()
+    monkeypatch.setattr("app.routes.trade._maybe_backfill_settlement", AsyncMock(return_value=None))
+
+    resp = client.post(
+        "/trade/claim",
+        json={"market_id": market.event_id, "wallet_address": "0x" + "1" * 40},
+    )
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "market_not_settled"
+
+
+def test_claim_rejects_invalid_claim_signature(client, db_session):
+    """Claim signed by wrong key → 401 wallet_signature_mismatch."""
+    user = Account.create()
+    wrong_signer = Account.create()
+    market = _seed_market(db_session, event_id="sig-mkt", address="0x" + "D" * 40)
+    commitment_hex = "0x" + "ee" * 32
+    leaf_bytes = bytes.fromhex(commitment_hex[2:])
+    root_bytes, _ = build_merkle_root_and_paths([leaf_bytes])
+    merkle_root = "0x" + root_bytes.hex()
+    db_session.add(
+        models.Commitment(
+            market_id=market.id,
+            user_address=user.address.lower(),
+            outcome_id=0,
+            amount_wei=100,
+            payout_wei=150,
+            salt="0x0",
+            ticket_hash=commitment_hex.lower(),
+            leaf=commitment_hex.lower(),
+            leaf_index=0,
+        )
+    )
+    db_session.add(
+        models.Settlement(
+            market_id=market.id,
+            merkle_root=merkle_root,
+            commitments_count=1,
+            winning_outcome_id=0,
+            proof_status=models.SettlementProofStatus.GENERATED.value,
+            created_at=datetime.now(tz=UTC),
+        )
+    )
+    db_session.commit()
+
+    # Sign claim message with the WRONG key
+    challenge = f"claim:{market.event_id}:{user.address.lower()}:0"
+    bad_sig = "0x" + wrong_signer.sign_message(encode_defunct(text=challenge)).signature.hex()
+    # Empty string for internal secret forces the non-internal path
+    resp = client.post(
+        "/trade/claim",
+        json={"market_id": market.event_id, "wallet_address": user.address, "ticket_id": 0},
+        headers={"X-Internal-Secret": "", "X-Wallet-Signature": bad_sig},
+    )
+    assert resp.status_code == 401
+
+
+def test_claim_rejects_ticket_already_claimed_onchain(client, db_session, monkeypatch):
+    """On-chain check returns ticket as claimed → 409 ticket_already_claimed."""
+    from unittest.mock import AsyncMock
+
+    user = Account.create()
+    market = _seed_market(db_session, event_id="already-claimed", address="0x" + "E" * 40)
+    commitment_hex = "0x" + "ff" * 32
+    leaf_bytes = bytes.fromhex(commitment_hex[2:])
+    root_bytes, _ = build_merkle_root_and_paths([leaf_bytes])
+    merkle_root = "0x" + root_bytes.hex()
+    db_session.add(
+        models.Commitment(
+            market_id=market.id,
+            user_address=user.address.lower(),
+            outcome_id=0,
+            amount_wei=100,
+            payout_wei=200,
+            salt="0x0",
+            ticket_hash=commitment_hex.lower(),
+            leaf=commitment_hex.lower(),
+            leaf_index=0,
+        )
+    )
+    db_session.add(
+        models.Settlement(
+            market_id=market.id,
+            merkle_root=merkle_root,
+            commitments_count=1,
+            winning_outcome_id=0,
+            proof_status=models.SettlementProofStatus.GENERATED.value,
+            created_at=datetime.now(tz=UTC),
+        )
+    )
+    db_session.commit()
+
+    monkeypatch.setattr("app.routes.trade._fetch_claimed_tickets", AsyncMock(return_value={0: True}))
+
+    resp = client.post(
+        "/trade/claim",
+        json={"market_id": market.event_id, "wallet_address": user.address},
+    )
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "ticket_already_claimed"
+
+
+def test_claim_rate_limited_after_threshold(client, db_session, monkeypatch):
+    """Rate counter exceeded → 429 claim_rate_limited."""
+    from unittest.mock import AsyncMock
+
+    from fastapi import HTTPException
+
+    user = Account.create()
+    market = _seed_market(db_session, event_id="rate-limit-mkt", address="0x" + "1" * 38 + "11")
+
+    commitment_hex = "0x" + "ab" * 32
+    leaf_bytes = bytes.fromhex(commitment_hex[2:])
+    root_bytes, _ = build_merkle_root_and_paths([leaf_bytes])
+    merkle_root = "0x" + root_bytes.hex()
+    db_session.add(
+        models.Commitment(
+            market_id=market.id,
+            user_address=user.address.lower(),
+            outcome_id=0,
+            amount_wei=100,
+            payout_wei=200,
+            salt="0x0",
+            ticket_hash=commitment_hex.lower(),
+            leaf=commitment_hex.lower(),
+            leaf_index=0,
+        )
+    )
+    db_session.add(
+        models.Settlement(
+            market_id=market.id,
+            merkle_root=merkle_root,
+            commitments_count=1,
+            winning_outcome_id=0,
+            proof_status=models.SettlementProofStatus.GENERATED.value,
+            created_at=datetime.now(tz=UTC),
+        )
+    )
+    db_session.commit()
+
+    monkeypatch.setattr("app.routes.trade._fetch_claimed_tickets", AsyncMock(return_value={}))
+    monkeypatch.setattr(runtime.settings, "relayer_base_url", "http://relayer", raising=False)
+
+    async def _rate_limited(*_args, **_kwargs):
+        raise HTTPException(status_code=429, detail="claim_rate_limited")
+
+    monkeypatch.setattr("app.routes.trade._claim_rate_and_lock", _rate_limited)
+
+    resp = client.post(
+        "/trade/claim",
+        json={"market_id": market.event_id, "wallet_address": user.address},
+    )
+    assert resp.status_code == 429
+    assert resp.json()["detail"] == "claim_rate_limited"
+
+
+def test_claim_in_progress_lock_held(client, db_session, monkeypatch):
+    """Claim lock already held for this ticket → 409 claim_in_progress."""
+    from unittest.mock import AsyncMock
+
+    from fastapi import HTTPException
+
+    user = Account.create()
+    market = _seed_market(db_session, event_id="lock-mkt", address="0x" + "2" * 38 + "22")
+
+    commitment_hex = "0x" + "ac" * 32
+    leaf_bytes = bytes.fromhex(commitment_hex[2:])
+    root_bytes, _ = build_merkle_root_and_paths([leaf_bytes])
+    merkle_root = "0x" + root_bytes.hex()
+    db_session.add(
+        models.Commitment(
+            market_id=market.id,
+            user_address=user.address.lower(),
+            outcome_id=0,
+            amount_wei=100,
+            payout_wei=200,
+            salt="0x0",
+            ticket_hash=commitment_hex.lower(),
+            leaf=commitment_hex.lower(),
+            leaf_index=0,
+        )
+    )
+    db_session.add(
+        models.Settlement(
+            market_id=market.id,
+            merkle_root=merkle_root,
+            commitments_count=1,
+            winning_outcome_id=0,
+            proof_status=models.SettlementProofStatus.GENERATED.value,
+            created_at=datetime.now(tz=UTC),
+        )
+    )
+    db_session.commit()
+
+    monkeypatch.setattr("app.routes.trade._fetch_claimed_tickets", AsyncMock(return_value={}))
+    monkeypatch.setattr(runtime.settings, "relayer_base_url", "http://relayer", raising=False)
+
+    async def _lock_held(*_args, **_kwargs):
+        raise HTTPException(status_code=409, detail="claim_in_progress")
+
+    monkeypatch.setattr("app.routes.trade._claim_rate_and_lock", _lock_held)
+
+    resp = client.post(
+        "/trade/claim",
+        json={"market_id": market.event_id, "wallet_address": user.address},
+    )
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "claim_in_progress"
+
+
+def test_claim_proceeds_when_rpc_returns_none(client, db_session, monkeypatch):
+    """When _fetch_claimed_tickets returns None (RPC down), claim proceeds gracefully to relayer."""
+    from unittest.mock import AsyncMock
+
+    user = Account.create()
+    market = _seed_market(db_session, event_id="rpc-none-mkt", address="0x" + "3" * 38 + "33")
+    commitment_hex = "0x" + "dd" * 32
+    leaf_bytes = bytes.fromhex(commitment_hex[2:])
+    root_bytes, _ = build_merkle_root_and_paths([leaf_bytes])
+    merkle_root = "0x" + root_bytes.hex()
+    db_session.add(
+        models.Commitment(
+            market_id=market.id,
+            user_address=user.address.lower(),
+            outcome_id=0,
+            amount_wei=100,
+            payout_wei=200,
+            salt="0x0",
+            ticket_hash=commitment_hex.lower(),
+            leaf=commitment_hex.lower(),
+            leaf_index=0,
+        )
+    )
+    db_session.add(
+        models.Settlement(
+            market_id=market.id,
+            merkle_root=merkle_root,
+            commitments_count=1,
+            winning_outcome_id=0,
+            proof_status=models.SettlementProofStatus.GENERATED.value,
+            created_at=datetime.now(tz=UTC),
+        )
+    )
+    db_session.commit()
+
+    monkeypatch.setattr("app.routes.trade._fetch_claimed_tickets", AsyncMock(return_value=None))
+    monkeypatch.setattr(runtime.settings, "relayer_base_url", "http://relayer", raising=False)
+
+    tx_hash = "0x" + "ab" * 32
+
+    async def _http_client_stub(*_args, **_kwargs):
+        return _AsyncClientStub({"txHash": tx_hash})
+
+    monkeypatch.setattr("app.routes.trade.get_http_client", _http_client_stub)
+
+    resp = client.post(
+        "/trade/claim",
+        json={"market_id": market.event_id, "wallet_address": user.address},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["tx_hash"] == tx_hash
+
+
+def test_claim_clears_claimed_at_if_rpc_says_unclaimed(client, db_session, monkeypatch):
+    """Stale claimed_at in DB but on-chain reports unclaimed → claimed_at cleared before relayer call."""
+    from unittest.mock import AsyncMock
+
+    user = Account.create()
+    market = _seed_market(db_session, event_id="stale-claimed", address="0x" + "4" * 38 + "44")
+    commitment_hex = "0x" + "cc" * 32
+    leaf_bytes = bytes.fromhex(commitment_hex[2:])
+    root_bytes, _ = build_merkle_root_and_paths([leaf_bytes])
+    merkle_root = "0x" + root_bytes.hex()
+    stale_claimed_at = datetime(2020, 1, 1, tzinfo=UTC)
+    commitment = models.Commitment(
+        market_id=market.id,
+        user_address=user.address.lower(),
+        outcome_id=0,
+        amount_wei=100,
+        payout_wei=200,
+        salt="0x0",
+        ticket_hash=commitment_hex.lower(),
+        leaf=commitment_hex.lower(),
+        leaf_index=0,
+        claimed_at=stale_claimed_at,
+    )
+    db_session.add(commitment)
+    db_session.add(
+        models.Settlement(
+            market_id=market.id,
+            merkle_root=merkle_root,
+            commitments_count=1,
+            winning_outcome_id=0,
+            proof_status=models.SettlementProofStatus.GENERATED.value,
+            created_at=datetime.now(tz=UTC),
+        )
+    )
+    db_session.commit()
+    commitment_id = commitment.id
+
+    # On-chain reports this ticket as NOT claimed
+    monkeypatch.setattr("app.routes.trade._fetch_claimed_tickets", AsyncMock(return_value={0: False}))
+    monkeypatch.setattr(runtime.settings, "relayer_base_url", "http://relayer", raising=False)
+
+    async def _http_client_stub(*_args, **_kwargs):
+        return _AsyncClientStub({"txHash": "0x" + "ba" * 32})
+
+    monkeypatch.setattr("app.routes.trade.get_http_client", _http_client_stub)
+
+    resp = client.post(
+        "/trade/claim",
+        json={"market_id": market.event_id, "wallet_address": user.address},
+    )
+    assert resp.status_code == 200
+    # The stale claimed_at should be replaced: the old 2020-01-01 timestamp is gone,
+    # and after the successful relayer call the code sets a fresh claimed_at.
+    db_session.expire_all()
+    refreshed = db_session.get(models.Commitment, commitment_id)
+    assert refreshed is not None
+    assert refreshed.claimed_at is not None
+    assert refreshed.claimed_at != stale_claimed_at, "stale claimed_at must be replaced by current timestamp"
+
+
+def test_claim_internal_secret_bypasses_wallet_signature(client, db_session, monkeypatch):
+    """X-Internal-Secret present without X-Wallet-Signature → claim proceeds (no 401)."""
+    user = Account.create()
+    market = _seed_market(db_session, event_id="internal-bypass", address="0x" + "5" * 38 + "55")
+    commitment_hex = "0x" + "12" * 32
+    leaf_bytes = bytes.fromhex(commitment_hex[2:])
+    root_bytes, _ = build_merkle_root_and_paths([leaf_bytes])
+    merkle_root = "0x" + root_bytes.hex()
+    db_session.add(
+        models.Commitment(
+            market_id=market.id,
+            user_address=user.address.lower(),
+            outcome_id=0,
+            amount_wei=100,
+            payout_wei=200,
+            salt="0x0",
+            ticket_hash=commitment_hex.lower(),
+            leaf=commitment_hex.lower(),
+            leaf_index=0,
+        )
+    )
+    db_session.add(
+        models.Settlement(
+            market_id=market.id,
+            merkle_root=merkle_root,
+            commitments_count=1,
+            winning_outcome_id=0,
+            proof_status=models.SettlementProofStatus.GENERATED.value,
+            created_at=datetime.now(tz=UTC),
+        )
+    )
+    db_session.commit()
+    monkeypatch.setattr(runtime.settings, "relayer_base_url", "http://relayer", raising=False)
+
+    async def _http_client_stub(*_args, **_kwargs):
+        return _AsyncClientStub({"txHash": "0x" + "ef" * 32})
+
+    monkeypatch.setattr("app.routes.trade.get_http_client", _http_client_stub)
+
+    # The client fixture already injects X-Internal-Secret but no X-Wallet-Signature.
+    # The endpoint should accept this as an internal request and return 200.
+    resp = client.post(
+        "/trade/claim",
+        json={"market_id": market.event_id, "wallet_address": user.address},
+    )
+    assert resp.status_code == 200
