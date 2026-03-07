@@ -1202,9 +1202,9 @@ def test_commit_auth_digest_uses_market_onchain_id(client, db_session, monkeypat
     monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
     monkeypatch.setattr(settings, "relayer_escrow_address", None, raising=False)
 
-    ONCHAIN_ID = 42
+    onchain_id = 42
     auth_signer = _setup_commit_mocks(
-        monkeypatch, settings, market.id, market.market_address, market_onchain_id=ONCHAIN_ID
+        monkeypatch, settings, market.id, market.market_address, market_onchain_id=onchain_id
     )
 
     captured: list[dict] = []
@@ -1242,7 +1242,7 @@ def test_commit_auth_digest_uses_market_onchain_id(client, db_session, monkeypat
         ["address", "uint256", "uint256", "bytes32", "address", "uint256", "uint256", "uint256", "uint256"],
         [
             Web3.to_checksum_address(payload["market"]),
-            ONCHAIN_ID,
+            onchain_id,
             payload["ticket_id"],
             bytes.fromhex(payload["commitment"][2:]),
             Web3.to_checksum_address(payload["user"]),
