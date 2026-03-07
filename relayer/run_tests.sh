@@ -18,4 +18,5 @@ export PYTHONPATH=src
 export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
 
 # Explicitly load pytest-asyncio so async tests run even without plugin autoload tweaks.
+printf '\n[%s] >>> %s\n' "$(date +'%Y-%m-%d %H:%M:%S')" "Running pytest (relayer)"
 python -m pytest -p pytest_asyncio.plugin "$@"

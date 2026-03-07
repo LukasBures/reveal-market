@@ -56,18 +56,39 @@ run_section() {
     exit 1
   fi
 
+  # Print service name immediately so users see which service is starting.
+  printf '\n%s\n' "${name}"
+
+  # Run, tee to log, and stream key progress lines to terminal with indentation.
+  # pipefail is disabled temporarily so PIPESTATUS[0] (the subprocess exit code)
+  # can be captured even when grep/awk always exit 0.
+  local cmd_exit=0
+  set +o pipefail
+  (
+    cd "$(dirname "${script_path}")"
+    env TERM=dumb NO_COLOR=1 PYTHONUNBUFFERED=1 \
+      PYTEST_ADDOPTS="--color=no ${PYTEST_ADDOPTS}" \
+      "${env_vars[@]}" \
+      "./$(basename "${script_path}")" "${SCRIPT_ARGS[@]}"
+  ) 2>&1 | \
+    tee "${log_file}" | \
+    grep --line-buffered -E '\] >>> |[0-9]+ passed|[0-9]+ failed|[0-9]+ error|Success: no issues|Found [0-9]+ error|^FAILED |Running mypy' | \
+    awk '{printf "  %s\n", $0; fflush()}'
+  cmd_exit="${PIPESTATUS[0]}"
+  set -o pipefail
+
   # Compact status line similar to pre-commit output.
-  local result
-  if (cd "$(dirname "${script_path}")" && env TERM=dumb NO_COLOR=1 PYTEST_ADDOPTS="--color=no ${PYTEST_ADDOPTS}" "${env_vars[@]}" "./$(basename "${script_path}")" "${SCRIPT_ARGS[@]}") >"${log_file}" 2>&1; then
+  local result dots
+  if [[ "${cmd_exit}" -eq 0 ]]; then
     result="Passed"
-    local dots=$((STATUS_LINE_WIDTH - ${#name} - ${#result}))
+    dots=$((STATUS_LINE_WIDTH - ${#name} - ${#result}))
     ((dots < 2)) && dots=2
     printf '%s' "${name}"
     printf '.%.0s' $(seq 1 "${dots}")
     printf '%s%s%s\n' "${GREEN}" "${result}" "${RESET}"
   else
     result="Failed"
-    local dots=$((STATUS_LINE_WIDTH - ${#name} - ${#result}))
+    dots=$((STATUS_LINE_WIDTH - ${#name} - ${#result}))
     ((dots < 2)) && dots=2
     printf '%s' "${name}"
     printf '.%.0s' $(seq 1 "${dots}")

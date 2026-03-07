@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+timestamp() { date +"%Y-%m-%d %H:%M:%S"; }
+log_step() { printf '\n[%s] >>> %s\n' "$(timestamp)" "$*"; }
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${ROOT_DIR}/.." && pwd)"
 export PYTHONPATH="${ROOT_DIR}:${REPO_ROOT}/backend:${PYTHONPATH:-}"
@@ -36,7 +39,7 @@ fi
 CONFIG_PATH="${ROOT_DIR}/../pyproject.toml"
 TARGET_PATH="${ROOT_DIR}/app"
 
-echo "Running mypy (streamer)"
+log_step "Running mypy (streamer)"
 MYPYPATH="${REPO_ROOT}/backend:${ROOT_DIR}:${MYPYPATH:-}" "$PYTHON_BIN" -m mypy --config-file "${CONFIG_PATH}" "${TARGET_PATH}"
 
 PYTEST_ARGS=()
@@ -68,7 +71,9 @@ if [[ "$WORKERS" =~ ^[0-9]+$ && "$WORKERS" -gt 1 && "$XDIST_AVAILABLE" == "yes" 
   if [[ -n "${PYTEST_DISABLE_PLUGIN_AUTOLOAD:-}" ]]; then
     PYTEST_ARGS+=(-p pytest_xdist)
   fi
+  log_step "pytest (streamer) workers=${WORKERS}"
   exec "$PYTHON_BIN" -m pytest "${PYTEST_ARGS[@]}" -n "$WORKERS"
 fi
 
+log_step "pytest (streamer) workers=1"
 exec "$PYTHON_BIN" -m pytest "${PYTEST_ARGS[@]}"
