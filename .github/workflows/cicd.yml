@@ -425,9 +425,9 @@ jobs:
   # ──────────────────────────────────────────────
   # Item 8: Circuit hash alignment check
   # Verifies the prover artifact circuit hash matches the on-chain verifier
-  # before any deploy proceeds. Requires secrets: TESTNET_RPC_URL,
-  # REVEAL_MARKET_ADDRESS. Missing secrets produce a warning, not a failure,
-  # so the check degrades gracefully until secrets are provisioned.
+  # before any deploy proceeds. Uses existing repo vars RM_RPC_URL and
+  # RM_VERIFIER_ADDRESS. Missing vars produce a warning, not a failure,
+  # so the check degrades gracefully until vars are provisioned.
   # ──────────────────────────────────────────────
 
   circuit-hash-check:
@@ -439,8 +439,8 @@ jobs:
       (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     env:
-      TESTNET_RPC_URL: ${{ secrets.TESTNET_RPC_URL }}
-      REVEAL_MARKET_ADDRESS: ${{ secrets.REVEAL_MARKET_ADDRESS }}
+      TESTNET_RPC_URL: ${{ vars.RM_RPC_URL }}
+      REVEAL_MARKET_ADDRESS: ${{ vars.RM_VERIFIER_ADDRESS }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
         with:
@@ -454,7 +454,7 @@ jobs:
       - name: Verify circuit hash alignment
         run: |
           if [ -z "${TESTNET_RPC_URL}" ] || [ -z "${REVEAL_MARKET_ADDRESS}" ]; then
-            echo "::warning::TESTNET_RPC_URL or REVEAL_MARKET_ADDRESS secret not set — skipping circuit hash check"
+            echo "::warning::RM_RPC_URL or RM_VERIFIER_ADDRESS repo var not set — skipping circuit hash check"
             exit 0
           fi
           MANIFEST="prover/artifacts/settlement_hashes.json"
