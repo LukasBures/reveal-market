@@ -460,6 +460,42 @@ services:
 
   # ---- Monitoring ----
 
+  # Item 10: Alertmanager — receives fired rules from Prometheus and delivers
+  # them to Discord via the DISCORD_ALERT_WEBHOOK_URL env var.
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: reveal-market-alertmanager
+    restart: unless-stopped
+    env_file:
+      - ${ENV_FILE:-.env.local}
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+      - "--web.listen-address=0.0.0.0:9093"
+      - "--log.level=warn"
+    volumes:
+      - ./docker/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9093/-/healthy || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64M
+        reservations:
+          cpus: "0.05"
+          memory: 32M
+
   prometheus:
     image: prom/prometheus:v3.2.1
     container_name: reveal-market-prometheus
@@ -481,6 +517,8 @@ services:
       - prometheus_data:/prometheus
     depends_on:
       api:
+        condition: service_healthy
+      alertmanager:
         condition: service_healthy
     logging:
       driver: "json-file"

@@ -1,0 +1,64 @@
+# Item 10: Alertmanager configuration — routes Prometheus alerts to Discord.
+#
+# Required env var: DISCORD_ALERT_WEBHOOK_URL
+# Set this in .env (local) and in the prod secrets store.
+#
+# Severity routing:
+#   critical → discord-critical  (distinct format, repeat every 1h)
+#   warning  → discord-warnings  (grouped, repeat every 4h)
+#
+# Inhibition: a firing critical alert suppresses matching warnings to avoid
+# duplicate noise for the same root cause.
+
+global:
+  resolve_timeout: 5m
+  # Slack/PagerDuty can be added here later as additional receivers.
+
+route:
+  group_by: ["alertname", "severity"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: discord-warnings
+  routes:
+    - matchers:
+        - severity="critical"
+      receiver: discord-critical
+      repeat_interval: 1h
+      continue: false
+
+receivers:
+  - name: discord-warnings
+    webhook_configs:
+      - url: "${DISCORD_ALERT_WEBHOOK_URL}"
+        send_resolved: true
+        http_config:
+          follow_redirects: true
+        title: '[{{ .Status | toUpper }}{{ if eq .Status "firing" }} ({{ .Alerts.Firing | len }}){{ end }}] {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}**{{ .Annotations.summary }}**
+          {{ .Annotations.description }}
+          {{ if .Labels.severity }}Severity: `{{ .Labels.severity }}`{{ end }}
+          {{ end }}
+
+  - name: discord-critical
+    webhook_configs:
+      - url: "${DISCORD_ALERT_WEBHOOK_URL}"
+        send_resolved: true
+        http_config:
+          follow_redirects: true
+        title: ':red_circle: CRITICAL{{ if eq .Status "resolved" }} RESOLVED{{ end }}: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}**{{ .Annotations.summary }}**
+          {{ .Annotations.description }}
+          Labels: {{ range .Labels.SortedPairs }}`{{ .Name }}={{ .Value }}` {{ end }}
+          {{ end }}
+
+inhibit_rules:
+  # Suppress warning-level alerts when a critical alert with the same alertname
+  # is already firing — avoids duplicate noise for the same root cause.
+  - source_matchers:
+      - severity="critical"
+    target_matchers:
+      - severity="warning"
+    equal: ["alertname"]
