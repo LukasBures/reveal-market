@@ -1,4 +1,14 @@
 groups:
+  - name: watchdog
+    rules:
+      - alert: Watchdog
+        expr: vector(1)
+        labels:
+          severity: watchdog
+        annotations:
+          summary: "Alertmanager → Discord pipeline is alive"
+          description: "Heartbeat fires every 12h. If this stops arriving, the alerting chain is broken."
+
   - name: service_availability
     interval: 15s
     rules:

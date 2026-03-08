@@ -4,6 +4,7 @@
 # Set this in .env (local) and in the prod secrets store.
 #
 # Severity routing:
+#   watchdog → discord-watchdog  (heartbeat, repeat every 12h)
 #   critical → discord-critical  (distinct format, repeat every 1h)
 #   warning  → discord-warnings  (grouped, repeat every 4h)
 #
@@ -22,12 +23,26 @@ route:
   receiver: discord-warnings
   routes:
     - matchers:
+        - severity="watchdog"
+      receiver: discord-watchdog
+      repeat_interval: 12h
+      continue: false
+    - matchers:
         - severity="critical"
       receiver: discord-critical
       repeat_interval: 1h
       continue: false
 
 receivers:
+  - name: discord-watchdog
+    webhook_configs:
+      - url: "${DISCORD_ALERT_WEBHOOK_URL}"
+        send_resolved: false
+        http_config:
+          follow_redirects: true
+        title: ':white_check_mark: Watchdog'
+        text: 'Alertmanager → Discord pipeline is alive. Next heartbeat in 12h.'
+
   - name: discord-warnings
     webhook_configs:
       - url: "${DISCORD_ALERT_WEBHOOK_URL}"
