@@ -328,7 +328,7 @@ async def _fetch_onchain_snapshot(web3: AsyncWeb3, market_address: str) -> dict[
     batch_roots: list[str] = []
     batch_counts: list[int] = []
     try:
-        if int(next_ticket_id or 0) > 0:
+        if int(phase_value) != 0 and int(next_ticket_id or 0) > 0:
             total_batches = (int(next_ticket_id) + BATCH_SIZE - 1) // BATCH_SIZE
 
             async def _fetch_batch(idx: int) -> tuple[str, int]:
@@ -1357,6 +1357,31 @@ async def _enqueue_relayer_claims(
     return enqueued
 
 
+async def _mark_winning_commitments_claimed(
+    session: AsyncSession, market: shared_models.Market, settlement: shared_models.Settlement
+) -> None:
+    """Optimistically set claimed_at on winning commitments after relayer claims are enqueued."""
+    if settlement.winning_outcome_id is None:
+        return
+    try:
+        commitments = await shared_repository.list_commitments_by_market(session, market.id)
+        now_dt = datetime.now(UTC)
+        for c in commitments:
+            if c.outcome_id == settlement.winning_outcome_id and c.claimed_at is None:
+                c.claimed_at = now_dt
+                session.add(c)
+        await session.commit()
+    except Exception as exc:  # pragma: no cover - defensive
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.relayer.claimed_at_update_failed",
+            message="failed to mark winning commitments as claimed",
+            market_id=getattr(market, "event_id", None),
+            error=str(exc),
+        )
+
+
 async def _update_settlement_stale_gauge() -> None:
     """Item 7: Count settlements with a resolved outcome but no confirmed tx after 4 hours.
 
@@ -1706,6 +1731,9 @@ async def run_settlement_jobs(summary, redis_client: Redis | None, market_id: st
                 settlement.settlement_block_number = block_number
                 settlement.submission_status = shared_models.SettlementSubmissionStatus.CONFIRMED.value
                 settlement.submission_error = None
+                if market.status != shared_models.MarketStatusEnum.SETTLED.value:
+                    market.status = shared_models.MarketStatusEnum.SETTLED.value
+                    session.add(market)
                 _mark_dirty()
                 session.add(settlement)
                 await session.commit()
@@ -1723,6 +1751,8 @@ async def run_settlement_jobs(summary, redis_client: Redis | None, market_id: st
                 if relayer_enabled:
                     enqueued = await _enqueue_relayer_claims(redis_client, market, settlement)
                     submitted += enqueued
+                    if enqueued:
+                        await _mark_winning_commitments_claimed(session, market, settlement)
             finally:
                 await _release_settlement_submission_lock(
                     redis_client,

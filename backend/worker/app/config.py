@@ -464,7 +464,7 @@ class Settings(BaseSettings):
         description="Max wall-clock seconds to keep retrying a settlement submission",
     )
     lock_batches_use_relayer: bool = Field(
-        default=False,
+        default=True,
         description="Route lockBatches submissions through the relayer API instead of direct RPC",
     )
     lock_batches_poll_seconds: float = Field(
@@ -659,7 +659,7 @@ def validate_required_settings(settings: Settings) -> None:
     require("RM_PROVER_BASE_URL", when=prod_like)
     require("RM_RPC_URL", when=prod_like)
     if settings.lock_batches_use_relayer:
-        require("RM_RELAYER_BASE_URL")
+        require("RM_RELAYER_BASE_URL", when=prod_like)
     if prod_like and settings.relayer_base_url:
         if not settings.relayer_bearer_token and not settings.relayer_internal_secret:
             missing.append("RM_RELAYER_BEARER_TOKEN or RM_RELAYER_API_INTERNAL_SECRET")

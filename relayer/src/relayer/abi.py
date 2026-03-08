@@ -75,5 +75,19 @@ LOCK_BATCHES_ABI = [
         "outputs": [],
         "stateMutability": "nonpayable",
         "type": "function",
-    }
+    },
+    {
+        "inputs": [],
+        "name": "factory",
+        "outputs": [{"internalType": "address", "name": "", "type": "address"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "marketId",
+        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
 ]

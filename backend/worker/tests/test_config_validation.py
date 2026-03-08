@@ -22,6 +22,8 @@ def test_validate_required_settings_allows_prover_when_env_present(monkeypatch):
     monkeypatch.setenv("RM_POLYMARKET_API_BASE", "https://gamma-api.polymarket.com")
     monkeypatch.setenv("RM_RPC_URL", "https://rpc.example")
     monkeypatch.setenv("RM_SETTLEMENT_SIGNER_PRIVATE_KEY", "0x" + "1" * 64)
+    monkeypatch.setenv("RM_RELAYER_BASE_URL", "http://relayer:8088")
+    monkeypatch.setenv("RM_RELAYER_BEARER_TOKEN", "test-token")
     settings = Settings(environment="production")
     # should not raise because required envs are set
     validate_required_settings(settings)
