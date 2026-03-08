@@ -17,8 +17,8 @@ poseidon_t3 = _mod.poseidon_t3
 FIELD_MODULUS = _mod.FIELD_MODULUS
 BATCH_SIZE = _mod.BATCH_SIZE
 
-from eth_account import Account
-from web3 import HTTPProvider, Web3
+from eth_account import Account  # noqa: E402
+from web3 import HTTPProvider, Web3  # noqa: E402
 
 w3 = Web3(HTTPProvider("https://horizen-testnet.rpc.caldera.xyz/http"))
 CHAIN_ID = 2651420
@@ -31,7 +31,7 @@ RELAYER_BEARER = os.environ.get("RM_RELAYER_BEARER_TOKEN", "")
 INTERNAL_SECRET =<REDACTED>
 USER_ADDRESS = os.environ["E2E_USER_ADDRESS"]
 
-state = json.load(open("/tmp/prod_e2e_state.json"))
+state = json.load(open("/tmp/prod_e2e_state.json"))  # noqa: S108
 market_address = state["market_address"]
 market_id = state["market_id"]
 batch_root = state["batch_root"]
@@ -260,7 +260,7 @@ print("  SETTLEMENT SUCCESSFUL!")
 # Save proof data to state
 state["proof_json"] = proof_json_str
 state["public_signals"] = [str(s) for s in public_signals]
-json.dump(state, open("/tmp/prod_e2e_state.json", "w"), indent=2)
+json.dump(state, open("/tmp/prod_e2e_state.json", "w"), indent=2)  # noqa: S108
 
 # =========================================================================
 # STEP 4: Claim winning payout via relayer
@@ -284,9 +284,9 @@ claim_payload = {
     "merkle_proof": merkle_proofs[str(winner_ticket["ticket_id"])],
     "event_id": state["event_id"],
 }
-print(
-    f"  Claiming ticket {winner_ticket['ticket_id']} (outcome={winner_ticket['outcome_id']}, payout={int(winner_ticket['payout']) / 1e18:.4f} ZEN)"
-)
+payout_zen = int(winner_ticket["payout"]) / 1e18
+tid, oid = winner_ticket["ticket_id"], winner_ticket["outcome_id"]
+print(f"  Claiming ticket {tid} (outcome={oid}, payout={payout_zen:.4f} ZEN)")
 
 claim_resp = httpx.post(
     f"{RELAYER_URL}/claim",

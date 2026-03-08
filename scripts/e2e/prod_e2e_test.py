@@ -27,7 +27,7 @@ RPC_URL = os.getenv("RM_RPC_URL", "https://horizen-testnet.rpc.caldera.xyz/http"
 CHAIN_ID = 2651420
 
 # Contract addresses
-ZEN_TOKEN = "0x070040A826B586b58569750ED43cb5979b171e8d"
+ZEN_TOKEN = "0x070040A826B586b58569750ED43cb5979b171e8d"  # noqa: S105
 FACTORY = "0x07e13179E5231B3823f26ECBA2750834cBAfC9d3"
 PROTOCOL_POOL = "0x314E44e894DeFDDb4c7337F7031901Ef7Bbab2E2"
 RELAYER_ESCROW = "0x5b0fA47675D07b018E2151d49d4aECc71b47E47D"
@@ -263,7 +263,7 @@ ERC20_ABI = [
 # ---------------------------------------------------------------------------
 # Import poseidon — try multiple locations
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
-import importlib.util as _ilu
+import importlib.util as _ilu  # noqa: E402
 
 _poseidon_paths = [
     "/app/shared/poseidon.py",  # inside API container
@@ -409,8 +409,6 @@ def main():
 
     factory = w3.eth.contract(address=w3.to_checksum_address(FACTORY), abi=FACTORY_ABI)
     escrow = w3.eth.contract(address=w3.to_checksum_address(RELAYER_ESCROW), abi=ESCROW_ABI)
-    zen = w3.eth.contract(address=w3.to_checksum_address(ZEN_TOKEN), abi=ERC20_ABI)
-
     rake_bps = factory.functions.globalRakeBps().call()
     print(f"Factory rake: {rake_bps} bps")
 
@@ -428,9 +426,9 @@ def main():
     print("=" * 60)
 
     # Check if we should resume from an existing market (e.g., previous run created it)
-    RESUME_MARKET_ID = int(os.environ.get("RESUME_MARKET_ID", "0"))
-    if RESUME_MARKET_ID > 0:
-        market_id = RESUME_MARKET_ID
+    resume_market_id = int(os.environ.get("RESUME_MARKET_ID", "0"))
+    if resume_market_id > 0:
+        market_id = resume_market_id
         market_address = factory.functions.marketAddress(market_id).call()
         print(f"  RESUMING existing market ID={market_id} at {market_address}")
     else:

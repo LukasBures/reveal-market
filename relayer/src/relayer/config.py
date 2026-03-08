@@ -74,7 +74,7 @@ class RelayerSettings(BaseSettings):
     relayer_escrow_address: str
 
     # --- Server binding ---
-    relayer_host: str = Field(default="0.0.0.0")
+    relayer_host: str = Field(default="0.0.0.0")  # noqa: S104
     relayer_port: int = Field(default=8088)
 
     # --- Auth ---

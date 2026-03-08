@@ -58,6 +58,7 @@ service.rpc_circuit_breaker_window_seconds = cfg.relayer_rpc_circuit_breaker_win
 service.rpc_circuit_breaker_cooldown_seconds = cfg.relayer_rpc_circuit_breaker_cooldown_seconds
 service.health_deep_cache_ttl_seconds = cfg.relayer_health_deep_cache_ttl_seconds
 
+assert cfg.relayer_queue_running_ttl_seconds is not None  # set by model_post_init
 queue = TxQueue(
     cfg.relayer_queue_db_path,
     service,

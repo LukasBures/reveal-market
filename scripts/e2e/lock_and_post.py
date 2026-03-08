@@ -10,15 +10,15 @@ _spec = importlib.util.spec_from_file_location("poseidon", "/app/shared/poseidon
 _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
 
-from eth_abi import encode
-from eth_account import Account
-from eth_account.messages import encode_defunct
-from web3 import HTTPProvider, Web3
+from eth_abi import encode  # noqa: E402
+from eth_account import Account  # noqa: E402
+from eth_account.messages import encode_defunct  # noqa: E402
+from web3 import HTTPProvider, Web3  # noqa: E402
 
 w3 = Web3(HTTPProvider("https://horizen-testnet.rpc.caldera.xyz/http"))
 CHAIN_ID = 2651420
 
-state = json.load(open("/tmp/prod_e2e_state.json"))
+state = json.load(open("/tmp/prod_e2e_state.json"))  # noqa: S108
 market_address = state["market_address"]
 market_id = state["market_id"]
 batch_root_bytes = bytes.fromhex(state["batch_root"][2:])
