@@ -5,6 +5,7 @@ This script runs INSIDE the API container with access to the DB and on-chain.
 It creates a real market, makes real commitments, and lets the worker handle
 lockBatches → postResult → proof generation → verifyAndSettle → claim.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -13,10 +14,8 @@ import os
 import secrets
 import sys
 import time
-from datetime import UTC, datetime, timedelta
-from decimal import Decimal
+from datetime import UTC, datetime
 
-from eth_abi import encode
 from eth_account import Account
 from eth_account.messages import encode_defunct
 from web3 import HTTPProvider, Web3
@@ -37,13 +36,13 @@ ORACLE_ADDRESS = "0x0F3d0f9274fA6AAEEbc493EdD44d2979BD75F369"
 AUTH_SIGNER_ADDRESS = "0x38C57472479fe7bB4C87e7A4BB23c7AAf10595Fd"
 CIRCUIT_HASH = "0x181e1866c82c6c72f18cd61723f1f61cd0a02224250b988af5a3f32863f2b157"
 
-# Private keys
-DEPLOYER_KEY = os.environ.get("DEPLOYER_KEY", "REDACTED_DEPLOYER_KEY")
-ORACLE_KEY = os.environ.get("RM_SETTLEMENT_SIGNER_PRIVATE_KEY", "REDACTED_SETTLEMENT_SIGNER_KEY")
-AUTH_SIGNER_KEY = os.environ.get("RM_AUTHORIZATION_SIGNER_PRIVATE_KEY", "REDACTED_AUTH_SIGNER_KEY")
-RELAYER_KEY = os.environ.get("RM_RELAYER_PRIVATE_KEY", "REDACTED_RELAYER_KEY")
-USER_KEY = "REDACTED_E2E_USER_KEY"
-USER_ADDRESS = "0x33c65aAC00aCE0b48876D9b87990E0c44F780708"
+# Private keys (from environment — never hardcode)
+DEPLOYER_KEY = os.environ["DEPLOYER_KEY"]
+ORACLE_KEY = os.environ["RM_SETTLEMENT_SIGNER_PRIVATE_KEY"]
+AUTH_SIGNER_KEY = os.environ["RM_AUTHORIZATION_SIGNER_PRIVATE_KEY"]
+RELAYER_KEY = os.environ["RM_RELAYER_PRIVATE_KEY"]
+USER_KEY = os.environ["E2E_USER_PRIVATE_KEY"]
+USER_ADDRESS = Account.from_key(USER_KEY).address
 
 # DB connection
 DB_URL = os.environ.get("RM_DATABASE_URL", "")
@@ -63,49 +62,200 @@ COMMIT_DEADLINE_SECS = 90  # seconds from now
 
 # ABIs
 FACTORY_ABI = [
-    {"inputs":[{"components":[
-        {"name":"oracle","type":"address"},{"name":"verifier","type":"address"},
-        {"name":"circuitHash","type":"bytes32"},{"name":"commitDeadline","type":"uint256"},
-        {"name":"fixedTicketSize","type":"uint256"},{"name":"maxCommitments","type":"uint256"},
-        {"name":"authorizationSigner","type":"address"},{"name":"protocolLiabilityCap","type":"uint256"},
-    ],"name":"params","type":"tuple"}],
-     "name":"createMarket","outputs":[{"name":"market","type":"address"}],"stateMutability":"nonpayable","type":"function"},
-    {"inputs":[],"name":"nextMarketId","outputs":[{"name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
-    {"inputs":[{"name":"marketId","type":"uint256"}],"name":"marketAddress","outputs":[{"name":"","type":"address"}],"stateMutability":"view","type":"function"},
-    {"inputs":[],"name":"globalRakeBps","outputs":[{"name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
+    {
+        "inputs": [
+            {
+                "components": [
+                    {"name": "oracle", "type": "address"},
+                    {"name": "verifier", "type": "address"},
+                    {"name": "circuitHash", "type": "bytes32"},
+                    {"name": "commitDeadline", "type": "uint256"},
+                    {"name": "fixedTicketSize", "type": "uint256"},
+                    {"name": "maxCommitments", "type": "uint256"},
+                    {"name": "authorizationSigner", "type": "address"},
+                    {"name": "protocolLiabilityCap", "type": "uint256"},
+                ],
+                "name": "params",
+                "type": "tuple",
+            }
+        ],
+        "name": "createMarket",
+        "outputs": [{"name": "market", "type": "address"}],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "nextMarketId",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [{"name": "marketId", "type": "uint256"}],
+        "name": "marketAddress",
+        "outputs": [{"name": "", "type": "address"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "globalRakeBps",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
 ]
 
 MARKET_ABI = [
-    {"inputs":[],"name":"phase","outputs":[{"name":"","type":"uint8"}],"stateMutability":"view","type":"function"},
-    {"inputs":[],"name":"nextTicketId","outputs":[{"name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
-    {"inputs":[],"name":"ticketSize","outputs":[{"name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
-    {"inputs":[],"name":"commitDeadline","outputs":[{"name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
-    {"inputs":[],"name":"winningOutcomeId","outputs":[{"name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
-    {"inputs":[],"name":"resultPosted","outputs":[{"name":"","type":"bool"}],"stateMutability":"view","type":"function"},
-    {"inputs":[],"name":"rakeBps","outputs":[{"name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
-    {"inputs":[],"name":"totalEscrow","outputs":[{"name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
-    {"inputs":[],"name":"marketId","outputs":[{"name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
-    {"inputs":[],"name":"oracle","outputs":[{"name":"","type":"address"}],"stateMutability":"view","type":"function"},
-    {"inputs":[],"name":"maxCommitments","outputs":[{"name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
-    {"inputs":[{"name":"ticketId","type":"uint256"}],"name":"commitmentAt","outputs":[{"name":"","type":"bytes32"}],"stateMutability":"view","type":"function"},
-    {"inputs":[{"name":"i","type":"uint256"}],"name":"batchRoots","outputs":[{"name":"","type":"bytes32"}],"stateMutability":"view","type":"function"},
-    {"inputs":[{"name":"batchIndex","type":"uint16"}],"name":"batchProofVerified","outputs":[{"name":"","type":"bool"}],"stateMutability":"view","type":"function"},
-    {"inputs":[{"name":"ticketId","type":"uint256"}],"name":"claimedTickets","outputs":[{"name":"","type":"bool"}],"stateMutability":"view","type":"function"},
+    {
+        "inputs": [],
+        "name": "phase",
+        "outputs": [{"name": "", "type": "uint8"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "nextTicketId",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "ticketSize",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "commitDeadline",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "winningOutcomeId",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "resultPosted",
+        "outputs": [{"name": "", "type": "bool"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "rakeBps",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "totalEscrow",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "marketId",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "oracle",
+        "outputs": [{"name": "", "type": "address"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "maxCommitments",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [{"name": "ticketId", "type": "uint256"}],
+        "name": "commitmentAt",
+        "outputs": [{"name": "", "type": "bytes32"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [{"name": "i", "type": "uint256"}],
+        "name": "batchRoots",
+        "outputs": [{"name": "", "type": "bytes32"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [{"name": "batchIndex", "type": "uint16"}],
+        "name": "batchProofVerified",
+        "outputs": [{"name": "", "type": "bool"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [{"name": "ticketId", "type": "uint256"}],
+        "name": "claimedTickets",
+        "outputs": [{"name": "", "type": "bool"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
 ]
 
 ESCROW_ABI = [
-    {"inputs":[{"name":"user","type":"address"},{"name":"market","type":"address"},
-     {"name":"auth","type":"tuple","components":[
-         {"name":"commitment","type":"bytes32"},{"name":"ticketId","type":"uint256"},
-         {"name":"user","type":"address"},{"name":"nonce","type":"uint256"},
-         {"name":"expiry","type":"uint256"},{"name":"ticketValue","type":"uint256"},
-     ]},{"name":"signature","type":"bytes"}],
-     "name":"commitOnBehalf","outputs":[],"stateMutability":"nonpayable","type":"function"},
-    {"inputs":[{"name":"user","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
+    {
+        "inputs": [
+            {"name": "user", "type": "address"},
+            {"name": "market", "type": "address"},
+            {
+                "name": "auth",
+                "type": "tuple",
+                "components": [
+                    {"name": "commitment", "type": "bytes32"},
+                    {"name": "ticketId", "type": "uint256"},
+                    {"name": "user", "type": "address"},
+                    {"name": "nonce", "type": "uint256"},
+                    {"name": "expiry", "type": "uint256"},
+                    {"name": "ticketValue", "type": "uint256"},
+                ],
+            },
+            {"name": "signature", "type": "bytes"},
+        ],
+        "name": "commitOnBehalf",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
+        "inputs": [{"name": "user", "type": "address"}],
+        "name": "balanceOf",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
 ]
 
 ERC20_ABI = [
-    {"inputs":[{"name":"a","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
+    {
+        "inputs": [{"name": "a", "type": "address"}],
+        "name": "balanceOf",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -173,6 +323,7 @@ def build_web3() -> Web3:
     w3 = Web3(HTTPProvider(RPC_URL, request_kwargs={"timeout": 60}))
     try:
         from web3.middleware import ExtraDataToPOAMiddleware
+
         w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
     except ImportError:
         pass
@@ -183,13 +334,15 @@ def send_tx(w3: Web3, private_key: str, tx_func, *, label: str = "tx") -> dict:
     account = Account.from_key(private_key)
     nonce = w3.eth.get_transaction_count(account.address, "pending")
     est = tx_func.estimate_gas({"from": account.address})
-    tx = tx_func.build_transaction({
-        "from": account.address,
-        "nonce": nonce,
-        "gas": int(est * 1.3),
-        "gasPrice": w3.eth.gas_price,
-        "chainId": CHAIN_ID,
-    })
+    tx = tx_func.build_transaction(
+        {
+            "from": account.address,
+            "nonce": nonce,
+            "gas": int(est * 1.3),
+            "gasPrice": w3.eth.gas_price,
+            "chainId": CHAIN_ID,
+        }
+    )
     signed = account.sign_transaction(tx)
     raw = getattr(signed, "raw_transaction", None) or getattr(signed, "rawTransaction", None)
     tx_hash = w3.eth.send_raw_transaction(raw)
@@ -205,9 +358,15 @@ def sign_commit_auth(market_address, market_id, ticket_id, commitment, user_addr
     digest = Web3.solidity_keccak(
         ["address", "uint256", "uint256", "bytes32", "address", "uint256", "uint256", "uint256", "uint256"],
         [
-            Web3.to_checksum_address(market_address), market_id, ticket_id,
-            commitment, Web3.to_checksum_address(user_address),
-            nonce, expiry, ticket_value_wei, CHAIN_ID,
+            Web3.to_checksum_address(market_address),
+            market_id,
+            ticket_id,
+            commitment,
+            Web3.to_checksum_address(user_address),
+            nonce,
+            expiry,
+            ticket_value_wei,
+            CHAIN_ID,
         ],
     )
     signed = Account.sign_message(encode_defunct(hexstr=digest.hex()), AUTH_SIGNER_KEY)
@@ -219,11 +378,12 @@ def sign_commit_auth(market_address, market_id, ticket_id, commitment, user_addr
 # ---------------------------------------------------------------------------
 def get_db_conn():
     import psycopg2
+
     # Strip SQLAlchemy dialect prefix if present
     url = DB_URL
     for prefix in ("postgresql+psycopg2://", "postgresql+asyncpg://"):
         if url.startswith(prefix):
-            url = "postgresql://" + url[len(prefix):]
+            url = "postgresql://" + url[len(prefix) :]
             break
     return psycopg2.connect(url)
 
@@ -331,25 +491,28 @@ def main():
     condition_id = f"0x{hashlib.sha256(event_id.encode()).hexdigest()[:64]}"
 
     # Insert market
-    db_execute("""
+    db_execute(
+        """
         INSERT INTO markets (event_id, title, category, oracle, factory, onchain_market_id,
                             market_address, status, closes_at, condition_id, rake_bps,
                             resolution_status)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-    """, (
-        event_id,
-        f"E2E Prod Test: Market #{market_id}",
-        "test",
-        ORACLE_ADDRESS.lower(),
-        FACTORY.lower(),
-        market_id,
-        market_address.lower(),
-        "commit",
-        closes_at,
-        condition_id,
-        on_rake,
-        "final",  # Mark as final so worker knows it's resolved
-    ))
+    """,
+        (
+            event_id,
+            f"E2E Prod Test: Market #{market_id}",
+            "test",
+            ORACLE_ADDRESS.lower(),
+            FACTORY.lower(),
+            market_id,
+            market_address.lower(),
+            "commit",
+            closes_at,
+            condition_id,
+            on_rake,
+            "final",  # Mark as final so worker knows it's resolved
+        ),
+    )
     print(f"  Inserted market: event_id={event_id}")
 
     # Get the DB market ID
@@ -358,31 +521,40 @@ def main():
     print(f"  DB market ID: {db_market_id}")
 
     # Insert market outcomes
-    db_execute("""
+    db_execute(
+        """
         INSERT INTO market_outcomes (market_id, outcome_id, label, price) VALUES (%s, 0, 'Yes', 0.5)
-    """, (db_market_id,))
-    db_execute("""
+    """,
+        (db_market_id,),
+    )
+    db_execute(
+        """
         INSERT INTO market_outcomes (market_id, outcome_id, label, price) VALUES (%s, 1, 'No', 0.5)
-    """, (db_market_id,))
+    """,
+        (db_market_id,),
+    )
     print("  Inserted market_outcomes (Yes/No)")
 
     # Insert resolution (YES wins, outcome 0)
     winning_outcome = 0
-    db_execute("""
+    db_execute(
+        """
         INSERT INTO resolutions (condition_id, market_id, event_id, source, resolved, payouts,
                                 winning_outcome_id, rake_bps, checked_at)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-    """, (
-        condition_id,
-        db_market_id,
-        event_id,
-        "e2e_test",
-        True,
-        json.dumps([1, 0]),  # YES wins
-        winning_outcome,
-        on_rake,
-        datetime.now(tz=UTC),
-    ))
+    """,
+        (
+            condition_id,
+            db_market_id,
+            event_id,
+            "e2e_test",
+            True,
+            json.dumps([1, 0]),  # YES wins
+            winning_outcome,
+            on_rake,
+            datetime.now(tz=UTC),
+        ),
+    )
     print(f"  Inserted resolution: winning_outcome={winning_outcome} (YES)")
 
     # =====================================================================
@@ -420,14 +592,21 @@ def main():
         nonce = secrets.randbits(256)
         expiry = int(time.time()) + 600
         signature = sign_commit_auth(
-            market_address, market_id, ticket_id, commitment_bytes,
-            USER_ADDRESS, nonce, expiry, TICKET_SIZE,
+            market_address,
+            market_id,
+            ticket_id,
+            commitment_bytes,
+            USER_ADDRESS,
+            nonce,
+            expiry,
+            TICKET_SIZE,
         )
 
         # Call commitOnBehalf via relayer (escrow owner)
         auth_tuple = (commitment_bytes, ticket_id, w3.to_checksum_address(USER_ADDRESS), nonce, expiry, TICKET_SIZE)
         send_tx(
-            w3, RELAYER_KEY,
+            w3,
+            RELAYER_KEY,
             escrow.functions.commitOnBehalf(
                 w3.to_checksum_address(USER_ADDRESS),
                 w3.to_checksum_address(market_address),
@@ -440,37 +619,42 @@ def main():
         # Verify on-chain
         stored = market_contract.functions.commitmentAt(ticket_id).call()
         assert stored == commitment_bytes, f"On-chain commitment mismatch for ticket {ticket_id}"
-        print(f"    On-chain commitment verified ✓")
+        print("    On-chain commitment verified ✓")
 
-        tickets.append({
-            "ticket_id": ticket_id,
-            "outcome_id": outcome_id,
-            "amount": net_amount,
-            "payout": payout,
-            "salt_int": salt_int,
-            "salt_hex": salt_hex,
-            "leaf_int": leaf_int,
-            "leaf_hex": leaf_hex,
-            "user_int": user_int,
-        })
+        tickets.append(
+            {
+                "ticket_id": ticket_id,
+                "outcome_id": outcome_id,
+                "amount": net_amount,
+                "payout": payout,
+                "salt_int": salt_int,
+                "salt_hex": salt_hex,
+                "leaf_int": leaf_int,
+                "leaf_hex": leaf_hex,
+                "user_int": user_int,
+            }
+        )
 
         # Insert commitment in DB
-        db_execute("""
+        db_execute(
+            """
             INSERT INTO commitments (market_id, user_address, outcome_id, amount_wei, payout_wei,
                                     salt, ticket_hash, leaf, leaf_index)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (
-            db_market_id,
-            USER_ADDRESS.lower(),
-            outcome_id,
-            net_amount,
-            payout,
-            salt_hex,
-            leaf_hex,  # ticket_hash = leaf for simplicity
-            leaf_hex,
-            ticket_id,
-        ))
-        print(f"    DB commitment inserted ✓")
+        """,
+            (
+                db_market_id,
+                USER_ADDRESS.lower(),
+                outcome_id,
+                net_amount,
+                payout,
+                salt_hex,
+                leaf_hex,  # ticket_hash = leaf for simplicity
+                leaf_hex,
+                ticket_id,
+            ),
+        )
+        print("    DB commitment inserted ✓")
 
     # =====================================================================
     # PHASE 4: Build Merkle Tree & Store Proofs
@@ -503,10 +687,13 @@ def main():
 
         # Insert merkle path entries
         for level, sibling_hash in enumerate(proof):
-            db_execute("""
+            db_execute(
+                """
                 INSERT INTO commitment_merkle_paths (commitment_id, level, sibling_hash)
                 VALUES (%s, %s, %s)
-            """, (commitment_db_id, level, sibling_hash))
+            """,
+                (commitment_db_id, level, sibling_hash),
+            )
         print(f"    Stored {len(proof)} merkle path entries in DB ✓")
 
     # =====================================================================
@@ -573,12 +760,12 @@ def main():
     print(f"  Event ID: {event_id}")
     print(f"  Winning outcome: {winning_outcome} (YES)")
     print(f"  Batch root: {batch_root_hex[:18]}...")
-    print(f"\n  The worker should now pick up this market and:")
-    print(f"    1. lockBatches (phase 0→1)")
+    print("\n  The worker should now pick up this market and:")
+    print("    1. lockBatches (phase 0→1)")
     print(f"    2. postResult (winning_outcome={winning_outcome})")
-    print(f"    3. Generate proof via prover")
-    print(f"    4. verifyAndSettle (phase 1→2)")
-    print(f"\n  Monitor worker logs with:")
+    print("    3. Generate proof via prover")
+    print("    4. verifyAndSettle (phase 1→2)")
+    print("\n  Monitor worker logs with:")
     print(f"    docker compose logs -f worker | grep -iE '{event_id[:20]}|lock_batch|post_result|proof|settle'")
 
     return 0

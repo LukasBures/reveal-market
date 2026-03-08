@@ -1,4 +1,5 @@
 """Configuration for the relayer service — Pydantic BaseSettings with RM_ prefix."""
+
 from __future__ import annotations
 
 import ipaddress
@@ -37,7 +38,9 @@ class RelayerSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="RM_")
 
     @classmethod
-    def settings_customise_sources(cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings):
+    def settings_customise_sources(
+        cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings
+    ):
         env_source = LenientEnvSettingsSource(
             settings_cls,
             case_sensitive=env_settings.case_sensitive,

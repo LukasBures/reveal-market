@@ -4,7 +4,6 @@ import secrets
 
 import pytest
 from pydantic import ValidationError
-
 from relayer.config import RelayerConfig, get_settings, load_config
 
 REQUIRED = {

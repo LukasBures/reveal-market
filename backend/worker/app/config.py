@@ -326,9 +326,7 @@ class Settings(BaseSettings):
     proof_cache_ttl_seconds: int = Field(default=86400, ge=60)
     relayer_base_url: AnyHttpUrl | None = Field(default=None, description="Base URL for the Reveal relayer service")
     relayer_bearer_token: str | None = Field(default=None, description="Optional bearer token for relayer auth")
-    relayer_internal_secret: SecretStr | None = Field(
-        default=None, description="Internal API secret for relayer calls"
-    )
+    relayer_internal_secret: SecretStr | None = Field(default=None, description="Internal API secret for relayer calls")
     relayer_http_timeout_seconds: float = Field(default=10.0, gt=0)
     relayer_queue_enabled: bool = Field(default=True, description="Enable Redis-backed relayer claim queue")
     relayer_queue_key: str = Field(default="reveal_market:relayer_queue", description="Redis key for relayer jobs")

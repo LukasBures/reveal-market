@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Manual lockBatches + postResult for E2E test market."""
-import json, os, sys, importlib.util
+
+import importlib.util
+import json
+import os
 
 # Load poseidon without polluting sys.path
 _spec = importlib.util.spec_from_file_location("poseidon", "/app/shared/poseidon.py")
@@ -10,7 +13,7 @@ _spec.loader.exec_module(_mod)
 from eth_abi import encode
 from eth_account import Account
 from eth_account.messages import encode_defunct
-from web3 import Web3, HTTPProvider
+from web3 import HTTPProvider, Web3
 
 w3 = Web3(HTTPProvider("https://horizen-testnet.rpc.caldera.xyz/http"))
 CHAIN_ID = 2651420
@@ -22,18 +25,23 @@ batch_root_bytes = bytes.fromhex(state["batch_root"][2:])
 ticket_count = len(state["tickets"])
 
 FACTORY = "0x07e13179E5231B3823f26ECBA2750834cBAfC9d3"
-ORACLE_KEY = "REDACTED_SETTLEMENT_SIGNER_KEY"
-RELAYER_KEY = os.environ.get("RM_RELAYER_PRIVATE_KEY", "REDACTED_RELAYER_KEY")
+ORACLE_KEY = os.environ["RM_SETTLEMENT_SIGNER_PRIVATE_KEY"]
+RELAYER_KEY = os.environ["RM_RELAYER_PRIVATE_KEY"]
 
 
 def send(key, fn, label):
     acct = Account.from_key(key)
     nonce = w3.eth.get_transaction_count(acct.address, "pending")
     est = fn.estimate_gas({"from": acct.address})
-    tx = fn.build_transaction({
-        "from": acct.address, "nonce": nonce,
-        "gas": int(est * 1.3), "gasPrice": w3.eth.gas_price, "chainId": CHAIN_ID,
-    })
+    tx = fn.build_transaction(
+        {
+            "from": acct.address,
+            "nonce": nonce,
+            "gas": int(est * 1.3),
+            "gasPrice": w3.eth.gas_price,
+            "chainId": CHAIN_ID,
+        }
+    )
     signed = acct.sign_transaction(tx)
     raw = getattr(signed, "raw_transaction", None) or getattr(signed, "rawTransaction", None)
     h = w3.eth.send_raw_transaction(raw)
@@ -47,8 +55,14 @@ def send(key, fn, label):
 # Sign relayer digest
 digest_data = encode(
     ["address", "address", "uint256", "bytes32[]", "uint16[]", "uint256"],
-    [w3.to_checksum_address(market_address), w3.to_checksum_address(FACTORY),
-     market_id, [batch_root_bytes], [ticket_count], CHAIN_ID],
+    [
+        w3.to_checksum_address(market_address),
+        w3.to_checksum_address(FACTORY),
+        market_id,
+        [batch_root_bytes],
+        [ticket_count],
+        CHAIN_ID,
+    ],
 )
 relayer_sig = Account.sign_message(encode_defunct(Web3.keccak(digest_data)), RELAYER_KEY).signature
 print(f"Relayer: {Account.from_key(RELAYER_KEY).address}")
@@ -56,15 +70,38 @@ print(f"Oracle:  {Account.from_key(ORACLE_KEY).address}")
 
 # ABI
 abi = [
-    {"inputs": [{"name": "roots", "type": "bytes32[]"}, {"name": "counts", "type": "uint16[]"},
-                {"name": "relayerSig", "type": "bytes"}],
-     "name": "lockBatches", "outputs": [], "stateMutability": "nonpayable", "type": "function"},
-    {"inputs": [], "name": "phase", "outputs": [{"name": "", "type": "uint8"}],
-     "stateMutability": "view", "type": "function"},
-    {"inputs": [{"name": "outcomeId", "type": "uint256"}], "name": "postResult",
-     "outputs": [], "stateMutability": "nonpayable", "type": "function"},
-    {"inputs": [], "name": "resultPosted", "outputs": [{"name": "", "type": "bool"}],
-     "stateMutability": "view", "type": "function"},
+    {
+        "inputs": [
+            {"name": "roots", "type": "bytes32[]"},
+            {"name": "counts", "type": "uint16[]"},
+            {"name": "relayerSig", "type": "bytes"},
+        ],
+        "name": "lockBatches",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "phase",
+        "outputs": [{"name": "", "type": "uint8"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [{"name": "outcomeId", "type": "uint256"}],
+        "name": "postResult",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "resultPosted",
+        "outputs": [{"name": "", "type": "bool"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
 ]
 mc = w3.eth.contract(address=w3.to_checksum_address(market_address), abi=abi)
 

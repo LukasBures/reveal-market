@@ -540,8 +540,7 @@ async def _compute_relayer_lock_sig(
     on_chain_market_id = await contract.functions.marketId().call()
 
     roots_bytes = [
-        bytes.fromhex(r[2:]) if isinstance(r, str) and r.startswith("0x") else bytes.fromhex(r)
-        for r in batch_roots
+        bytes.fromhex(r[2:]) if isinstance(r, str) and r.startswith("0x") else bytes.fromhex(r) for r in batch_roots
     ]
     chain_id = await web3.eth.chain_id
     digest_data = abi_encode(

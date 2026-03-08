@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """Phase 2: Generate proof, settle on-chain, and claim payout."""
-import json, os, sys, time, importlib.util, httpx
+
+import importlib.util
+import json
+import os
+import sys
+import time
+
+import httpx
 
 _spec = importlib.util.spec_from_file_location("poseidon", "/app/shared/poseidon.py")
 _mod = importlib.util.module_from_spec(_spec)
@@ -11,18 +18,18 @@ FIELD_MODULUS = _mod.FIELD_MODULUS
 BATCH_SIZE = _mod.BATCH_SIZE
 
 from eth_account import Account
-from web3 import Web3, HTTPProvider
+from web3 import HTTPProvider, Web3
 
 w3 = Web3(HTTPProvider("https://horizen-testnet.rpc.caldera.xyz/http"))
 CHAIN_ID = 2651420
 CIRCUIT_HASH = "0x181e1866c82c6c72f18cd61723f1f61cd0a02224250b988af5a3f32863f2b157"
-ORACLE_KEY = "REDACTED_SETTLEMENT_SIGNER_KEY"
+ORACLE_KEY = os.environ["RM_SETTLEMENT_SIGNER_PRIVATE_KEY"]
 PROVER_URL = os.environ.get("RM_PROVER_URL", "http://prover:8085")
 PROVER_SECRET =<REDACTED>
 RELAYER_URL = os.environ.get("RM_RELAYER_BASE_URL", "http://relayer:8088")
 RELAYER_BEARER = os.environ.get("RM_RELAYER_BEARER_TOKEN", "")
 INTERNAL_SECRET =<REDACTED>
-USER_ADDRESS = "0x33c65aAC00aCE0b48876D9b87990E0c44F780708"
+USER_ADDRESS = os.environ["E2E_USER_ADDRESS"]
 
 state = json.load(open("/tmp/prod_e2e_state.json"))
 market_address = state["market_address"]
@@ -34,17 +41,50 @@ rake_bps = state["rake_bps"]
 winning_outcome = state["winning_outcome"]
 
 MARKET_ABI = [
-    {"inputs": [], "name": "phase", "outputs": [{"name": "", "type": "uint8"}], "stateMutability": "view", "type": "function"},
-    {"inputs": [{"name": "proof", "type": "bytes"}, {"name": "publicSignals", "type": "uint256[10]"}],
-     "name": "verifyAndSettle", "outputs": [], "stateMutability": "nonpayable", "type": "function"},
-    {"inputs": [{"name": "ticketId", "type": "uint256"}], "name": "claimedTickets",
-     "outputs": [{"name": "", "type": "bool"}], "stateMutability": "view", "type": "function"},
-    {"inputs": [], "name": "resultPosted", "outputs": [{"name": "", "type": "bool"}], "stateMutability": "view", "type": "function"},
-    {"inputs": [], "name": "totalEscrow", "outputs": [{"name": "", "type": "uint256"}], "stateMutability": "view", "type": "function"},
+    {
+        "inputs": [],
+        "name": "phase",
+        "outputs": [{"name": "", "type": "uint8"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [{"name": "proof", "type": "bytes"}, {"name": "publicSignals", "type": "uint256[10]"}],
+        "name": "verifyAndSettle",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
+        "inputs": [{"name": "ticketId", "type": "uint256"}],
+        "name": "claimedTickets",
+        "outputs": [{"name": "", "type": "bool"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "resultPosted",
+        "outputs": [{"name": "", "type": "bool"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "totalEscrow",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
 ]
 ESCROW_ABI = [
-    {"inputs": [{"name": "user", "type": "address"}], "name": "balanceOf",
-     "outputs": [{"name": "", "type": "uint256"}], "stateMutability": "view", "type": "function"},
+    {
+        "inputs": [{"name": "user", "type": "address"}],
+        "name": "balanceOf",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
 ]
 
 mc = w3.eth.contract(address=w3.to_checksum_address(market_address), abi=MARKET_ABI)
@@ -55,10 +95,15 @@ def send(key, fn, label):
     acct = Account.from_key(key)
     nonce = w3.eth.get_transaction_count(acct.address, "pending")
     est = fn.estimate_gas({"from": acct.address})
-    tx = fn.build_transaction({
-        "from": acct.address, "nonce": nonce,
-        "gas": int(est * 1.3), "gasPrice": w3.eth.gas_price, "chainId": CHAIN_ID,
-    })
+    tx = fn.build_transaction(
+        {
+            "from": acct.address,
+            "nonce": nonce,
+            "gas": int(est * 1.3),
+            "gasPrice": w3.eth.gas_price,
+            "chainId": CHAIN_ID,
+        }
+    )
     signed = acct.sign_transaction(tx)
     raw = getattr(signed, "raw_transaction", None) or getattr(signed, "rawTransaction", None)
     h = w3.eth.send_raw_transaction(raw)
@@ -103,31 +148,37 @@ print(f"  Pool NO: {pool_no / 1e18:.4f} ZEN")
 print(f"  Total escrow: {total_escrow_calc / 1e18:.4f} ZEN")
 print(f"  Total liability (winning payouts): {total_liability / 1e18:.4f} ZEN")
 
+
 # Build ticket array (padded to BATCH_SIZE=256)
 def address_to_field(addr):
     return int(addr, 16)
 
+
 prover_tickets = []
 for t in tickets:
-    prover_tickets.append({
-        "ticketId": str(t["ticket_id"]),
-        "outcomeId": str(t["outcome_id"]),
-        "amount": str(t["amount"]),
-        "payout": str(t["payout"]),
-        "user": str(address_to_field(USER_ADDRESS)),
-        "salt": str(int(t["salt"], 16)),
-    })
+    prover_tickets.append(
+        {
+            "ticketId": str(t["ticket_id"]),
+            "outcomeId": str(t["outcome_id"]),
+            "amount": str(t["amount"]),
+            "payout": str(t["payout"]),
+            "user": str(address_to_field(USER_ADDRESS)),
+            "salt": str(int(t["salt"], 16)),
+        }
+    )
 
 # Pad to 256 with zero tickets
 for i in range(len(tickets), BATCH_SIZE):
-    prover_tickets.append({
-        "ticketId": str(i),
-        "outcomeId": "0",
-        "amount": "0",
-        "payout": "0",
-        "user": "0",
-        "salt": "0",
-    })
+    prover_tickets.append(
+        {
+            "ticketId": str(i),
+            "outcomeId": "0",
+            "amount": "0",
+            "payout": "0",
+            "user": "0",
+            "salt": "0",
+        }
+    )
 
 prover_payload = {
     "marketId": str(market_id),
@@ -233,7 +284,9 @@ claim_payload = {
     "merkle_proof": merkle_proofs[str(winner_ticket["ticket_id"])],
     "event_id": state["event_id"],
 }
-print(f"  Claiming ticket {winner_ticket['ticket_id']} (outcome={winner_ticket['outcome_id']}, payout={int(winner_ticket['payout'])/1e18:.4f} ZEN)")
+print(
+    f"  Claiming ticket {winner_ticket['ticket_id']} (outcome={winner_ticket['outcome_id']}, payout={int(winner_ticket['payout']) / 1e18:.4f} ZEN)"
+)
 
 claim_resp = httpx.post(
     f"{RELAYER_URL}/claim",
@@ -341,8 +394,8 @@ print("  E2E TEST SUMMARY")
 print("=" * 60)
 print(f"  Market: {market_address} (ID={market_id})")
 print(f"  Phase: {mc.functions.phase().call()} (2=Settled)")
-print(f"  Proof generated: YES")
-print(f"  Settlement verified on-chain: YES")
+print("  Proof generated: YES")
+print("  Settlement verified on-chain: YES")
 print(f"  Winner claim (ticket 0): {'YES' if mc.functions.claimedTickets(0).call() else 'PENDING'}")
 print(f"  Loser claim (ticket 1): {'BLOCKED' if not mc.functions.claimedTickets(1).call() else 'ERROR-claimed'}")
 print(f"  User escrow delta: +{(escrow_after - escrow_before) / 1e18:.4f} ZEN")
