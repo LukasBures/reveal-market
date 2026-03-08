@@ -702,7 +702,7 @@ export function ConnectWalletButton() {
         )
       : null;
 
-  if (!isMounted) {
+  if (!isMounted || accountStatus === "reconnecting") {
     return <div className="h-9 w-[130px] animate-pulse rounded-full bg-white/10" />;
   }
 

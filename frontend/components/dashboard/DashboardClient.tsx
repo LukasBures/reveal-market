@@ -1386,7 +1386,15 @@ export function DashboardClient() {
               return (
                 <div
                   key={`${p.market_id}-${p.ticket_id ?? idx}`}
-                  className="rounded-2xl border border-white/[0.07] bg-black/40 p-4 shadow-[0_4px_24px_rgba(1,3,20,0.55),inset_0_1px_0_rgba(255,255,255,0.04)]"
+                  className={`rounded-2xl border border-white/[0.07] bg-black/40 p-4 shadow-[0_4px_24px_rgba(1,3,20,0.55),inset_0_1px_0_rgba(255,255,255,0.04)]${
+                    p.status === "cancelled"
+                      ? " border-l-2 border-l-amber-500/40"
+                      : hasResolution && p.status !== "claimed"
+                        ? isWinner
+                          ? " border-l-2 border-l-emerald-500/50"
+                          : " border-l-2 border-l-rose-500/40"
+                        : ""
+                  }`}
                 >
                   {(() => {
                     const normalizedTxHash = normalizeTxHash(p.tx_hash);
@@ -1409,21 +1417,6 @@ export function DashboardClient() {
                             </p>
                           </div>
                           <div className="flex flex-col items-end gap-1.5">
-                            {p.status === "cancelled" ? (
-                              <span className="rounded-full border border-amber-400/30 bg-amber-500/20 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-300">
-                                Void
-                              </span>
-                            ) : hasResolution && p.status !== "claimed" ? (
-                              isWinner ? (
-                                <span className="rounded-full border border-emerald-400/40 bg-emerald-500/20 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-300">
-                                  Won
-                                </span>
-                              ) : (
-                                <span className="rounded-full border border-rose-400/30 bg-rose-500/20 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-rose-300">
-                                  Lost
-                                </span>
-                              )
-                            ) : null}
                             <div className="text-right">
                               <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
                                 Stake

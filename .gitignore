@@ -944,4 +944,3 @@ contracts/cache/
 prod_db_backups/*.gz
 prod_db_backups/*.dump
 prod_db_backups/*.dump.gz
-
