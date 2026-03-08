@@ -8,7 +8,7 @@ services:
     restart: unless-stopped
     mem_swappiness: 0
     env_file:
-      - ${ENV_FILE:-.env.local}
+      - ${ENV_FILE:-.env.production}
     depends_on:
       - frontend
     ports:
