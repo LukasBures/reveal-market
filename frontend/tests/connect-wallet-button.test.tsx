@@ -79,6 +79,7 @@ vi.mock("@/lib/wagmi", () => ({
 
 describe("ConnectWalletButton", () => {
   beforeEach(() => {
+    localStorage.clear();
     (globalThis as any).window = Object.assign(globalThis.window ?? {}, {
       dispatchEvent: vi.fn(),
       addEventListener: vi.fn(),
