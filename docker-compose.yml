@@ -503,8 +503,12 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    depends_on:
+      - alertmanager-discord
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9093/-/healthy || exit 1"]
+      # Checks alertmanager's own API AND that the discord sidecar is reachable.
+      # busybox wget can't handle dual-stack DNS, so resolve IPv4 via nslookup first.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9093/-/healthy >/dev/null 2>&1 && DISC_IP=$(nslookup alertmanager-discord 2>/dev/null | awk '/^Address:.*\\./{print $2}' | grep -v 127 | head -1) && wget -qO /dev/null http://${DISC_IP}:9094/ 2>&1"]
       interval: 15s
       timeout: 5s
       retries: 3
