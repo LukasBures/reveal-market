@@ -50,7 +50,9 @@ echo "${LOG_PREFIX} Starting backup of ${POSTGRES_DB} → ${DEST}"
 mkdir -p "${BACKUP_DIR}"
 
 # -T disables pseudo-TTY (required when piping binary pg_dump output through gzip)
+# --env-file is required so compose can interpolate all service variables
 docker compose -f "${COMPOSE_DIR}/docker-compose.yml" \
+    --env-file "${COMPOSE_DIR}/.env.production" \
     exec -T postgres \
     pg_dump \
         --username="${POSTGRES_USER}" \
