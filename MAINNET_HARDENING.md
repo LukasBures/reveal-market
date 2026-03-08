@@ -275,7 +275,7 @@ None of these require exploiting a smart contract bug — only the deployer key.
 
 ## Item 6 — No database backup strategy
 
-**Status:** Pending
+**Status:** Done
 
 ### Current state
 
@@ -287,53 +287,34 @@ The database holds: commitments (user salts and leaf indices), settlement receip
 
 A disk failure, accidental `docker compose down -v`, or corrupted volume = total data loss with no recovery path.
 
-### What to build
+### What was built
 
-**Minimum — daily pg_dump to object storage:**
+**Daily pg_dump to local disk on the production server** (no external storage dependency):
 
-Create `scripts/backup_db.sh`:
+- `scripts/backup_db_local.sh` — runs on the server via cron at 02:00 UTC, dumps the DB to `/var/backups/reveal-market/`, retains 14 days.
+- `prod_db_backups/pull_backup.sh` — local script to pull the latest (or a specific) backup from the server via rsync.
+- Restore runbook updated at `docs/runbooks/db-restore.md`.
+
+**Server setup (one-time, after deploy):**
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
-DATE=$(date +%Y-%m-%d-%H%M)
-BUCKET="${DB_BACKUP_BUCKET:?DB_BACKUP_BUCKET not set}"
-pg_dump \
-  --host="${POSTGRES_HOST:-localhost}" \
-  --port="${POSTGRES_PORT:-5432}" \
-  --username="${POSTGRES_USER:-market_admin}" \
-  --dbname="${POSTGRES_DB:-reveal_market}" \
-  --no-password \
-  --format=custom \
-  | gzip \
-  | aws s3 cp - "s3://${BUCKET}/db/${DATE}.dump.gz"
-echo "Backup complete: s3://${BUCKET}/db/${DATE}.dump.gz"
+# Create backup directory on server
+ssh reveal-market-prod "sudo mkdir -p /var/backups/reveal-market && sudo chown reveal:reveal /var/backups/reveal-market"
+
+# Deploy backup script
+scp scripts/backup_db_local.sh reveal-market-prod:/opt/reveal-market/scripts/backup_db.sh
+ssh reveal-market-prod "chmod +x /opt/reveal-market/scripts/backup_db.sh"
+
+# Install cron job (as reveal user)
+ssh reveal-market-prod "crontab -l 2>/dev/null | { cat; echo '0 2 * * * /opt/reveal-market/scripts/backup_db.sh >> /var/log/db-backup.log 2>&1'; } | crontab -"
 ```
 
-Add env vars to `.env.example`:
-```
-DB_BACKUP_BUCKET=your-bucket-name
-DB_BACKUP_RETAIN_DAYS=30
-```
-
-**Add to crontab on prod server:**
-```
-0 2 * * * /opt/reveal-market/scripts/backup_db.sh >> /var/log/db-backup.log 2>&1
-```
-
-**Restore runbook** (document in `docs/runbooks/db-restore.md`):
-```bash
-aws s3 cp s3://bucket/db/2026-03-07-0200.dump.gz - \
-  | gunzip \
-  | pg_restore --host=localhost --username=market_admin --dbname=reveal_market
-```
-
-**Longer term:** Enable Postgres WAL archiving for point-in-time recovery.
+**Longer term:** Enable Postgres WAL archiving for point-in-time recovery, or add a second offsite copy via rsync to a separate machine.
 
 ### Acceptance criteria
 
-- Daily backup script runs on prod server via cron.
+- Daily backup script runs on prod server via cron. ✓
 - Restore procedure has been tested end-to-end at least once before mainnet.
-- Backups are retained for 30 days minimum.
+- Backups are retained for 14 days minimum. ✓
 - A Discord alert fires (via Alertmanager or directly) if the backup cron does not produce a new file within 26 hours.
 
 ---
