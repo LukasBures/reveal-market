@@ -378,6 +378,13 @@ REVEAL_MARKET_ABI: list[dict] = [
     },
     {
         "inputs": [],
+        "name": "factory",
+        "outputs": [{"internalType": "address", "name": "", "type": "address"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [],
         "name": "marketState",
         "outputs": [
             {"internalType": "bytes32", "name": "commitmentsRoot_", "type": "bytes32"},

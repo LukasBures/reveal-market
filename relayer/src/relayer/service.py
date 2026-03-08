@@ -645,28 +645,6 @@ class RelayerService:
             await self._preflight_tx(tx, "claim")
             return await self._send_and_wait(tx, "claim")
 
-    async def _compute_lock_batches_sig(
-        self, market: Contract, market_addr: ChecksumAddress, roots: list[str], counts: list[int]
-    ) -> bytes:
-        """Compute the relayer signature required by the lockBatches contract call.
-
-        The contract verifies: abi.encode(market, factory, marketId, roots, counts, chainId)
-        signed by the RelayerEscrow owner (i.e. this relayer's account).
-        """
-        from eth_abi import encode as abi_encode
-        from eth_account.messages import encode_defunct
-
-        factory_addr = await asyncio.to_thread(market.functions.factory().call)
-        on_chain_market_id = await asyncio.to_thread(market.functions.marketId().call)
-        roots_bytes = [bytes.fromhex(r[2:]) if isinstance(r, str) and r.startswith("0x") else bytes.fromhex(r) for r in roots]
-        digest_data = abi_encode(
-            ["address", "address", "uint256", "bytes32[]", "uint16[]", "uint256"],
-            [str(market_addr), str(factory_addr), on_chain_market_id, roots_bytes, counts, self.chain_id],
-        )
-        digest = Web3.keccak(digest_data)
-        signed = self.account.sign_message(encode_defunct(digest))
-        return signed.signature
-
     async def lock_batches(
         self, payload: Mapping[str, Any], *, nonce_override: int | None = None, bump_factor: float = 1.0
     ) -> dict[str, str | int]:
@@ -681,8 +659,6 @@ class RelayerService:
 
         market = self.web3.eth.contract(address=market_addr, abi=LOCK_BATCHES_ABI)
         relayer_sig = validation["relayer_sig"]
-        if not relayer_sig:
-            relayer_sig = await self._compute_lock_batches_sig(market, market_addr, roots, counts)
         logger.info(
             "relayer.lock_batches.prepare",
             market=payload.get("market"),

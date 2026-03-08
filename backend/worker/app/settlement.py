@@ -517,6 +517,52 @@ def _ensure_tx_success(receipt: Any, tx_hash: Any, *, action: str) -> None:
         raise RuntimeError(f"{action}_failed status={status_value} tx_hash={_format_tx_hash(tx_hash)}")
 
 
+async def _compute_relayer_lock_sig(
+    web3: AsyncWeb3,
+    market_address: str,
+    batch_roots: list[str],
+    batch_counts: list[int],
+) -> bytes:
+    """Compute the relayer signature for lockBatches.
+
+    The contract verifies: abi.encode(market, factory, marketId, roots, counts, chainId)
+    signed by the RelayerEscrow owner (the relayer signer key).
+    """
+    from eth_abi import encode as abi_encode
+    from eth_account.messages import encode_defunct
+
+    signer_key = runtime.settings.relayer_private_key
+    if not signer_key:
+        raise RuntimeError("relayer_private_key not configured")
+
+    contract = _build_market_contract(web3, market_address)
+    factory_addr = await contract.functions.factory().call()
+    on_chain_market_id = await contract.functions.marketId().call()
+
+    roots_bytes = [
+        bytes.fromhex(r[2:]) if isinstance(r, str) and r.startswith("0x") else bytes.fromhex(r)
+        for r in batch_roots
+    ]
+    chain_id = await web3.eth.chain_id
+    digest_data = abi_encode(
+        ["address", "address", "uint256", "bytes32[]", "uint16[]", "uint256"],
+        [
+            to_checksum(market_address),
+            str(factory_addr),
+            on_chain_market_id,
+            roots_bytes,
+            batch_counts,
+            chain_id,
+        ],
+    )
+    from web3 import Web3 as SyncWeb3
+
+    digest = SyncWeb3.keccak(digest_data)
+    signer = Account.from_key(signer_key)
+    signed = signer.sign_message(encode_defunct(digest))
+    return signed.signature
+
+
 async def _submit_lock_batches(
     web3: AsyncWeb3,
     account,
@@ -525,6 +571,11 @@ async def _submit_lock_batches(
     batch_counts: list[int],
 ) -> tuple[str, int | None]:
     contract = _build_market_contract(web3, market_address)
+
+    relayer_sig: bytes = b""
+    if runtime.settings.relayer_private_key:
+        relayer_sig = await _compute_relayer_lock_sig(web3, market_address, batch_roots, batch_counts)
+
     base_tx: TxParams = {
         "from": account.address,
         "nonce": await web3.eth.get_transaction_count(account.address),
@@ -534,7 +585,7 @@ async def _submit_lock_batches(
         base_tx["gasPrice"] = cast(Wei, int(runtime.settings.lock_batches_gas_price_gwei * 1e9))
     if runtime.settings.lock_batches_max_priority_fee_gwei is not None:
         base_tx["maxPriorityFeePerGas"] = cast(Wei, int(runtime.settings.lock_batches_max_priority_fee_gwei * 1e9))
-    tx = await contract.functions.lockBatches(batch_roots, batch_counts, b"").build_transaction(base_tx)
+    tx = await contract.functions.lockBatches(batch_roots, batch_counts, relayer_sig).build_transaction(base_tx)
     if "gasPrice" not in tx and "maxFeePerGas" not in tx:
         tx["gasPrice"] = await web3.eth.gas_price
     signed = account.sign_transaction(tx)

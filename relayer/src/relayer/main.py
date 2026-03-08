@@ -1,6 +1,7 @@
 import importlib
 import sys
 
+from pydantic import ValidationError
 from structlog import get_logger
 from web3 import Web3
 
@@ -20,11 +21,11 @@ logger = get_logger()
 
 try:
     cfg = load_config()
-except RuntimeError as err:
+except (RuntimeError, ValidationError) as err:
     print(f"Failed to load config: {err}", file=sys.stderr)
     raise
 
-web3 = Web3(Web3.HTTPProvider(cfg.rpc_url, request_kwargs={"timeout": cfg.http_timeout_seconds}))
+web3 = Web3(Web3.HTTPProvider(cfg.rpc_url, request_kwargs={"timeout": cfg.relayer_http_timeout_seconds}))
 if _poa_middleware is not None:
     web3.middleware_onion.inject(_poa_middleware, layer=0)
 elif ExtraDataToPOAMiddleware is not None:
@@ -36,41 +37,41 @@ service = build_service(
     account,
     cfg.chain_id,
     cfg.rpc_url,
-    max_retries=cfg.max_retries,
-    retry_backoff_seconds=cfg.retry_backoff_seconds,
-    tx_timeout_seconds=cfg.tx_timeout_seconds,
-    max_block_age_seconds=cfg.max_block_age_seconds,
-    min_relayer_balance_wei=cfg.min_relayer_balance_wei,
-    min_escrow_token_balance_wei=cfg.min_escrow_token_balance_wei,
-    min_relayer_token_allowance_wei=cfg.min_relayer_token_allowance_wei,
-    fee_bump_percent=cfg.fee_bump_percent,
-    preflight_mode=cfg.preflight_mode,
-    api_base_url=cfg.api_base_url,
-    api_bearer_token=cfg.api_bearer_token,
-    api_internal_secret=cfg.api_internal_secret,
-    api_timeout_seconds=cfg.api_timeout_seconds,
-    api_client_max_age_seconds=cfg.api_client_max_age_seconds,
-    api_health_failure_cooldown_seconds=cfg.api_health_failure_cooldown_seconds,
+    max_retries=cfg.relayer_max_retries,
+    retry_backoff_seconds=cfg.relayer_retry_backoff_seconds,
+    tx_timeout_seconds=cfg.relayer_tx_timeout_seconds,
+    max_block_age_seconds=cfg.relayer_max_block_age_seconds,
+    min_relayer_balance_wei=cfg.relayer_min_balance_wei,
+    min_escrow_token_balance_wei=cfg.relayer_min_escrow_token_balance_wei,
+    min_relayer_token_allowance_wei=cfg.relayer_min_relayer_token_allowance_wei,
+    fee_bump_percent=cfg.relayer_fee_bump_percent,
+    preflight_mode=cfg.relayer_preflight_mode,
+    api_base_url=cfg.relayer_api_base_url,
+    api_bearer_token=cfg.relayer_api_bearer_token,
+    api_internal_secret=cfg.relayer_api_internal_secret,
+    api_timeout_seconds=cfg.relayer_api_timeout_seconds,
+    api_client_max_age_seconds=cfg.relayer_api_client_max_age_seconds,
+    api_health_failure_cooldown_seconds=cfg.relayer_api_health_failure_cooldown_seconds,
 )
-service.rpc_circuit_breaker_threshold = cfg.rpc_circuit_breaker_threshold
-service.rpc_circuit_breaker_window_seconds = cfg.rpc_circuit_breaker_window_seconds
-service.rpc_circuit_breaker_cooldown_seconds = cfg.rpc_circuit_breaker_cooldown_seconds
-service.health_deep_cache_ttl_seconds = cfg.health_deep_cache_ttl_seconds
+service.rpc_circuit_breaker_threshold = cfg.relayer_rpc_circuit_breaker_threshold
+service.rpc_circuit_breaker_window_seconds = cfg.relayer_rpc_circuit_breaker_window_seconds
+service.rpc_circuit_breaker_cooldown_seconds = cfg.relayer_rpc_circuit_breaker_cooldown_seconds
+service.health_deep_cache_ttl_seconds = cfg.relayer_health_deep_cache_ttl_seconds
 
 queue = TxQueue(
-    cfg.queue_db_path,
+    cfg.relayer_queue_db_path,
     service,
     dsn=cfg.queue_dsn,
-    poll_seconds=cfg.queue_poll_seconds,
-    max_attempts=cfg.queue_max_attempts,
-    max_payload_bytes=cfg.queue_max_payload_bytes,
-    running_ttl_seconds=cfg.queue_running_ttl_seconds,
-    fee_bump_percent=cfg.fee_bump_percent,
+    poll_seconds=cfg.relayer_queue_poll_seconds,
+    max_attempts=cfg.relayer_queue_max_attempts,
+    max_payload_bytes=cfg.relayer_queue_max_payload_bytes,
+    running_ttl_seconds=cfg.relayer_queue_running_ttl_seconds,
+    fee_bump_percent=cfg.relayer_fee_bump_percent,
 )
 
 rate_limiter = None
-if cfg.rate_limit_requests > 0:
-    rate_limiter = RateLimiter(cfg.rate_limit_requests, cfg.rate_limit_window_seconds)
+if cfg.relayer_rate_limit_requests > 0:
+    rate_limiter = RateLimiter(cfg.relayer_rate_limit_requests, cfg.relayer_rate_limit_window_seconds)
 
 logger.info(
     "relayer_boot",
@@ -78,21 +79,21 @@ logger.info(
     rpc_url=cfg.rpc_url,
     relayer_address=account.address,
     escrow_address=cfg.relayer_escrow_address,
-    host=cfg.host,
-    port=cfg.port,
-    queue_db=cfg.queue_db_path,
+    host=cfg.relayer_host,
+    port=cfg.relayer_port,
+    queue_db=cfg.relayer_queue_db_path,
     queue_dsn=cfg.queue_dsn,
-    http_timeout_seconds=cfg.http_timeout_seconds,
+    http_timeout_seconds=cfg.relayer_http_timeout_seconds,
 )
 
 app = create_app(
     service,
     cfg.chain_id,
     cfg.rpc_url,
-    bearer_token=cfg.bearer_token,
+    bearer_token=cfg.relayer_bearer_token,
     tx_queue=queue,
     rate_limiter=rate_limiter,
-    ip_allowlist=cfg.ip_allowlist,
-    trust_x_forwarded_for=cfg.trust_x_forwarded_for,
-    trusted_proxy_cidrs=cfg.trusted_proxy_cidrs,
+    ip_allowlist=cfg.relayer_ip_allowlist,
+    trust_x_forwarded_for=cfg.relayer_trust_x_forwarded_for,
+    trusted_proxy_cidrs=cfg.relayer_trusted_proxy_cidrs,
 )

@@ -1,225 +1,223 @@
+"""Configuration for the relayer service — Pydantic BaseSettings with RM_ prefix."""
+from __future__ import annotations
+
 import ipaddress
-import logging
-import os
-from dataclasses import dataclass
+from functools import lru_cache
+from typing import Any
 
-from dotenv import load_dotenv
-
-load_dotenv()
-
-_config_logger = logging.getLogger("reveal_market.relayer.config")
+from pydantic import Field, field_validator, model_validator
+from pydantic_settings import BaseSettings, DotEnvSettingsSource, EnvSettingsSource, SettingsConfigDict
 
 IPAllowEntry = ipaddress.IPv4Address | ipaddress.IPv6Address | ipaddress.IPv4Network | ipaddress.IPv6Network
 
-# Env vars that should use the RM_ prefix for cross-service consistency.
-_RM_PREFIX_VARS = {"RPC_URL", "CHAIN_ID"}
 
+class LenientEnvSettingsSource(EnvSettingsSource):
+    """Env source that falls back to raw strings when JSON decoding fails."""
 
-def _env_with_prefix(name: str) -> str | None:
-    """Read an env var, preferring RM_ prefix. Warn if only the legacy name is set."""
-    if name in _RM_PREFIX_VARS:
-        rm_name = f"RM_{name}"
-        rm_val = os.getenv(rm_name)
-        legacy_val = os.getenv(name)
-        if rm_val:
-            return rm_val
-        if legacy_val:
-            _config_logger.warning(
-                "deprecated env var %s; use %s instead",
-                name,
-                rm_name,
-            )
-            return legacy_val
-        return None
-    return os.getenv(name)
-
-
-def _require_env(name: str) -> str:
-    val = _env_with_prefix(name)
-    if not val:
-        raise RuntimeError(f"Missing env var: {name}")
-    return val
-
-
-def _int_env(name: str, default: int) -> int:
-    val = _env_with_prefix(name)
-    return int(val) if val else default
-
-
-def _float_env(name: str, default: float) -> float:
-    val = _env_with_prefix(name)
-    return float(val) if val else default
-
-
-def _bool_env(name: str, default: bool = False) -> bool:
-    val = _env_with_prefix(name)
-    if val is None:
-        return default
-    normalized = val.strip().lower()
-    if normalized in ("1", "true", "yes", "on"):
-        return True
-    if normalized in ("0", "false", "no", "off"):
-        return False
-    raise RuntimeError(f"Invalid boolean for {name}: {val}")
-
-
-def _queue_dsn() -> str | None:
-    dsn = os.getenv("RM_DATABASE_URL")
-    if dsn and dsn.startswith("postgresql+psycopg2://"):
-        dsn = "postgresql://" + dsn.split("postgresql+psycopg2://", 1)[1]
-    return dsn
-
-
-def _preflight_mode() -> str:
-    mode = (os.getenv("RELAYER_PREFLIGHT_MODE") or "none").strip().lower()
-    if mode in ("", "none", "off", "false", "0"):
-        return "none"
-    if mode in ("true", "1", "yes"):
-        return "both"
-    if mode in ("call", "estimate", "both"):
-        return mode
-    raise RuntimeError(f"Invalid RELAYER_PREFLIGHT_MODE: {mode}")
-
-
-def _ip_allowlist() -> list[IPAllowEntry]:
-    raw = os.getenv("RELAYER_IP_ALLOWLIST")
-    if not raw:
-        return []
-    entries: list[IPAllowEntry] = []
-    for item in raw.split(","):
-        value = item.strip()
-        if not value:
-            continue
+    def decode_complex_value(self, field_name, field, value):
         try:
-            if "/" in value:
-                entries.append(ipaddress.ip_network(value, strict=False))
-            else:
-                entries.append(ipaddress.ip_address(value))
-        except ValueError as err:
-            raise RuntimeError(f"Invalid RELAYER_IP_ALLOWLIST entry: {value}") from err
-    return entries
+            return super().decode_complex_value(field_name, field, value)
+        except (ValueError, TypeError):
+            return value
 
 
-def _proxy_allowlist() -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
-    raw = os.getenv("RELAYER_TRUSTED_PROXY_CIDRS")
-    if not raw:
-        return []
-    entries: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
-    for item in raw.split(","):
-        value = item.strip()
-        if not value:
-            continue
+class LenientDotEnvSettingsSource(DotEnvSettingsSource):
+    """Dotenv source that falls back to raw strings when JSON decoding fails."""
+
+    def decode_complex_value(self, field_name, field, value):
         try:
-            entries.append(ipaddress.ip_network(value, strict=False))
-        except ValueError as err:
-            raise RuntimeError(f"Invalid RELAYER_TRUSTED_PROXY_CIDRS entry: {value}") from err
-    return entries
+            return super().decode_complex_value(field_name, field, value)
+        except (ValueError, TypeError):
+            return value
 
 
-@dataclass
-class RelayerConfig:
+class RelayerSettings(BaseSettings):
+    """Runtime options sourced from env vars / .env for the relayer."""
+
+    model_config = SettingsConfigDict(env_prefix="RM_")
+
+    @classmethod
+    def settings_customise_sources(cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings):
+        env_source = LenientEnvSettingsSource(
+            settings_cls,
+            case_sensitive=env_settings.case_sensitive,
+            env_prefix=env_settings.env_prefix,
+            env_nested_delimiter=env_settings.env_nested_delimiter,
+            env_nested_max_split=getattr(env_settings, "env_nested_max_split", None),
+            env_ignore_empty=env_settings.env_ignore_empty,
+            env_parse_none_str=env_settings.env_parse_none_str,
+            env_parse_enums=env_settings.env_parse_enums,
+        )
+        dotenv_source = LenientDotEnvSettingsSource(
+            settings_cls,
+            env_file=getattr(dotenv_settings, "env_file", None),
+            env_file_encoding=getattr(dotenv_settings, "env_file_encoding", None),
+            case_sensitive=dotenv_settings.case_sensitive,
+            env_prefix=dotenv_settings.env_prefix,
+            env_nested_delimiter=dotenv_settings.env_nested_delimiter,
+            env_nested_max_split=getattr(dotenv_settings, "env_nested_max_split", None),
+            env_ignore_empty=dotenv_settings.env_ignore_empty,
+            env_parse_none_str=dotenv_settings.env_parse_none_str,
+            env_parse_enums=dotenv_settings.env_parse_enums,
+        )
+        return init_settings, env_source, dotenv_source, file_secret_settings
+
+    # --- Core chain config ---
     rpc_url: str
     chain_id: int
+
+    # --- Relayer identity ---
     relayer_private_key: str
     relayer_escrow_address: str
-    host: str
-    port: int
-    bearer_token: str | None
-    allow_insecure_auth: bool
-    max_block_age_seconds: int
-    min_relayer_balance_wei: int
-    max_retries: int
-    retry_backoff_seconds: float
-    tx_timeout_seconds: int
-    queue_db_path: str
-    queue_dsn: str | None
-    queue_poll_seconds: float
-    queue_max_attempts: int
-    queue_max_payload_bytes: int
-    queue_running_ttl_seconds: int
-    fee_bump_percent: float
-    min_escrow_token_balance_wei: int
-    min_relayer_token_allowance_wei: int
-    http_timeout_seconds: int
-    preflight_mode: str
-    rate_limit_requests: int
-    rate_limit_window_seconds: int
-    ip_allowlist: list[IPAllowEntry]
-    trust_x_forwarded_for: bool
-    trusted_proxy_cidrs: list[ipaddress.IPv4Network | ipaddress.IPv6Network]
-    api_base_url: str | None
-    api_bearer_token: str | None
-    api_internal_secret: str | None
-    api_timeout_seconds: int
-    health_deep_cache_ttl_seconds: int
-    api_client_max_age_seconds: int
-    api_health_failure_cooldown_seconds: int
-    rpc_circuit_breaker_threshold: int
-    rpc_circuit_breaker_window_seconds: float
-    rpc_circuit_breaker_cooldown_seconds: float
+
+    # --- Server binding ---
+    relayer_host: str = Field(default="0.0.0.0")
+    relayer_port: int = Field(default=8088)
+
+    # --- Auth ---
+    relayer_bearer_token: str | None = Field(default=None)
+    relayer_allow_insecure_auth: bool = Field(default=False)
+
+    # --- Chain health ---
+    relayer_max_block_age_seconds: int = Field(default=60)
+    relayer_min_balance_wei: int = Field(default=0)
+
+    # --- Retry ---
+    relayer_max_retries: int = Field(default=3, ge=1)
+    relayer_retry_backoff_seconds: float = Field(default=0.5, ge=0)
+    relayer_tx_timeout_seconds: int = Field(default=120, ge=1)
+
+    # --- Queue ---
+    relayer_queue_db_path: str = Field(default="relayer_queue.db")
+    database_url: str | None = Field(default=None)
+    relayer_queue_poll_seconds: float = Field(default=1.0, ge=0.1)
+    relayer_queue_max_attempts: int = Field(default=5, ge=1)
+    relayer_queue_max_payload_bytes: int = Field(default=131072, gt=0)
+    relayer_queue_running_ttl_seconds: int | None = Field(default=None)
+
+    # --- Fee / balance ---
+    relayer_fee_bump_percent: float = Field(default=0.15, ge=0)
+    relayer_min_escrow_token_balance_wei: int = Field(default=0)
+    relayer_min_relayer_token_allowance_wei: int = Field(default=0)
+
+    # --- HTTP ---
+    relayer_http_timeout_seconds: int = Field(default=10, ge=1)
+
+    # --- Preflight ---
+    relayer_preflight_mode: str = Field(default="none")
+
+    # --- Rate limiting ---
+    relayer_rate_limit_requests: int = Field(default=30, ge=0)
+    relayer_rate_limit_window_seconds: int = Field(default=60, ge=0)
+
+    # --- IP allowlist ---
+    relayer_ip_allowlist: list[IPAllowEntry] = Field(default_factory=list)
+    relayer_trust_x_forwarded_for: bool = Field(default=False)
+    relayer_trusted_proxy_cidrs: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = Field(default_factory=list)
+
+    # --- API client (relayer → backend API) ---
+    relayer_api_base_url: str | None = Field(default=None)
+    relayer_api_bearer_token: str | None = Field(default=None)
+    relayer_api_internal_secret: str | None = Field(default=None)
+    relayer_api_timeout_seconds: int = Field(default=10, ge=1)
+    relayer_health_deep_cache_ttl_seconds: int = Field(default=10, ge=0)
+    relayer_api_client_max_age_seconds: int = Field(default=900, ge=0)
+    relayer_api_health_failure_cooldown_seconds: int = Field(default=15, ge=0)
+
+    # --- RPC circuit breaker ---
+    relayer_rpc_circuit_breaker_threshold: int = Field(default=5, ge=1)
+    relayer_rpc_circuit_breaker_window_seconds: float = Field(default=30.0, ge=0)
+    relayer_rpc_circuit_breaker_cooldown_seconds: float = Field(default=30.0, ge=0)
+
+    # --- Validators ---
+
+    @field_validator("relayer_preflight_mode", mode="before")
+    @classmethod
+    def _normalize_preflight(cls, value: Any) -> str:
+        if not isinstance(value, str):
+            return str(value)
+        mode = value.strip().lower()
+        if mode in ("", "none", "off", "false", "0"):
+            return "none"
+        if mode in ("true", "1", "yes"):
+            return "both"
+        if mode in ("call", "estimate", "both"):
+            return mode
+        raise ValueError(f"Invalid preflight mode: {value}")
+
+    @field_validator("relayer_ip_allowlist", mode="before")
+    @classmethod
+    def _parse_ip_allowlist(cls, value: Any) -> list[IPAllowEntry]:
+        if isinstance(value, list):
+            return value
+        if not isinstance(value, str) or not value.strip():
+            return []
+        entries: list[IPAllowEntry] = []
+        for item in value.split(","):
+            v = item.strip()
+            if not v:
+                continue
+            if "/" in v:
+                entries.append(ipaddress.ip_network(v, strict=False))
+            else:
+                entries.append(ipaddress.ip_address(v))
+        return entries
+
+    @field_validator("relayer_trusted_proxy_cidrs", mode="before")
+    @classmethod
+    def _parse_proxy_cidrs(cls, value: Any) -> list:
+        if isinstance(value, list):
+            return value
+        if not isinstance(value, str) or not value.strip():
+            return []
+        entries = []
+        for item in value.split(","):
+            v = item.strip()
+            if not v:
+                continue
+            entries.append(ipaddress.ip_network(v, strict=False))
+        return entries
+
+    @model_validator(mode="after")
+    def _compute_defaults_and_validate(self) -> RelayerSettings:
+        # Derived default: queue_running_ttl_seconds
+        if self.relayer_queue_running_ttl_seconds is None:
+            object.__setattr__(self, "relayer_queue_running_ttl_seconds", self.relayer_tx_timeout_seconds + 30)
+
+        # Bearer token requirement
+        if not self.relayer_bearer_token and not self.relayer_allow_insecure_auth:
+            raise ValueError("RM_RELAYER_BEARER_TOKEN is required unless RM_RELAYER_ALLOW_INSECURE_AUTH=true")
+
+        # Rate limit constraint
+        if self.relayer_rate_limit_requests > 0 and self.relayer_rate_limit_window_seconds <= 0:
+            raise ValueError("RM_RELAYER_RATE_LIMIT_WINDOW_SECONDS must be > 0 when rate limiting is enabled")
+
+        return self
+
+    @property
+    def queue_dsn(self) -> str | None:
+        """Derive async-compatible queue DSN from RM_DATABASE_URL."""
+        dsn = self.database_url
+        if dsn and dsn.startswith("postgresql+psycopg2://"):
+            dsn = "postgresql://" + dsn.split("postgresql+psycopg2://", 1)[1]
+        return dsn
 
 
-def load_config() -> RelayerConfig:
-    bearer_token = os.getenv("RELAYER_BEARER_TOKEN")
-    allow_insecure_auth = _bool_env("RELAYER_ALLOW_INSECURE_AUTH", False)
-    if not bearer_token and not allow_insecure_auth:
-        raise RuntimeError("RELAYER_BEARER_TOKEN is required unless RELAYER_ALLOW_INSECURE_AUTH=true")
-    tx_timeout_seconds = _int_env("RELAYER_TX_TIMEOUT_SECONDS", 120)
-    rate_limit_requests = _int_env("RELAYER_RATE_LIMIT_REQUESTS", 30)
-    rate_limit_window_seconds = _int_env("RELAYER_RATE_LIMIT_WINDOW_SECONDS", 60)
-    queue_max_payload_bytes = _int_env("RELAYER_QUEUE_MAX_PAYLOAD_BYTES", 131072)
-    queue_running_ttl_env = os.getenv("RELAYER_QUEUE_RUNNING_TTL_SECONDS")
-    if queue_running_ttl_env is None:
-        queue_running_ttl_seconds = tx_timeout_seconds + 30
-    else:
-        queue_running_ttl_seconds = int(queue_running_ttl_env)
-    if rate_limit_requests < 0:
-        raise RuntimeError("RELAYER_RATE_LIMIT_REQUESTS must be >= 0")
-    if rate_limit_requests > 0 and rate_limit_window_seconds <= 0:
-        raise RuntimeError("RELAYER_RATE_LIMIT_WINDOW_SECONDS must be > 0 when rate limiting is enabled")
-    if queue_max_payload_bytes <= 0:
-        raise RuntimeError("RELAYER_QUEUE_MAX_PAYLOAD_BYTES must be > 0")
-    if queue_running_ttl_seconds <= 0:
-        raise RuntimeError("RELAYER_QUEUE_RUNNING_TTL_SECONDS must be > 0")
+@lru_cache(maxsize=1)
+def get_settings(**kwargs: Any) -> RelayerSettings:
+    """Return a cached RelayerSettings instance."""
+    return RelayerSettings(**kwargs)  # type: ignore[arg-type]
 
-    return RelayerConfig(
-        rpc_url=_require_env("RPC_URL"),
-        chain_id=int(_require_env("CHAIN_ID")),
-        relayer_private_key=_require_env("RELAYER_PRIVATE_KEY"),
-        relayer_escrow_address=_require_env("RELAYER_ESCROW_ADDRESS"),
-        host=_require_env("RELAYER_HOST"),
-        port=int(_require_env("RELAYER_PORT")),
-        bearer_token=bearer_token,
-        allow_insecure_auth=allow_insecure_auth,
-        max_block_age_seconds=_int_env("RELAYER_MAX_BLOCK_AGE_SECONDS", 60),
-        min_relayer_balance_wei=_int_env("RELAYER_MIN_BALANCE_WEI", 0),
-        max_retries=_int_env("RELAYER_MAX_RETRIES", 3),
-        retry_backoff_seconds=_float_env("RELAYER_RETRY_BACKOFF_SECONDS", 0.5),
-        tx_timeout_seconds=tx_timeout_seconds,
-        queue_db_path=os.getenv("RELAYER_QUEUE_DB_PATH", "relayer_queue.db"),
-        queue_dsn=_queue_dsn(),
-        queue_poll_seconds=_float_env("RELAYER_QUEUE_POLL_SECONDS", 1.0),
-        queue_max_attempts=_int_env("RELAYER_QUEUE_MAX_ATTEMPTS", 5),
-        queue_max_payload_bytes=queue_max_payload_bytes,
-        queue_running_ttl_seconds=queue_running_ttl_seconds,
-        fee_bump_percent=_float_env("RELAYER_FEE_BUMP_PERCENT", 0.15),
-        min_escrow_token_balance_wei=_int_env("RELAYER_MIN_ESCROW_TOKEN_BALANCE_WEI", 0),
-        min_relayer_token_allowance_wei=_int_env("RELAYER_MIN_RELAYER_TOKEN_ALLOWANCE_WEI", 0),
-        http_timeout_seconds=_int_env("RELAYER_HTTP_TIMEOUT_SECONDS", 10),
-        preflight_mode=_preflight_mode(),
-        rate_limit_requests=rate_limit_requests,
-        rate_limit_window_seconds=rate_limit_window_seconds,
-        ip_allowlist=_ip_allowlist(),
-        trust_x_forwarded_for=_bool_env("RELAYER_TRUST_X_FORWARDED_FOR", False),
-        trusted_proxy_cidrs=_proxy_allowlist(),
-        api_base_url=os.getenv("RELAYER_API_BASE_URL"),
-        api_bearer_token=os.getenv("RELAYER_API_BEARER_TOKEN"),
-        api_internal_secret=os.getenv("RELAYER_API_INTERNAL_SECRET"),
-        api_timeout_seconds=_int_env("RELAYER_API_TIMEOUT_SECONDS", 10),
-        health_deep_cache_ttl_seconds=_int_env("RELAYER_HEALTH_DEEP_CACHE_TTL_SECONDS", 10),
-        api_client_max_age_seconds=_int_env("RELAYER_API_CLIENT_MAX_AGE_SECONDS", 900),
-        api_health_failure_cooldown_seconds=_int_env("RELAYER_API_HEALTH_COOLDOWN_SECONDS", 15),
-        rpc_circuit_breaker_threshold=_int_env("RELAYER_RPC_CIRCUIT_THRESHOLD", 5),
-        rpc_circuit_breaker_window_seconds=_float_env("RELAYER_RPC_CIRCUIT_WINDOW_SECONDS", 30.0),
-        rpc_circuit_breaker_cooldown_seconds=_float_env("RELAYER_RPC_CIRCUIT_COOLDOWN_SECONDS", 30.0),
-    )
+
+def reload_settings() -> RelayerSettings:
+    """Clear cached settings and rebuild from the environment."""
+    get_settings.cache_clear()
+    return get_settings()
+
+
+# Backward-compatible aliases
+def load_config() -> RelayerSettings:
+    return get_settings()
+
+
+RelayerConfig = RelayerSettings

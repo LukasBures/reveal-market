@@ -50,7 +50,7 @@ DEPLOYER_KEY = os.environ["DEPLOYER_KEY"]
 TEST_ACCOUNT_KEY = os.environ["TEST_ACCOUNT_KEY"]
 ORACLE_KEY = os.environ["ORACLE_KEY"]
 AUTH_SIGNER_KEY = os.environ["RM_AUTHORIZATION_SIGNER_PRIVATE_KEY"]
-RELAYER_KEY = os.environ["RELAYER_PRIVATE_KEY"]
+RELAYER_KEY = os.environ["RM_RELAYER_PRIVATE_KEY"]
 
 # Service URLs
 API_URL = os.getenv("API_URL", "http://localhost:8000")
@@ -60,7 +60,7 @@ HEDGER_URL = os.getenv("HEDGER_URL", "http://localhost:8090")
 
 # Auth tokens
 INTERNAL_SECRET =<REDACTED>
-RELAYER_BEARER = os.getenv("RELAYER_BEARER_TOKEN", "REDACTED")
+RELAYER_BEARER = os.getenv("RM_RELAYER_BEARER_TOKEN", "REDACTED")
 PROVER_SECRET =<REDACTED>
 
 # State file for passing data between scripts

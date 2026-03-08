@@ -305,8 +305,8 @@ services:
       - ${ENV_FILE:-.env.local}
     environment:
       TZ: UTC
-      RELAYER_HOST: ${RELAYER_HOST:-0.0.0.0}
-      RELAYER_PORT: ${RELAYER_PORT:-8088}
+      RM_RELAYER_HOST: ${RM_RELAYER_HOST:-0.0.0.0}
+      RM_RELAYER_PORT: ${RM_RELAYER_PORT:-8088}
     logging:
       driver: "json-file"
       options:
@@ -317,7 +317,7 @@ services:
       - "prometheus.port=8088"
       - "prometheus.path=/metrics"
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${RELAYER_PORT:-8088}/healthz || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${RM_RELAYER_PORT:-8088}/healthz || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 3

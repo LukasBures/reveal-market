@@ -327,7 +327,7 @@ class Settings(BaseSettings):
     relayer_base_url: AnyHttpUrl | None = Field(default=None, description="Base URL for the Reveal relayer service")
     relayer_bearer_token: str | None = Field(default=None, description="Optional bearer token for relayer auth")
     relayer_internal_secret: SecretStr | None = Field(
-        default=None, alias="RELAYER_API_INTERNAL_SECRET", description="Internal API secret for relayer calls"
+        default=None, description="Internal API secret for relayer calls"
     )
     relayer_http_timeout_seconds: float = Field(default=10.0, gt=0)
     relayer_queue_enabled: bool = Field(default=True, description="Enable Redis-backed relayer claim queue")
@@ -464,8 +464,12 @@ class Settings(BaseSettings):
         description="Max wall-clock seconds to keep retrying a settlement submission",
     )
     lock_batches_use_relayer: bool = Field(
-        default=True,
+        default=False,
         description="Route lockBatches submissions through the relayer API instead of direct RPC",
+    )
+    relayer_private_key: str | None = Field(
+        default=None,
+        description="Private key of the RelayerEscrow owner, used to sign lockBatches digest",
     )
     lock_batches_poll_seconds: float = Field(
         default=60.0,
