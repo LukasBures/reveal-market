@@ -123,10 +123,10 @@ def _build_batch_payloads(
                 }
             )
 
-        for _ in range(BATCH_SIZE - count):
+        for pad_idx in range(count, BATCH_SIZE):
             tickets.append(
                 {
-                    "ticketId": "0",
+                    "ticketId": str(pad_idx),
                     "outcomeId": "0",
                     "amount": "0",
                     "payout": "0",

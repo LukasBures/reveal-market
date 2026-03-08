@@ -171,3 +171,49 @@ async def test_worker_claim_payload_includes_payout():
     assert "payout" in payload, "worker claim payload must include 'payout'"
     assert payload["payout"] == 1_500_000_000_000_000_000
     assert payload["amount"] == 1_000_000_000_000_000_000
+
+
+def test_padding_ticket_ids_unique(session):
+    """All 256 ticketIds in a batch payload must be unique (prover rejects duplicates)."""
+    leaves = ["0x" + ("a" * 64), "0x" + ("b" * 64)]
+    for i, leaf in enumerate(leaves):
+        ticket_hash = f"0x{i + 1:064x}"
+        c = Commitment(
+            id=i + 1,
+            market_id=1,
+            user_address="0x0000000000000000000000000000000000000abc",
+            outcome_id=i % 2,
+            amount_wei=100 + i,
+            payout_wei=120 + i,
+            salt="0x1",
+            ticket_hash=ticket_hash,
+            leaf=leaf,
+            leaf_index=i,
+        )
+        session.add(c)
+    session.commit()
+
+    root, _ = build_merkle_root_and_paths([bytes.fromhex(leaf.removeprefix("0x")) for leaf in leaves])
+    s = Settlement(
+        id=1,
+        market_id=1,
+        merkle_root="0x" + root.hex(),
+        commitments_count=2,
+        pool_total_yes=100,
+        pool_total_no=101,
+        total_escrow=201,
+        total_liability=121,
+        rake_bps=100,
+        winning_outcome_id=1,
+        circuit_hash="0xdead",
+    )
+    session.add(s)
+    session.commit()
+
+    payloads = build_prover_payload(session, 1)
+    tickets = payloads[0]["tickets"]
+    ticket_ids = [t["ticketId"] for t in tickets]
+    assert len(ticket_ids) == 256
+    assert len(set(ticket_ids)) == 256, (
+        f"duplicate ticketIds found: {[x for x in ticket_ids if ticket_ids.count(x) > 1]}"
+    )
