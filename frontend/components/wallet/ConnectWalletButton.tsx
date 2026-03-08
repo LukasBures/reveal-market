@@ -711,7 +711,13 @@ export function ConnectWalletButton() {
       : null;
 
   if (!isMounted) {
-    return <div className="inline-flex h-[38px] w-[130px] animate-pulse rounded-full bg-brand-500/60" />;
+    return (
+      <div>
+        <span className="inline-flex items-center rounded-full bg-brand-500/60 px-5 py-2.5 text-sm font-semibold text-transparent select-none shadow-lg shadow-brand-500/20">
+          {lastConnectedAddress ? formatAddress(lastConnectedAddress) : "Connect Wallet"}
+        </span>
+      </div>
+    );
   }
 
   return (
