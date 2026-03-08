@@ -67,6 +67,8 @@ async def upsert_market(
     session: AsyncSession,
     data: Mapping[str, Any],
     existing: models.Market | None = None,
+    *,
+    skip_lookup: bool = False,
 ) -> models.Market:
     """Insert or update a market row based on the provided field mapping."""
 
@@ -96,7 +98,7 @@ async def upsert_market(
     ):
         payload.pop(legacy, None)
     market: models.Market | None = existing
-    if market is None:
+    if market is None and not skip_lookup:
         conditions: list[ColumnElement[bool]] = [models.Market.event_id == payload["event_id"]]
         onchain_market_id = payload.get("onchain_market_id")
         if onchain_market_id is not None:

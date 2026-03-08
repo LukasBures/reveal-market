@@ -967,7 +967,9 @@ async def _get_polymarket_updated_at_cutoff(redis_client: Redis | None) -> float
         try:
             async with session_scope() as session:
                 row = await session.execute(
-                    text("SELECT EXTRACT(EPOCH FROM MAX(source_updated_at)) FROM markets WHERE source_updated_at IS NOT NULL")
+                    text(
+                        "SELECT EXTRACT(EPOCH FROM MAX(source_updated_at)) FROM markets WHERE source_updated_at IS NOT NULL"
+                    )
                 )
                 db_ts = row.scalar()
                 if db_ts is not None:

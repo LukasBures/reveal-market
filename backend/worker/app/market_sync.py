@@ -159,6 +159,7 @@ async def _persist_normalized_market_data(
     clob_token_ids: list[str] | None,
     gamma_metadata: dict | None,
     prefetched_state: PrefetchedMarketState | None = None,
+    is_new: bool = False,
 ) -> dict[str, int]:
     """Upsert normalized tables for a market, avoiding unnecessary rewrites."""
 
@@ -168,6 +169,8 @@ async def _persist_normalized_market_data(
     if outcomes is not None:
         if prefetched_state and market_id in prefetched_state.outcomes:
             existing_outcome_rows = prefetched_state.outcomes.get(market_id, [])
+        elif is_new and not (prefetched_state and market_id in prefetched_state.outcomes):
+            existing_outcome_rows = []
         else:
             existing_outcome_rows = list(
                 (
@@ -214,6 +217,8 @@ async def _persist_normalized_market_data(
     if tags is not None:
         if prefetched_state and market_id in prefetched_state.tags:
             existing_tags = prefetched_state.tags.get(market_id, set())
+        elif is_new and not (prefetched_state and market_id in prefetched_state.tags):
+            existing_tags = set()
         else:
             existing_tags = {
                 row.tag
@@ -240,6 +245,8 @@ async def _persist_normalized_market_data(
     if clob_token_ids is not None:
         if prefetched_state and market_id in prefetched_state.clob_tokens:
             existing_clob_rows = prefetched_state.clob_tokens.get(market_id, [])
+        elif is_new and not (prefetched_state and market_id in prefetched_state.clob_tokens):
+            existing_clob_rows = []
         else:
             existing_clob_rows = list(
                 (
@@ -273,6 +280,8 @@ async def _persist_normalized_market_data(
     if gamma_metadata is not None:
         if prefetched_state and market_id in prefetched_state.gamma_metadata:
             existing_meta = prefetched_state.gamma_metadata.get(market_id)
+        elif is_new and not (prefetched_state and market_id in prefetched_state.gamma_metadata):
+            existing_meta = None
         else:
             existing_meta = (
                 await session.execute(
@@ -490,6 +499,7 @@ async def collect_market_changes_with_summary(
                 prefetched_state=prefetched_state,
                 resolution_summaries=resolution_summaries,
                 allow_resolution_fetch=allow_resolution_fetch.get(market.event_id, True),
+                batch_checked=True,
             )
         except Exception as exc:  # pragma: no cover - defensive
             log_event(
@@ -751,6 +761,7 @@ async def sync_market(
     prefetched_state: PrefetchedMarketState | None = None,
     resolution_summaries: dict[str, dict[str, Any] | None] | None = None,
     allow_resolution_fetch: bool = True,
+    batch_checked: bool = False,
 ):
     """Upsert a market row using `event_id` as the natural key, reusing prefetched state when available."""
     if market.event_key:
@@ -762,6 +773,7 @@ async def sync_market(
         prefetched_state=prefetched_state,
         resolution_summaries=resolution_summaries,
         allow_resolution_fetch=allow_resolution_fetch,
+        batch_checked=batch_checked,
     )
 
 
@@ -920,10 +932,14 @@ async def _sync_market(
     prefetched_state: PrefetchedMarketState | None = None,
     resolution_summaries: dict[str, dict[str, Any] | None] | None = None,
     allow_resolution_fetch: bool = True,
+    batch_checked: bool = False,
 ):
     """Async implementation that upserts market state + resolutions."""
     now = datetime.now(UTC)
-    existing = existing_market or await shared_repository.get_market_by_event_id(session, market.event_id)
+    if batch_checked:
+        existing = existing_market
+    else:
+        existing = existing_market or await shared_repository.get_market_by_event_id(session, market.event_id)
     if existing is not None:
         state: InstanceState[shared_models.Market] | None = inspect(existing)
         if state is not None and state.detached:
@@ -1060,7 +1076,7 @@ async def _sync_market(
 
     if existing is None:
         upsert_start = time.perf_counter()
-        db_market = await shared_repository.upsert_market(session, payload, existing)
+        db_market = await shared_repository.upsert_market(session, payload, existing, skip_lookup=batch_checked)
         timing_upsert_ms = (time.perf_counter() - upsert_start) * 1000
         market_changed = True
         market_created = True
@@ -1122,7 +1138,7 @@ async def _sync_market(
             )
         else:
             upsert_start = time.perf_counter()
-            db_market = await shared_repository.upsert_market(session, payload, existing)
+            db_market = await shared_repository.upsert_market(session, payload, existing, skip_lookup=batch_checked)
             timing_upsert_ms = (time.perf_counter() - upsert_start) * 1000
             market_changed = True
             market_updated = True
@@ -1154,6 +1170,7 @@ async def _sync_market(
             clob_token_ids=clob_token_ids,
             gamma_metadata=gamma_metadata,
             prefetched_state=prefetched_state,
+            is_new=market_created,
         )
         timing_normalized_ms = (time.perf_counter() - norm_start) * 1000
         if gamma_counts.get("metadata") or gamma_counts.get("events"):

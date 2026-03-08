@@ -256,10 +256,10 @@ async def test_sync_market_skips_when_source_timestamp_matches(monkeypatch):
         call_count = 0
         original_upsert = market_sync.shared_repository.upsert_market
 
-        def tracked_upsert(session, data, existing=None):
+        def tracked_upsert(session, data, existing=None, **kwargs):
             nonlocal call_count
             call_count += 1
-            return original_upsert(session, data, existing)
+            return original_upsert(session, data, existing, **kwargs)
 
         monkeypatch.setattr("app.market_sync.shared_repository.upsert_market", tracked_upsert, raising=False)
 
@@ -302,10 +302,10 @@ async def test_sync_market_upserts_when_hash_changes_with_same_timestamp(monkeyp
         call_count = 0
         original_upsert = market_sync.shared_repository.upsert_market
 
-        def tracked_upsert(session, data, existing=None):
+        def tracked_upsert(session, data, existing=None, **kwargs):
             nonlocal call_count
             call_count += 1
-            return original_upsert(session, data, existing)
+            return original_upsert(session, data, existing, **kwargs)
 
         monkeypatch.setattr("app.market_sync.shared_repository.upsert_market", tracked_upsert, raising=False)
 
@@ -348,10 +348,10 @@ async def test_sync_market_skips_when_source_timestamp_matches_without_hash(monk
         call_count = 0
         original_upsert = market_sync.shared_repository.upsert_market
 
-        def tracked_upsert(session, data, existing=None):
+        def tracked_upsert(session, data, existing=None, **kwargs):
             nonlocal call_count
             call_count += 1
-            return original_upsert(session, data, existing)
+            return original_upsert(session, data, existing, **kwargs)
 
         monkeypatch.setattr("app.market_sync.shared_repository.upsert_market", tracked_upsert, raising=False)
 
