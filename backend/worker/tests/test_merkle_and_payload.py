@@ -85,6 +85,9 @@ def test_build_prover_payload(session):
     assert payload["tickets"]
     assert "payoutMultiplierWad" not in payload
     assert payload["poolTotals"] == ["100", "101"]
+    # totalLiability must equal sum of winning payouts only, NOT totalEscrow.
+    # winning_outcome_id=1 → only commitment 1 (outcome_id=1, payout_wei=121) counts.
+    assert payload["totalLiability"] == "121"
 
 
 def test_build_prover_payload_missing_data(session):

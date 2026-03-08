@@ -244,7 +244,10 @@ async def _enqueue_backfill_proof_jobs(redis_client: Redis | None) -> int:
             stmt = (
                 select(shared_models.Market, shared_models.Settlement)
                 .where(
-                    shared_models.Market.resolution_status == shared_models.ResolutionStatusEnum.FINAL.value,
+                    or_(
+                        shared_models.Market.resolution_status == shared_models.ResolutionStatusEnum.FINAL.value,
+                        shared_models.Market.resolution_status.is_(None),
+                    ),
                     shared_models.Settlement.market_id == shared_models.Market.id,
                     shared_models.Settlement.proof_status != shared_models.SettlementProofStatus.GENERATED.value,
                 )
@@ -259,7 +262,10 @@ async def _enqueue_backfill_proof_jobs(redis_client: Redis | None) -> int:
                 stmt = (
                     select(shared_models.Market, shared_models.Settlement)
                     .where(
-                        shared_models.Market.resolution_status == shared_models.ResolutionStatusEnum.FINAL.value,
+                        or_(
+                            shared_models.Market.resolution_status == shared_models.ResolutionStatusEnum.FINAL.value,
+                            shared_models.Market.resolution_status.is_(None),
+                        ),
                         shared_models.Settlement.market_id == shared_models.Market.id,
                         shared_models.Settlement.proof_status != shared_models.SettlementProofStatus.GENERATED.value,
                     )

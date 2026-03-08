@@ -292,9 +292,8 @@ def main() -> int:
     pool_yes = sum(int(t["amount"]) for t in tickets if t["outcome_id"] == 0)
     pool_no = sum(int(t["amount"]) for t in tickets if t["outcome_id"] == 1)
     total_escrow = pool_yes + pool_no
-    # Settlement invariant: totalLiability = poolYes + poolNo = totalEscrow
-    # (rake was already deducted from ticket amounts before entering the pool)
-    total_liability = total_escrow
+    # totalLiability = sum of payouts for WINNING tickets only (circuit line 164/188)
+    total_liability = sum(int(t["payout"]) for t in tickets if t["outcome_id"] == WINNING_OUTCOME)
 
     # Cross-validate against on-chain state
     on_chain_escrow = market_contract.functions.totalEscrow().call()
