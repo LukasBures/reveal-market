@@ -460,8 +460,31 @@ services:
 
   # ---- Monitoring ----
 
-  # Item 10: Alertmanager — receives fired rules from Prometheus and delivers
-  # them to Discord via the DISCORD_ALERT_WEBHOOK_URL env var.
+  # Item 10: alertmanager-discord sidecar — converts Alertmanager's JSON
+  # webhook payload to Discord embed format and POSTs to DISCORD_WEBHOOK.
+  alertmanager-discord:
+    image: benjojo/alertmanager-discord:latest
+    container_name: reveal-market-alertmanager-discord
+    restart: unless-stopped
+    environment:
+      DISCORD_WEBHOOK: ${DISCORD_ALERT_WEBHOOK_URL:?Set DISCORD_ALERT_WEBHOOK_URL in your env file}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 32M
+        reservations:
+          cpus: "0.05"
+          memory: 16M
+
+  # Alertmanager — receives fired rules from Prometheus and forwards to the
+  # alertmanager-discord sidecar at http://alertmanager-discord:9094.
   alertmanager:
     image: prom/alertmanager:v0.27.0
     container_name: reveal-market-alertmanager

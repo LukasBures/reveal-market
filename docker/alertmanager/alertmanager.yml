@@ -1,0 +1,51 @@
+# Item 10: Alertmanager configuration — routes Prometheus alerts to Discord.
+#
+# Delivery: all receivers route through the alertmanager-discord sidecar
+# (reveal-market-alertmanager-discord:9094), which converts Alertmanager's
+# JSON payload to Discord's embed format and forwards to DISCORD_ALERT_WEBHOOK_URL.
+#
+# Severity routing:
+#   watchdog → discord        (heartbeat, repeat every 12h, no resolved message)
+#   critical → discord        (repeat every 1h)
+#   warning  → discord        (grouped, repeat every 4h)
+#
+# Inhibition: a firing critical suppresses matching warnings to reduce noise.
+
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ["alertname", "severity"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: discord
+  routes:
+    - matchers:
+        - severity="watchdog"
+      receiver: discord-watchdog
+      repeat_interval: 12h
+      continue: false
+    - matchers:
+        - severity="critical"
+      receiver: discord
+      repeat_interval: 1h
+      continue: false
+
+receivers:
+  - name: discord
+    webhook_configs:
+      - url: "http://alertmanager-discord:9094"
+        send_resolved: true
+
+  - name: discord-watchdog
+    webhook_configs:
+      - url: "http://alertmanager-discord:9094"
+        send_resolved: false
+
+inhibit_rules:
+  - source_matchers:
+      - severity="critical"
+    target_matchers:
+      - severity="warning"
+    equal: ["alertname"]

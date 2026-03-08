@@ -609,24 +609,8 @@ else
   log_warn "Skipping docker compose build step (per --skip-build)."
 fi
 
-log_step "Generating Alertmanager config from template"
-_TMPL="${ROOT_DIR}/docker/alertmanager/alertmanager.yml.tmpl"
-_OUT="${ROOT_DIR}/docker/alertmanager/alertmanager.yml"
-if [[ -f "${_TMPL}" ]]; then
-  _DISCORD_URL=$(grep '^DISCORD_ALERT_WEBHOOK_URL=' "${ENV_FILE}" | cut -d= -f2- | tr -d '"' || true)
-  if [[ -n "${_DISCORD_URL}" ]]; then
-    DISCORD_ALERT_WEBHOOK_URL=<REDACTED>
-    log_info "Alertmanager config generated (webhook URL set)"
-  else
-    log_warn "DISCORD_ALERT_WEBHOOK_URL not set — copying template as-is (alerts will not deliver)"
-    cp "${_TMPL}" "${_OUT}"
-  fi
-else
-  log_warn "Alertmanager template not found at ${_TMPL} — skipping config generation"
-fi
-
 log_step "Starting services in detached mode"
-UP_CMD=("${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" up "-d" "--remove-orphans" "${WAIT_FLAG[@]}" postgres redis alertmanager api worker streamer prover frontend relayer hedger caddy prometheus)
+UP_CMD=("${COMPOSE_CMD[@]}" "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_ENV_ARGS[@]}" up "-d" "--remove-orphans" "${WAIT_FLAG[@]}" postgres redis alertmanager-discord alertmanager api worker streamer prover frontend relayer hedger caddy prometheus)
 if [[ ${#UP_ARGS[@]} -gt 0 ]]; then
   UP_CMD+=("${UP_ARGS[@]}")
 fi
