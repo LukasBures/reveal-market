@@ -155,9 +155,11 @@ class Settings(BaseSettings):
     polymarket_only_open_markets: bool | None = Field(default=None)
     polymarket_active_filter: bool | None = Field(default=None)
     polymarket_archived_filter: bool | None = Field(default=None)
-    # Hardcoded: only sync markets ending within -14/+14 days of today.
-    polymarket_end_date_min_days: int = -14
-    polymarket_end_date_max_days: int = 14
+    # Only sync markets ending within this window relative to today.
+    # 0/+2 is safe: past resolutions are handled by _reconcile_closed_markets
+    # which fetches by event_id (bypasses date window entirely).
+    polymarket_end_date_min_days: int = 0
+    polymarket_end_date_max_days: int = 2
     polymarket_max_retries: int = Field(default=3, ge=1)
     polymarket_retry_backoff_seconds: float = Field(default=0.2, ge=0)
     polymarket_retry_backoff_max_seconds: float = Field(default=2.0, ge=0)

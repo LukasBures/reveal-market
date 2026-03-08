@@ -21,7 +21,7 @@ from shared import repository_async
 from shared.cache_keys import market_stats_cache_key
 from shared.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 from shared.logging import log_event, start_heartbeat_logger
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.sql.elements import ColumnElement
 
 from . import runtime
@@ -961,6 +961,39 @@ async def _get_polymarket_updated_at_cutoff(redis_client: Redis | None) -> float
     else:
         async with _WORKER_TIMESTAMPS_LOCK:
             last_ts = _WORKER_TIMESTAMPS.last_polymarket_updated_at_ts
+
+    # Seed from DB when Redis/in-memory has no cutoff (cold start after deploy/restart)
+    if last_ts is None:
+        try:
+            async with session_scope() as session:
+                row = await session.execute(
+                    text("SELECT EXTRACT(EPOCH FROM MAX(source_updated_at)) FROM markets WHERE source_updated_at IS NOT NULL")
+                )
+                db_ts = row.scalar()
+                if db_ts is not None:
+                    last_ts = float(db_ts)
+                    if redis_client is not None:
+                        await redis_client.set(
+                            runtime.settings.polymarket_updated_at_cutoff_key,
+                            str(last_ts),
+                            ex=86400,
+                        )
+                    log_event(
+                        logger,
+                        logging.INFO,
+                        event="worker.fetch.cutoff_seeded_from_db",
+                        message="seeded updatedAt cutoff from database",
+                        cutoff_ts=last_ts,
+                    )
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="worker.fetch.cutoff_db_seed_failed",
+                message="failed to seed cutoff from database",
+                error=str(exc),
+            )
+
     if last_ts is None:
         return None
     grace = max(runtime.settings.polymarket_updated_at_cutoff_grace_seconds, 0)
@@ -2112,6 +2145,24 @@ async def run_maintenance_loop(redis_client: Redis | None) -> None:
                         logging.WARNING,
                         event="worker.settlement.recover_failed",
                         message="settlement recovery run failed",
+                        error=str(exc),
+                    )
+                try:
+                    backfill_enqueued = await _enqueue_backfill_proof_jobs(redis_client)
+                    if backfill_enqueued:
+                        log_event(
+                            logger,
+                            logging.INFO,
+                            event="worker.maintenance.proof_backfill",
+                            message="enqueued proof backfill jobs during maintenance",
+                            enqueued=backfill_enqueued,
+                        )
+                except Exception as exc:  # pragma: no cover - defensive
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        event="worker.maintenance.proof_backfill_failed",
+                        message="proof backfill during maintenance failed",
                         error=str(exc),
                     )
             elapsed = time.monotonic() - loop_start
