@@ -26,7 +26,7 @@ const ConnectWalletButton = dynamic(
       } catch { /* SSR / private browsing */ }
       return (
         <div>
-          <span className="inline-flex items-center rounded-full bg-brand-500/60 px-5 py-2.5 text-sm font-semibold text-transparent select-none shadow-lg shadow-brand-500/20">
+          <span className="inline-flex min-w-[9.5rem] items-center justify-center rounded-full bg-brand-500/60 px-5 py-2.5 text-sm font-semibold text-transparent select-none shadow-lg shadow-brand-500/20">
             {label}
           </span>
         </div>
