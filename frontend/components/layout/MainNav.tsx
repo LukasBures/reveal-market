@@ -18,13 +18,20 @@ const ConnectWalletButton = dynamic(
     })),
   {
     ssr: false,
-    loading: () => (
-      <div>
-        <span className="inline-flex items-center rounded-full bg-brand-500/60 px-5 py-2.5 text-sm font-semibold text-transparent select-none shadow-lg shadow-brand-500/20">
-          Connect Wallet
-        </span>
-      </div>
-    ),
+    loading: () => {
+      let label = "Connect Wallet";
+      try {
+        const addr = localStorage.getItem("rm_last_wallet_address");
+        if (addr) label = `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+      } catch { /* SSR / private browsing */ }
+      return (
+        <div>
+          <span className="inline-flex items-center rounded-full bg-brand-500/60 px-5 py-2.5 text-sm font-semibold text-transparent select-none shadow-lg shadow-brand-500/20">
+            {label}
+          </span>
+        </div>
+      );
+    },
   }
 );
 
