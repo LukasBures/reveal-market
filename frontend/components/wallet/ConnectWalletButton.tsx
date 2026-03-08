@@ -146,7 +146,13 @@ export function ConnectWalletButton() {
   const activeConnectorId = activeConnector?.id;
   const connectErrorMessage = formatErrorMessage(connectError);
   const chainMismatch = isConnected && chain?.id !== defaultChain.id;
-  const [lastConnectedAddress, setLastConnectedAddress] = useState<string | null>(null);
+  const [lastConnectedAddress, setLastConnectedAddress] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem("rm_last_wallet_address");
+    } catch {
+      return null;
+    }
+  });
   const [lastConnectedChainName, setLastConnectedChainName] = useState<string | null>(null);
   const [eip6963Providers, setEip6963Providers] = useState<Record<string, Eip6963ProviderDetail>>({});
 
@@ -221,6 +227,7 @@ export function ConnectWalletButton() {
   useEffect(() => {
     if (isConnected && address) {
       setLastConnectedAddress(address);
+      try { localStorage.setItem("rm_last_wallet_address", address); } catch { /* quota */ }
     }
     if (isConnected && chain?.name) {
       setLastConnectedChainName(chain.name);
@@ -228,6 +235,7 @@ export function ConnectWalletButton() {
     if (accountStatus === "disconnected") {
       setLastConnectedAddress(null);
       setLastConnectedChainName(null);
+      try { localStorage.removeItem("rm_last_wallet_address"); } catch { /* noop */ }
     }
   }, [accountStatus, address, chain?.name, isConnected]);
 
@@ -702,7 +710,7 @@ export function ConnectWalletButton() {
         )
       : null;
 
-  if (!isMounted || accountStatus === "reconnecting") {
+  if (!isMounted) {
     return <div className="h-9 w-[130px] animate-pulse rounded-full bg-white/10" />;
   }
 
