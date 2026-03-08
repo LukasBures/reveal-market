@@ -103,8 +103,11 @@ groups:
           description: "Net exposure: ${{ $value }}."
 
       - alert: HedgerFloatLow
-        expr: hedger_float_balance_zen < 100
-        for: 10m
+        expr: |
+          hedger_float_balance_zen < 100
+          and hedger_float_balance_zen >= 0
+          and sum(abs(hedger_market_net_exposure_usd)) > 0
+        for: 15m
         labels:
           severity: warning
         annotations:

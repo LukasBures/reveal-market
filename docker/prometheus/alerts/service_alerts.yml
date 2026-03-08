@@ -13,7 +13,7 @@ groups:
     interval: 15s
     rules:
       - alert: ServiceDown
-        expr: up == 0
+        expr: up{job!~"postgres|redis"} == 0
         for: 2m
         labels:
           severity: critical
@@ -50,30 +50,30 @@ groups:
       - alert: CacheHitRateLow
         expr: |
           (
-            sum(rate(api_cache_requests_total{outcome="hit"}[10m]))
+            sum(rate(api_cache_requests_total{outcome="hit"}[15m]))
             /
-            sum(rate(api_cache_requests_total[10m]))
-          ) < 0.8
-        for: 10m
+            sum(rate(api_cache_requests_total[15m]))
+          ) < 0.6
+        for: 15m
         labels:
           severity: warning
         annotations:
-          summary: "API cache hit rate below 80%"
-          description: "Cache hit rate has been {{ $value | humanizePercentage }} for 10 minutes."
+          summary: "API cache hit rate below 60%"
+          description: "Cache hit rate has been {{ $value | humanizePercentage }} for 15 minutes."
 
   - name: worker_health
     interval: 15s
     rules:
       - alert: WorkerSyncStale
         expr: |
-          changes(worker_sync_cycle_duration_seconds_count{job="worker"}[10m]) == 0
+          changes(worker_sync_cycle_duration_seconds_count{job="worker"}[35m]) == 0
           or absent(worker_sync_cycle_duration_seconds_count{job="worker"})
         for: 5m
         labels:
-          severity: critical
+          severity: warning
         annotations:
           summary: "Worker sync appears stalled"
-          description: "No sync cycle completed in the last 10 minutes."
+          description: "No sync cycle completed in the last 35 minutes."
 
       - alert: ProofQueueDepthCritical
         expr: sum(worker_proof_queue_depth) > 100
