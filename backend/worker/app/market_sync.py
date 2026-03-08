@@ -942,13 +942,13 @@ async def _sync_market(
         existing = existing_market
     else:
         existing = existing_market or await shared_repository.get_market_by_event_id(session, market.event_id)
-    if existing is not None:
+    if existing is not None and not batch_checked:
         state: InstanceState[shared_models.Market] | None = inspect(existing)
         if state is not None and state.detached:
             existing = await shared_repository.get_market_by_event_id(session, market.event_id)
             state = inspect(existing) if existing is not None else None
-    if existing is not None and state is not None and state.expired_attributes:
-        await session.refresh(existing)
+        if state is not None and state.expired_attributes:
+            await session.refresh(existing)
     previous_group_slug = getattr(existing, "group_slug", None) if existing is not None else None
     factory_snapshot: dict[str, Any] | None = None
     if existing is not None:

@@ -200,16 +200,23 @@ async def persist_group_markets_cache(
 ) -> int:
     if redis_client is None or not group_slugs:
         return 0
-    total_written = 0
-    for slug in group_slugs:
-        normalized = (slug or "").strip().lower()
-        if not normalized:
-            continue
-        group_expr = func.coalesce(
-            shared_models.Market.group_slug,
-            shared_models.MarketGammaMetadata.group_slug,
-            shared_models.Market.event_key,
-        )
+    normalized_slugs = {(s or "").strip().lower() for s in group_slugs}
+    normalized_slugs.discard("")
+    if not normalized_slugs:
+        return 0
+
+    # Batch-load all markets for all changed groups in one query (+4 selectinloads)
+    # instead of N separate queries per slug.
+    group_expr = func.coalesce(
+        shared_models.Market.group_slug,
+        shared_models.MarketGammaMetadata.group_slug,
+        shared_models.Market.event_key,
+    )
+    all_markets: list[shared_models.Market] = []
+    chunk_size = 500
+    slug_list = sorted(normalized_slugs)
+    for start in range(0, len(slug_list), chunk_size):
+        chunk = slug_list[start : start + chunk_size]
         stmt = (
             select(shared_models.Market)
             .options(
@@ -222,10 +229,22 @@ async def persist_group_markets_cache(
                 shared_models.MarketGammaMetadata,
                 shared_models.MarketGammaMetadata.market_id == shared_models.Market.id,
             )
-            .where(group_expr == normalized)
+            .where(group_expr.in_(chunk))
         )
         result = await session.execute(stmt)
-        rows = list(result.unique().scalars().all())
+        all_markets.extend(result.unique().scalars().all())
+
+    # Group loaded markets by their resolved slug in Python.
+    groups: dict[str, list[shared_models.Market]] = {}
+    for market in all_markets:
+        meta = market.gamma_metadata_rel
+        resolved = market.group_slug or (meta.group_slug if meta else None) or market.event_key
+        if resolved and resolved in normalized_slugs:
+            groups.setdefault(resolved, []).append(market)
+
+    total_written = 0
+    for slug in normalized_slugs:
+        rows = groups.get(slug)
         if not rows:
             continue
         rows.sort(
@@ -235,9 +254,9 @@ async def persist_group_markets_cache(
             )
         )
         payload = [_serialize_market_for_group_cache(row) for row in rows]
-        cache_key = group_markets_cache_key(normalized)
+        cache_key = group_markets_cache_key(slug)
         await shared_cache.set_json(redis_client, cache_key, payload, ttl_seconds)
-        await shared_cache.add_tag(redis_client, f"group:{normalized}", cache_key)
+        await shared_cache.add_tag(redis_client, f"group:{slug}", cache_key)
         await shared_cache.add_tag(redis_client, "markets:group", cache_key)
         total_written += 1
     return total_written
