@@ -12,7 +12,7 @@ Each item includes: current code state, exact risk, what to build, and acceptanc
 
 | Phase | Items | Status |
 |-------|-------|--------|
-| **Now** | 2, 3, 4, 6, 7, 8, 9, 10, 11 | Pending |
+| **Now** | 2, 3, 4, 6, 7, 8, 9, 10, 11 | **Done** |
 | **Deferred** | 1, 5, 12, 13 | Before significant TVL |
 
 ---
@@ -69,7 +69,7 @@ Same pattern applies to:
 
 ## Item 2 — Relayer webhook secret is optional
 
-**Status:** Pending
+**Status:** Done
 
 ### Current state
 
@@ -112,7 +112,7 @@ Ensure it is guarded by `RM_ENVIRONMENT=prod` check, same pattern as existing va
 
 ## Item 3 — Rate limiting off by default
 
-**Status:** Pending
+**Status:** Done
 
 ### Current state
 
@@ -159,7 +159,7 @@ if not settings.rate_limit_enabled:
 
 ## Item 4 — Redis no persistence and nonce dedup bypass
 
-**Status:** Pending
+**Status:** Done
 
 Two distinct problems that compound each other.
 
@@ -321,7 +321,7 @@ ssh reveal-market-prod "crontab -l 2>/dev/null | { cat; echo '0 2 * * * /opt/rev
 
 ## Item 7 — No alert for unresolved markets post-deadline
 
-**Status:** Pending
+**Status:** Done
 
 ### Current state
 
@@ -375,7 +375,7 @@ Then add alert rule:
 
 ## Item 8 — Circuit hash not validated in CI
 
-**Status:** Pending
+**Status:** Done
 
 ### Current state
 
@@ -426,7 +426,7 @@ This job must gate the deploy step — it should be a dependency, not run in par
 
 ## Item 9 — Internal service ports not firewall-verified
 
-**Status:** Pending
+**Status:** Done
 
 ### Current state
 
@@ -478,7 +478,7 @@ Do not rely solely on `ufw` for Docker containers — use cloud-level firewall r
 
 ## Item 10 — Alertmanager not configured (alerts fire but go nowhere)
 
-**Status:** Pending
+**Status:** Done
 
 ### Current state
 
@@ -586,7 +586,7 @@ DISCORD_ALERT_WEBHOOK_URL=<REDACTED>
 
 ## Item 11 — No emergency runbooks
 
-**Status:** Pending
+**Status:** Done (⚠ README link pending)
 
 ### Current state
 
