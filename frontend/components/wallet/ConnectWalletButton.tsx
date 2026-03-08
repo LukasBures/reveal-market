@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Connector } from "wagmi";
 import { useConnect, useConnectors, useConnection, useDisconnect, useSwitchChain } from "wagmi";
@@ -224,15 +224,17 @@ export function ConnectWalletButton() {
     }
   }, [attemptedAutoSwitch, chain, isConnected, switchChain, switchChainAsync, switchError]);
 
+  const hasBeenConnected = useRef(false);
   useEffect(() => {
     if (isConnected && address) {
+      hasBeenConnected.current = true;
       setLastConnectedAddress(address);
       try { localStorage.setItem("rm_last_wallet_address", address); } catch { /* quota */ }
     }
     if (isConnected && chain?.name) {
       setLastConnectedChainName(chain.name);
     }
-    if (accountStatus === "disconnected") {
+    if (accountStatus === "disconnected" && hasBeenConnected.current) {
       setLastConnectedAddress(null);
       setLastConnectedChainName(null);
       try { localStorage.removeItem("rm_last_wallet_address"); } catch { /* noop */ }
