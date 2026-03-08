@@ -944,3 +944,6 @@ contracts/cache/
 prod_db_backups/*.gz
 prod_db_backups/*.dump
 prod_db_backups/*.dump.gz
+
+# Generated Alertmanager config (built from alertmanager.yml.tmpl by run_prod.sh / run_local.sh)
+docker/alertmanager/alertmanager.yml

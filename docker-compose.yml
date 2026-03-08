@@ -470,7 +470,6 @@ services:
       - ${ENV_FILE:-.env.local}
     command:
       - "--config.file=/etc/alertmanager/alertmanager.yml"
-      - "--config.expand-env=true"
       - "--storage.path=/alertmanager"
       - "--web.listen-address=0.0.0.0:9093"
       - "--log.level=warn"
