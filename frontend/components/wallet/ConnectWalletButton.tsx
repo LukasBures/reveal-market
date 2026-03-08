@@ -711,7 +711,7 @@ export function ConnectWalletButton() {
       : null;
 
   if (!isMounted) {
-    return <div className="h-9 w-[130px] animate-pulse rounded-full bg-white/10" />;
+    return <div className="inline-flex h-[38px] w-[130px] animate-pulse rounded-full bg-brand-500/60" />;
   }
 
   return (

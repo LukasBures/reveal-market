@@ -19,7 +19,7 @@ const ConnectWalletButton = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="h-9 w-[130px] animate-pulse rounded-full bg-white/10" />
+      <div className="inline-flex h-[38px] w-[130px] animate-pulse rounded-full bg-brand-500/60" />
     ),
   }
 );
