@@ -62,7 +62,7 @@ class PrefetchedMarketState:
     outcomes: dict[int, list[shared_models.MarketOutcome]] = field(default_factory=dict)
     tags: dict[int, set[str]] = field(default_factory=dict)
     clob_tokens: dict[int, list[shared_models.MarketClobToken]] = field(default_factory=dict)
-    gamma_metadata: dict[int, shared_models.MarketGammaMetadata] = field(default_factory=dict)
+    gamma_metadata: dict[int, shared_models.MarketGammaMetadata | None] = field(default_factory=dict)
 
 
 @dataclass
@@ -342,10 +342,12 @@ async def _prefetch_normalized_state(session: AsyncSession, market_ids: list[int
     if not market_ids:
         return PrefetchedMarketState()
 
-    outcomes: dict[int, list[shared_models.MarketOutcome]] = {}
-    tags: dict[int, set[str]] = {}
-    clob_tokens: dict[int, list[shared_models.MarketClobToken]] = {}
-    gamma_metadata: dict[int, shared_models.MarketGammaMetadata] = {}
+    # Pre-seed every requested market_id so "id not in dict" means "not prefetched"
+    # rather than "prefetched but has no data" — prevents per-market fallback queries.
+    outcomes: dict[int, list[shared_models.MarketOutcome]] = {mid: [] for mid in market_ids}
+    tags: dict[int, set[str]] = {mid: set() for mid in market_ids}
+    clob_tokens: dict[int, list[shared_models.MarketClobToken]] = {mid: [] for mid in market_ids}
+    gamma_metadata: dict[int, shared_models.MarketGammaMetadata | None] = {mid: None for mid in market_ids}
 
     def _chunk(seq: list[int], size: int = 500):
         for start in range(0, len(seq), size):
@@ -359,11 +361,11 @@ async def _prefetch_normalized_state(session: AsyncSession, market_ids: list[int
             shared_models.MarketGammaMetadata.market_id.in_(chunk)
         )
         for outcome_row in (await session.execute(outcome_stmt)).scalars():
-            outcomes.setdefault(outcome_row.market_id, []).append(outcome_row)
+            outcomes[outcome_row.market_id].append(outcome_row)
         for tag_row in (await session.execute(tag_stmt)).scalars():
-            tags.setdefault(tag_row.market_id, set()).add(tag_row.tag)
+            tags[tag_row.market_id].add(tag_row.tag)
         for clob_row in (await session.execute(clob_stmt)).scalars():
-            clob_tokens.setdefault(clob_row.market_id, []).append(clob_row)
+            clob_tokens[clob_row.market_id].append(clob_row)
         for gamma_meta_row in (await session.execute(gamma_meta_stmt)).scalars():
             gamma_metadata[gamma_meta_row.market_id] = gamma_meta_row
 

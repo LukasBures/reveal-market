@@ -1786,6 +1786,7 @@ async def process_once(
         proofs=summary.proofs_generated,
         lock_batches=summary.lock_batches_submitted,
         gamma_metadata_updates=summary.gamma_metadata_updates,
+        group_slugs_refreshed=summary.changed_group_slugs_total,
         latency_ms=round(latency_ms, 2),
         cache_invalidations=summary.cache_invalidations,
         market_errors=summary.failed_markets,
