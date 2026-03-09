@@ -3,10 +3,10 @@
 Deposit ERC-20 collateral into the ProtocolPool via its `deposit(uint256)` function.
 
 Defaults:
-- sender/private key: scripts/generated/testnet_zenith_token_random_1764886505.txt
-- token: Horizen testnet ZEN ERC-20
-- pool: default ProtocolPool from .env.local (Horizen testnet)
-- RPC: Horizen testnet public RPC
+- sender/private key: scripts/generated/mainnet_funding_wallet.txt
+- token: Horizen Mainnet ZEN ERC-20
+- pool: default ProtocolPool from RM_PROTOCOL_POOL_ADDRESS
+- RPC: Horizen Mainnet public RPC
 """
 
 from __future__ import annotations
@@ -38,9 +38,9 @@ DEFAULT_EXPLORER_URL = os.getenv("NEXT_PUBLIC_BLOCK_EXPLORER_URL", "https://hori
 DEFAULT_KEYFILE = Path(__file__).resolve().parent / "generated" / "mainnet_funding_wallet.txt"
 DEFAULT_TOKEN_ADDRESS = os.getenv(
     "ZEN_TOKEN_ADDRESS", "0x57da2D504bf8b83Ef304759d9f2648522D7a9280"
-)  # ZEN ERC-20 on Horizen Mainnet  # noqa: S105
+)  # ZEN ERC-20 on Horizen Mainnet
 DEFAULT_POOL_ADDRESS = os.getenv("RM_PROTOCOL_POOL_ADDRESS", "0x3C8fC2C4bbe255ED8A8A343239a5EC8c016686B8")
-DEFAULT_TOKEN_AMOUNT = "2.0"  # noqa: S105
+DEFAULT_TOKEN_AMOUNT = "2.0"
 
 ERC20_ABI: list[dict[str, Any]] = [
     {

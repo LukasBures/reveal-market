@@ -411,18 +411,6 @@ def main() -> int:
     # ─── Step 4: Compute Merkle Root & Lock Batches ────────────────────────
     header("Step 4: Lock Batches (oracle action)")
 
-    def poseidon_leaf(commitment: bytes) -> bytes:
-        # For locking we need the Merkle root — use the prover's hash endpoint
-        resp = httpx.post(
-            f"{PROVER_URL}/api/v1/hash/poseidon",
-            json={"inputs": [str(int.from_bytes(commitment, "big"))]},
-            timeout=30,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        val = int(data["hash"], 16) if data["hash"].startswith("0x") else int(data["hash"])
-        return val.to_bytes(32, "big")
-
     # Compute batch Merkle root via prover merkle endpoint
     commitments_hex = [t["commitment"] for t in tickets]
     log.info("Computing batch Merkle root via prover...")

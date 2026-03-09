@@ -87,7 +87,7 @@
 | **Chain ID** | `2651420` | `26514` |
 | **RPC (HTTP)** | `https://horizen-testnet.rpc.caldera.xyz/http` | `https://horizen.calderachain.xyz/http` |
 | **RPC (WS)** | `wss://horizen-testnet.rpc.caldera.xyz/ws` | `wss://horizen.calderachain.xyz/ws` |
-| **Explorer** | `https://horizen-testnet.explorer.caldera.xyz` | `https://horizen.calderaexplorer.xyz` (confirm from hub) |
+| **Explorer** | `https://horizen-testnet.explorer.caldera.xyz` | `https://horizen.calderaexplorer.xyz` |
 | **ETH Bridge** | `https://horizen-testnet.hub.caldera.xyz/` | `https://bridge.horizen.io` (Base → Horizen Mainnet ETH) |
 | **ZEN Bridge** | N/A | `https://stargate.finance/?srcChain=base&srcToken=0xf43eB8De897Fbc7F2502483B2Bef7Bb9EA179229&dstChain=horizen&dstToken=0x57da2D504bf8b83Ef304759d9f2648522D7a9280` |
 | **Settlement Layer** | Base Sepolia (`84532`) | Base (`8453`) |
@@ -480,7 +480,7 @@ NEXT_PUBLIC_ZEN_TOKEN_ADDRESS=0x57da2D504bf8b83Ef304759d9f2648522D7a9280
 # The relayer uses env_prefix="RM_" so it reads RM_RELAYER_ESCROW_ADDRESS (not bare RELAYER_ESCROW_ADDRESS).
 # The backend (API + worker) also reads RM_RELAYER_ESCROW_ADDRESS.
 # The frontend reads NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS.
-# NOTE: .env.production currently has a DUPLICATE RM_RELAYER_ESCROW_ADDRESS (lines 419 & 440) — clean this up.
+# Ensure .env.production contains a single RM_RELAYER_ESCROW_ADDRESS definition (no duplicates).
 RM_RELAYER_ESCROW_ADDRESS=0x<NEW_ESCROW>
 NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS=0x<NEW_ESCROW>
 
@@ -529,7 +529,7 @@ HEDGER_VAULT_GAS_PRICE_GWEI=40
 RM_PRICING_VERIFYING_CONTRACT=0x<NEW_FACTORY>
 ```
 
-> **Note on `.env.example` bug**: Line 330 currently sets `HEDGER_VAULT_RPC_URL` to `https://horizen-testnet.rpc.caldera.xyz/http`, but this should be a **Polygon** RPC URL since the vault is on Polygon chain. Fix this regardless of mainnet migration.
+> **Note on `.env.example` bug**: Ensure line 330 sets `HEDGER_VAULT_RPC_URL` to a **Polygon** RPC URL (for example, `https://polygon-rpc.com`) since the vault is on Polygon chain, not to a Horizen testnet URL. Fix this regardless of mainnet migration.
 
 ### Gas & RPC Tuning for Mainnet
 
@@ -1302,7 +1302,7 @@ Adjust in `docker-compose.yml` and/or `docker-compose.prod.yml` `deploy.resource
 | Explorer URL wrong | **Low** — broken "view on explorer" links | Verify explorer URL from hub.horizen.io |
 | Hardcoded testnet value missed | **Medium** — one service talks to testnet | Full `grep -r "2651420"` and `grep -r "horizen-testnet"` before launch |
 | Bridge delay / failure | **Medium** — funding wallets takes time | Bridge funds well in advance of launch |
-| Escrow address mismatch | **High** — relayer can't interact with escrow | Set both `RM_RELAYER_ESCROW_ADDRESS` and `NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS` to the same value. **Pre-existing bug**: `.env.production` currently has mismatched values (`0x5b0fA476...` vs `0x494464c3...`) — fix before migration. Also clean up duplicate `RM_RELAYER_ESCROW_ADDRESS` entries (lines 419 & 440). |
+| Escrow address mismatch | **High** — relayer can't interact with escrow | In `.env.production`, ensure `RM_RELAYER_ESCROW_ADDRESS` and `NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS` are set to the same (correct) escrow address, and ensure there is only a single `RM_RELAYER_ESCROW_ADDRESS` entry (remove any duplicates such as at lines 419 & 440). |
 | EIP-712 signature replay | **Low** — old testnet quotes replayed on mainnet | Chain ID in domain separator prevents cross-chain replay (see Appendix C) |
 | `HEDGER_VAULT_RPC_URL` bug | **Medium** — hedger sends Polygon txns to Horizen RPC | Fix `.env.example` line 330 to use Polygon RPC (pre-existing bug) |
 | Docker resource exhaustion | **Medium** — OOM kills under mainnet load | Review and bump resource limits (see Appendix D) |
@@ -1320,7 +1320,7 @@ Adjust in `docker-compose.yml` and/or `docker-compose.prod.yml` `deploy.resource
 ```
 Phase 1  → Generate 7 mainnet wallets + secrets     (30 min)
 Phase 2  → Bridge ~2 ETH to Horizen Mainnet         (1-2 hours, bridge confirmation time)
-Phase 3  → Deploy ZEN token (if needed)              (30 min)
+Phase 3  → [Skipped] Deploy ZEN token — ZEN already live on mainnet
 Phase 4  → Verify ZK artifacts (no rebuild needed)   (15 min)
 Phase 5  → Deploy contracts to mainnet               (1 hour)
            ├── 5 contracts on Horizen
