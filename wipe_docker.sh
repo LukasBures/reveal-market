@@ -101,6 +101,7 @@ PYEOF
     | gzip -9 > "$DEST"; then
     SIZE=$(du -sh "$DEST" | cut -f1)
     echo "Backup complete: $DEST ($SIZE)"
+    # Prune backups older than RETAIN_DAYS days
     find "$BACKUP_DIR" -name "*.dump.gz" -mtime "+${RETAIN_DAYS}" -delete || true
   else
     echo "" >&2
