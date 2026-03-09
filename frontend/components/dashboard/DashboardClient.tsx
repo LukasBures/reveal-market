@@ -1159,7 +1159,7 @@ export function DashboardClient() {
         <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-10 text-center">
           <p className="mb-4 text-slate-400">No positions yet.</p>
           <Link
-            href="/events"
+            href="/"
             className="rounded-full border border-emerald-400/30 bg-emerald-500/20 px-4 py-2 text-sm text-emerald-200 transition hover:bg-emerald-500/30"
           >
             Browse markets
