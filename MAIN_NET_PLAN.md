@@ -62,7 +62,7 @@ You need **7 distinct EOA wallets** for mainnet (6 on Horizen + 1 on Polygon if 
 | 1 | **Deployer / Owner** | Horizen | `DEPLOYER_KEY`, `RM_WALLET_PRIVATE_KEY` | Deploys contracts, owns Factory/Pool/Escrow. Must retain ownership. |
 | 2 | **Oracle** | Horizen | `ORACLE_ADDRESS` (address only) | Resolves markets. Backend calls this to submit outcomes. |
 | 3 | **Authorization Signer** | Horizen | `RM_AUTHORIZATION_SIGNER_PRIVATE_KEY`, `RM_PRICING_SIGNER_PRIVATE_KEY`, `AUTHORIZATION_SIGNER` | Signs commit-auth messages + pricing quotes. Used by API service. |
-| 4 | **Relayer** | Horizen | `RELAYER_PRIVATE_KEY` | Submits on-chain commit/claim/lock transactions. Needs ETH for gas. |
+| 4 | **Relayer** | Horizen | `RM_RELAYER_PRIVATE_KEY` | Submits on-chain commit/claim/lock transactions. Needs ETH for gas. |
 | 5 | **Settlement Signer** | Horizen | `RM_SETTLEMENT_SIGNER_PRIVATE_KEY` | Signs settlement batches. Used by worker service. |
 | 6 | **Funding / Treasury** | Horizen | (manual, not in env) | Holds reserve ETH + ZEN tokens. Seeds other wallets. |
 | 7 | **Hedger Vault Signer** | Polygon | `HEDGER_VAULT_PRIVATE_KEY`, `HEDGER_VAULT_SENDER_ADDRESS` | Signs Polygon vault txns (LP deposits/withdrawals). Only needed if hedger is active. |
@@ -395,9 +395,10 @@ RM_RPC_URL=https://horizen.calderachain.xyz/http
 RM_PRICING_CHAIN_ID=26514
 
 # ──── Relayer ────
-RPC_URL=https://horizen.calderachain.xyz/http
-CHAIN_ID=26514
-RELAYER_PRIVATE_KEY=<REDACTED>
+# NOTE: The relayer uses env_prefix="RM_" (see relayer/src/relayer/config.py line 38),
+# so RM_RPC_URL and RM_CHAIN_ID (set above) are already read by the relayer.
+# RM_RELAYER_PRIVATE_KEY is set in the "Signer Keys" section below.
+# No additional relayer-specific env vars are needed here.
 
 # ──── Contract Addresses (from Phase 5 deployment) ────
 RM_FACTORY_ADDRESS=0x<NEW_FACTORY>
@@ -408,15 +409,16 @@ RM_ORACLE_ADDRESS=0x<NEW_ORACLE_ADDRESS>
 ZEN_TOKEN_ADDRESS=0x<NEW_ZEN_TOKEN>
 NEXT_PUBLIC_ZEN_TOKEN_ADDRESS=0x<NEW_ZEN_TOKEN>
 
-# ──── Escrow Address (THREE separate env vars, all same value) ────
-# The relayer reads RELAYER_ESCROW_ADDRESS (no RM_ prefix).
-# The backend reads RM_RELAYER_ESCROW_ADDRESS.
+# ──── Escrow Address (TWO env vars, same value) ────
+# The relayer uses env_prefix="RM_" so it reads RM_RELAYER_ESCROW_ADDRESS (not bare RELAYER_ESCROW_ADDRESS).
+# The backend (API + worker) also reads RM_RELAYER_ESCROW_ADDRESS.
 # The frontend reads NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS.
+# NOTE: .env.production currently has a DUPLICATE RM_RELAYER_ESCROW_ADDRESS (lines 419 & 440) — clean this up.
 RM_RELAYER_ESCROW_ADDRESS=0x<NEW_ESCROW>
-RELAYER_ESCROW_ADDRESS=0x<NEW_ESCROW>
 NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS=0x<NEW_ESCROW>
 
 # ──── Signer Keys (NEW mainnet keys) ────
+RM_RELAYER_PRIVATE_KEY=<REDACTED>
 RM_PRICING_SIGNER_PRIVATE_KEY=<REDACTED>
 RM_AUTHORIZATION_SIGNER_PRIVATE_KEY=<REDACTED>
 RM_AUTHORIZATION_SIGNER=0x<NEW_MAINNET_AUTH_ADDRESS>
@@ -545,12 +547,12 @@ These files have **hardcoded** testnet values as fallbacks. They must be updated
 
 ### Backend
 
-**`backend/api/app/config.py`** (lines ~122, ~210):
+**`backend/api/app/config.py`** (lines 123, 211):
 ```python
-# Line ~122: Change default RPC URL
+# Line 123: Change default RPC URL
 rpc_url: AnyUrl | None = Field(default=AnyUrl("https://horizen.calderachain.xyz/http"))
 
-# Line ~210: Change default chain ID
+# Line 211: Change default chain ID
 pricing_chain_id: int | None = Field(default=26514, ge=1, description="Chain id used for quote signatures")
 ```
 
@@ -569,7 +571,7 @@ const FALLBACK_EXPLORER = "https://horizen.explorer.caldera.xyz";
 const DEFAULT_RPC_URL = "https://horizen.calderachain.xyz/http";
 ```
 
-**`frontend/components/proofs/ProofReceiptList.tsx`** (line 9):
+**`frontend/components/proofs/ProofReceiptList.tsx`** (line 12):
 ```typescript
 const explorerBase = process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL ?? "https://horizen.explorer.caldera.xyz";
 ```
@@ -618,6 +620,30 @@ DEFAULT_KEYFILE = Path(__file__).resolve().parent / "generated" / "<mainnet_fund
 
 > **Note**: `send_eth.py` currently defaults to `https://mainnet.base.org` (Base chain), which is intentional if used for Base ETH transfers. If you want it to default to Horizen Mainnet for relayer gas top-ups (referenced in Phase 14), update the defaults above. Alternatively, always pass `--rpc-url` explicitly.
 
+**`scripts/generate_env.sh`** (lines 80, 85):
+```bash
+# Line 80: Change default chain ID fallback
+RM_CHAIN_ID="${RM_CHAIN_ID:-26514}"
+
+# Line 85: Change default explorer URL fallback
+NEXT_PUBLIC_BLOCK_EXPLORER_URL="${NEXT_PUBLIC_BLOCK_EXPLORER_URL:-https://horizen.explorer.caldera.xyz}"
+```
+
+### E2E Test Scripts
+
+These scripts have **hardcoded** testnet values with no env fallback. Update or parameterize them:
+
+| File | Line(s) | Hardcoded Value |
+|------|---------|-----------------|
+| `scripts/e2e/lock_and_post.py` | 18-19 | RPC URL + `CHAIN_ID = 2651420` (no env override) |
+| `scripts/e2e/prove_settle_claim.py` | 23-24 | RPC URL + `CHAIN_ID = 2651420` (no env override) |
+| `scripts/e2e/prod_e2e_test.py` | 27 | `CHAIN_ID = 2651420` (no env override) |
+| `scripts/e2e/prod_e2e_test.py` | 30-36 | Hardcoded contract addresses (no env override) |
+| `scripts/e2e/utils.py` | 33-35 | RPC URL, chain ID, explorer URL (has env fallbacks) |
+| `scripts/e2e/api_commit_test.py` | 52 | RPC URL (has env fallback) |
+
+> **Note**: `lock_and_post.py` and `prove_settle_claim.py` have fully hardcoded values (no `os.getenv`). Either update the constants or refactor to use `scripts/e2e/utils.py` shared config.
+
 **`scripts/zen_testnet_faucet.py`** — This script is **testnet-only**. Do not use on mainnet. Consider adding a guard:
 ```python
 # At top of file:
@@ -653,6 +679,14 @@ The code extracts the origin with `new URL(rawUrl).origin` and adds it to `conne
 
 Wallet connectors will automatically use the `defineChain()` config from `wagmi.ts`. Once the chain ID and RPC are updated, MetaMask will prompt users to add the new network.
 
+### Explorer URL Inconsistency
+
+> **Note**: Two components use `NEXT_PUBLIC_EXPLORER_BASE_URL` instead of `NEXT_PUBLIC_BLOCK_EXPLORER_URL`:
+> - `frontend/components/dashboard/DashboardClient.tsx` (line 349)
+> - `frontend/components/markets/StakeQuoteCard.tsx` (line 129)
+>
+> Both fall back to `defaultChain.blockExplorers` from `wagmi.ts`, so updating `wagmi.ts` is sufficient — no code change needed. But be aware of the inconsistent env var name if you set `NEXT_PUBLIC_EXPLORER_BASE_URL` separately.
+
 ### WalletConnect
 
 No changes needed — WalletConnect uses the chain config from wagmi.
@@ -663,7 +697,7 @@ No changes needed — WalletConnect uses the chain config from wagmi.
 
 ### Docker Compose
 
-**`docker-compose.yml`** (lines 351-354) — Update **all four** hardcoded testnet defaults in frontend build args:
+**`docker-compose.yml`** (lines 343-346) — Update **all four** hardcoded testnet defaults in frontend build args:
 
 ```yaml
 # Frontend build args — ALL of these have testnet fallbacks:
@@ -676,6 +710,17 @@ args:
 
 > These build args are baked into the Docker image at build time. If `.env.production` is set correctly they'll be overridden, but the fallback defaults should still be mainnet to prevent accidents.
 
+### Docker Bake
+
+**`docker-bake.hcl`** (lines 42-45) — Update **all four** hardcoded testnet defaults in frontend build variables:
+
+```hcl
+variable "NEXT_PUBLIC_CHAIN_ID" { default = "26514" }
+variable "NEXT_PUBLIC_CHAIN_NAME" { default = "Horizen Mainnet" }
+variable "NEXT_PUBLIC_RPC_URL" { default = "https://horizen.calderachain.xyz/http" }
+variable "NEXT_PUBLIC_BLOCK_EXPLORER_URL" { default = "https://horizen.explorer.caldera.xyz" }
+```
+
 ### Caddyfile
 
 **`docker/caddy/Caddyfile`** — No changes needed for the Caddy config itself (domains stay `revealmarket.xyz`, `api.revealmarket.xyz`, `stream.revealmarket.xyz`).
@@ -686,11 +731,31 @@ However, verify:
 
 ### CI/CD
 
-**`.github/workflows/cicd.yml`** — No changes needed unless:
-- You want to add a mainnet-specific deploy gate/approval
-- You want separate staging (testnet) vs production (mainnet) pipelines
+**`.github/workflows/cicd.yml`** — The workflow reads **20+ GitHub repo variables** (Settings > Secrets and variables > Actions > Variables) that contain chain config and contract addresses. These must be updated for mainnet:
 
-**Recommendation**: Add a manual approval step or environment protection rule in GitHub for mainnet deploys.
+**Variables to update in GitHub repo settings:**
+| Variable | New Value |
+|----------|-----------|
+| `RM_RPC_URL` | `https://horizen.calderachain.xyz/http` |
+| `RM_CHAIN_ID` | `26514` |
+| `RM_FACTORY_ADDRESS` | `0x<NEW_FACTORY>` |
+| `RM_PROTOCOL_POOL_ADDRESS` | `0x<NEW_POOL>` |
+| `RM_RELAYER_ESCROW_ADDRESS` | `0x<NEW_ESCROW>` |
+| `RM_MARKET_IMPLEMENTATION_ADDRESS` | `0x<NEW_IMPLEMENTATION>` |
+| `RM_VERIFIER_ADDRESS` | `0x<NEW_VERIFIER>` |
+| `RM_AUTHORIZATION_SIGNER` | `0x<NEW_AUTH_SIGNER_ADDRESS>` |
+| `RM_ORACLE_ADDRESS` | `0x<NEW_ORACLE_ADDRESS>` |
+| `ZEN_TOKEN_ADDRESS` | `0x<NEW_ZEN_TOKEN>` |
+| `RM_WALLET_ADDRESS` | `0x<NEW_DEPLOYER_ADDRESS>` |
+| `PROVER_CIRCUIT_HASH` | `0x181e1866...` (unchanged if reusing artifacts) |
+| `PRICING_SIGNER_ADDRESS` | `0x<NEW_PRICING_SIGNER_ADDRESS>` |
+| `NEXT_PUBLIC_CHAIN_ID` | `26514` |
+| `NEXT_PUBLIC_RPC_URL` | `https://horizen.calderachain.xyz/http` |
+| `NEXT_PUBLIC_BLOCK_EXPLORER_URL` | `https://horizen.explorer.caldera.xyz` |
+
+These variables are used by the circuit hash check job (lines 442-443) and the deploy job (lines 544-563).
+
+**Recommendation**: Also add a manual approval step or environment protection rule in GitHub for mainnet deploys.
 
 ### Streamer
 
@@ -876,14 +941,13 @@ echo "=== Environment Validation ==="
 grep -c "2651420" .env.production && echo "FAIL: testnet chain ID found!" || echo "OK: no testnet chain ID"
 grep -c "horizen-testnet" .env.production && echo "FAIL: testnet RPC found!" || echo "OK: no testnet RPC"
 
-# 2. Verify all three escrow address vars match
-[ "$RM_RELAYER_ESCROW_ADDRESS" = "$RELAYER_ESCROW_ADDRESS" ] && \
-[ "$RELAYER_ESCROW_ADDRESS" = "$NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS" ] && \
-  echo "OK: escrow addresses match" || echo "FAIL: escrow address mismatch!"
+# 2. Verify both escrow address vars match
+[ "$RM_RELAYER_ESCROW_ADDRESS" = "$NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS" ] && \
+  echo "OK: escrow addresses match" || echo "FAIL: escrow address mismatch! RM=$RM_RELAYER_ESCROW_ADDRESS vs NEXT_PUBLIC=$NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS"
 
 # 3. Verify chain ID consistency
 [ "$NEXT_PUBLIC_CHAIN_ID" = "26514" ] && echo "OK: frontend chain ID" || echo "FAIL: frontend chain ID = $NEXT_PUBLIC_CHAIN_ID"
-[ "$CHAIN_ID" = "26514" ] && echo "OK: relayer chain ID" || echo "FAIL: relayer chain ID = $CHAIN_ID"
+[ "$RM_CHAIN_ID" = "26514" ] && echo "OK: relayer chain ID (RM_CHAIN_ID)" || echo "FAIL: relayer chain ID = $RM_CHAIN_ID"
 [ "$RM_PRICING_CHAIN_ID" = "26514" ] && echo "OK: pricing chain ID" || echo "FAIL: pricing chain ID = $RM_PRICING_CHAIN_ID"
 
 # 3b. Verify database URL points to mainnet database
@@ -901,7 +965,7 @@ ACTUAL_CHAIN_ID=$(cast chain-id --rpc-url "$RPC" 2>/dev/null)
 
 # 5. Verify contracts exist on-chain (non-zero code)
 for LABEL_ADDR in "MarketFactory:$RM_FACTORY_ADDRESS" "ProtocolPool:$RM_PROTOCOL_POOL_ADDRESS" \
-  "RelayerEscrow:$RELAYER_ESCROW_ADDRESS" "Verifier:$RM_VERIFIER_ADDRESS"; do
+  "RelayerEscrow:$RM_RELAYER_ESCROW_ADDRESS" "Verifier:$RM_VERIFIER_ADDRESS"; do
   LABEL="${LABEL_ADDR%%:*}"
   ADDR="${LABEL_ADDR##*:}"
   CODE=$(cast code "$ADDR" --rpc-url "$RPC" 2>/dev/null)
@@ -1051,15 +1115,20 @@ Adjust in `docker-compose.yml` and/or `docker-compose.prod.yml` `deploy.resource
 
 | File | What to Change |
 |------|---------------|
-| `backend/api/app/config.py` | Default RPC URL (line 122), default chain ID (line 210), `pricing_verifying_contract` zero addr (line 212) |
+| `backend/api/app/config.py` | Default RPC URL (line 123), default chain ID (line 211), `pricing_verifying_contract` zero addr (line 212) |
 | `frontend/lib/wagmi.ts` | `EXPECTED_CHAIN_ID`, `FALLBACK_CHAIN_NAME`, `FALLBACK_RPC_URL`, `FALLBACK_EXPLORER`, `nativeCurrency` |
 | `frontend/next.config.mjs` | `DEFAULT_RPC_URL` (line 11) |
-| `frontend/components/proofs/ProofReceiptList.tsx` | Explorer fallback URL (line 9) |
+| `frontend/components/proofs/ProofReceiptList.tsx` | Explorer fallback URL (line 12) |
 | `frontend/components/markets/MarketDetailSidebar.tsx` | Explorer fallback URL (line 99) |
 | `contracts/scripts/monitoring_report.py` | Hardcoded RPC URL (line 11) |
 | `scripts/send_erc20.py` | Default RPC URL, explorer URL, token address (lines 34-38) |
 | `scripts/send_to_protocol_pool.py` | Default RPC URL, explorer URL, token address, pool address (lines 36-40) |
 | `scripts/send_eth.py` | Default RPC URL, explorer URL, keyfile path (lines 32-34) — currently defaults to Base mainnet; update if used for Horizen gas top-ups |
+| `scripts/generate_env.sh` | Default chain ID fallback (line 80), default explorer URL fallback (line 85) |
+| `scripts/e2e/lock_and_post.py` | Hardcoded RPC URL + chain ID (lines 18-19, no env override) |
+| `scripts/e2e/prove_settle_claim.py` | Hardcoded RPC URL + chain ID (lines 23-24, no env override) |
+| `scripts/e2e/prod_e2e_test.py` | Hardcoded chain ID (line 27) + contract addresses (lines 30-36, no env override) |
+| `scripts/e2e/utils.py` | RPC URL, chain ID, explorer URL defaults (lines 33-35, has env fallbacks) |
 
 ### Environment Files
 
@@ -1078,7 +1147,8 @@ Adjust in `docker-compose.yml` and/or `docker-compose.prod.yml` `deploy.resource
 
 | File | What to Change |
 |------|---------------|
-| `docker-compose.yml` | Default `NEXT_PUBLIC_CHAIN_ID`, `NEXT_PUBLIC_CHAIN_NAME`, `NEXT_PUBLIC_RPC_URL`, `NEXT_PUBLIC_BLOCK_EXPLORER_URL` build args (lines 351-354) |
+| `docker-compose.yml` | Default `NEXT_PUBLIC_CHAIN_ID`, `NEXT_PUBLIC_CHAIN_NAME`, `NEXT_PUBLIC_RPC_URL`, `NEXT_PUBLIC_BLOCK_EXPLORER_URL` build args (lines 343-346) |
+| `docker-bake.hcl` | Default `NEXT_PUBLIC_CHAIN_ID`, `NEXT_PUBLIC_CHAIN_NAME`, `NEXT_PUBLIC_RPC_URL`, `NEXT_PUBLIC_BLOCK_EXPLORER_URL` variables (lines 42-45) |
 | `docker-compose.yml` | Review `deploy.resources` limits for mainnet traffic (see Appendix D) |
 
 ### Tests (chain ID + RPC mocks)
@@ -1108,6 +1178,7 @@ Adjust in `docker-compose.yml` and/or `docker-compose.prod.yml` `deploy.resource
 | `MVP.md` | Chain ID + RPC references |
 | `AGENTS.md` | Chain ID reference |
 | `MVP.md` | Chain ID + RPC references |
+| `scripts/e2e/DEPLOYMENT_GUIDE.md` | Testnet chain ID, RPC URLs, contract addresses throughout |
 
 ---
 
@@ -1123,11 +1194,11 @@ Adjust in `docker-compose.yml` and/or `docker-compose.prod.yml` `deploy.resource
 | Relayer | `0xdAdEbecf077cdA5f86F60a91f76B238F675204f9` | Retire |
 | Settlement Signer | (derived from key) | Retire |
 | ZEN Token | `0x070040A826B586b58569750ED43cb5979b171e8d` | Retire |
-| Market Factory | `0x34c55902e3DCCFEd8b467B3d1a1BFCfB13CBe9Bc` | Retire |
-| Protocol Pool | `0xB39d728430e7D14Dd080950C04e3E436Bf363365` | Retire |
-| Relayer Escrow | `0xcD610639564536568be79aa539dd40F01A668da1` | Retire |
-| Market Implementation | `0x6C39599FFa1092b133cb50f2238accB28Ee8f53c` | Retire |
-| Verifier | `0xB7758730f3FCe4948B3d62dADaB7d5012Dc50ea4` | Retire |
+| Market Factory | `0x5163c0CB206e7b69fFB15D9E9b52f24B4B189F77` | Retire (latest deploy 2026-03-03) |
+| Protocol Pool | `0xcBa9935a4E529883e5577ab525Bc4B7B4066f84C` | Retire (latest deploy 2026-03-03) |
+| Relayer Escrow | `0x494464c34AaC52E48461D5926C8CeE608f4e3ad8` | Retire (latest deploy 2026-03-03) |
+| Market Implementation | `0x1b4e51854A2124B9C2965B1f32A140a06D5A467e` | Retire (latest deploy 2026-03-03) |
+| Verifier | `0x590730be9D051994dCc8A91B42E92D5770e7B8f6` | Retire (latest deploy 2026-03-03) |
 
 ### Mainnet Addresses (TO BE GENERATED)
 
@@ -1164,7 +1235,7 @@ Adjust in `docker-compose.yml` and/or `docker-compose.prod.yml` `deploy.resource
 | Explorer URL wrong | **Low** — broken "view on explorer" links | Verify explorer URL from hub.horizen.io |
 | Hardcoded testnet value missed | **Medium** — one service talks to testnet | Full `grep -r "2651420"` and `grep -r "horizen-testnet"` before launch |
 | Bridge delay / failure | **Medium** — funding wallets takes time | Bridge funds well in advance of launch |
-| Escrow address mismatch | **High** — relayer can't interact with escrow | Set all THREE env vars: `RELAYER_ESCROW_ADDRESS`, `RM_RELAYER_ESCROW_ADDRESS`, `NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS` |
+| Escrow address mismatch | **High** — relayer can't interact with escrow | Set both `RM_RELAYER_ESCROW_ADDRESS` and `NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS` to the same value. **Pre-existing bug**: `.env.production` currently has mismatched values (`0x5b0fA476...` vs `0x494464c3...`) — fix before migration. Also clean up duplicate `RM_RELAYER_ESCROW_ADDRESS` entries (lines 419 & 440). |
 | EIP-712 signature replay | **Low** — old testnet quotes replayed on mainnet | Chain ID in domain separator prevents cross-chain replay (see Appendix C) |
 | `HEDGER_VAULT_RPC_URL` bug | **Medium** — hedger sends Polygon txns to Horizen RPC | Fix `.env.example` line 330 to use Polygon RPC (pre-existing bug) |
 | Docker resource exhaustion | **Medium** — OOM kills under mainnet load | Review and bump resource limits (see Appendix D) |
