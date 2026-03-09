@@ -45,6 +45,7 @@ variable "NEXT_PUBLIC_RPC_URL" { default = "https://horizen.calderachain.xyz/htt
 variable "NEXT_PUBLIC_BLOCK_EXPLORER_URL" { default = "https://horizen.calderaexplorer.xyz" }
 variable "NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID" { default = "" }
 variable "NEXT_PUBLIC_ZEN_TOKEN_ADDRESS" { default = "" }
+variable "NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS" { default = "" }
 variable "NEXT_DISABLE_MINIFY" { default = "false" }
 
 # ---------------------------------------------------------------------------
@@ -154,6 +155,7 @@ target "frontend" {
     NEXT_PUBLIC_BLOCK_EXPLORER_URL       = NEXT_PUBLIC_BLOCK_EXPLORER_URL
     NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID = NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID
     NEXT_PUBLIC_ZEN_TOKEN_ADDRESS        = NEXT_PUBLIC_ZEN_TOKEN_ADDRESS
+    NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS   = NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS
     NEXT_DISABLE_MINIFY                  = NEXT_DISABLE_MINIFY
   }
   tags = ["reveal-market-frontend:latest"]
