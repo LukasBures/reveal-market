@@ -826,7 +826,6 @@ export function DashboardClient() {
       const bundleKey = `${p.market_id}:${p.ticket_id ?? "na"}`;
       const bundle = bundleLookup.get(bundleKey);
 
-
       const market = p.market_summary ?? null;
       const outcomes = market?.outcomes ?? [];
       const outcomeLabel =
@@ -843,10 +842,10 @@ export function DashboardClient() {
           ? p.potential_payout_zen
           : null;
       const potentialWeiFromPosition =
-        normalizeWei((p as any).payout_wei) ??
-        normalizeWei((p as any).potential_payout_wei);
+        normalizeWei(p.payout_wei) ??
+        normalizeWei(p.potential_payout_wei);
       const bundlePayoutWei = bundle
-        ? normalizeWei((bundle as any).payoutWei ?? bundle.amountWei)
+        ? normalizeWei(bundle.payoutWei ?? bundle.amountWei)
         : null;
       const hasResolution =
         p.winning_outcome_id !== null &&
