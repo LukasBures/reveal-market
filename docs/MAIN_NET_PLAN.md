@@ -16,13 +16,13 @@
 | 5 — Deploy contracts | ✅ Done | All 5 contracts deployed 2026-03-09 |
 | 6 — Update env files | ✅ Done | `.env.production`, `.env.local`, `frontend/.env.local`, `contracts/zen/.env` |
 | 7 — Update hardcoded defaults | ✅ Done | Chain IDs, RPC URLs, explorer URLs updated throughout codebase |
-| 8 — Update frontend | ✅ Done | wagmi.ts, next.config.mjs, components updated |
-| 9 — Update infrastructure | ✅ Done | docker-compose.yml, docker-bake.hcl defaults updated |
+| 8 — Update frontend | ✅ Done | wagmi.ts, next.config.mjs, components, Dockerfile build args |
+| 9 — Update infrastructure | ✅ Done | docker-compose.yml, docker-bake.hcl, frontend Dockerfile updated |
 | 10 — Update tests | ✅ Done | Chain IDs, explorer URLs, EIP-712 digest snapshot updated |
-| Seed ProtocolPool | 🔄 Partial | 2 ZEN deposited (MAX allowance set) |
-| 11 — Database & State | ⏳ Pending | Create mainnet DB on prod server |
-| 12 — Pre-launch validation | ⏳ Pending | |
-| 13 — Go-live | ⏳ Pending | |
+| Seed ProtocolPool | ✅ Done | 2 ZEN deposited, MAX_UINT256 allowance set |
+| 11 — Database & State | ✅ Done | Fresh mainnet DB via auto-migration on API startup |
+| 12 — GitHub vars & secrets | ✅ Done | 25 repo variables + secrets updated for mainnet |
+| 13 — Production deploy | ✅ Done | All 13 containers healthy on `reveal-market-prod` |
 
 ### Deployed Contracts (Horizen Mainnet, chain 26514)
 
@@ -881,7 +881,7 @@ cd backend/api && uv run --project . --extra dev pytest tests/test_openapi_snaps
 
 ---
 
-## 12. Phase 11: Database & State ⏳ NEXT STEP
+## 12. Phase 11: Database & State ✅ DONE
 
 ### Fresh Database (Recommended for Mainnet Launch)
 
