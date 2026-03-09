@@ -83,10 +83,14 @@ PYEOF
   echo "Writing backup to $DEST ..."
   POSTGRES_CONTAINER_ID=$(docker compose -f "${COMPOSE_DIR}/docker-compose.yml" ps -q postgres 2>/dev/null || true)
   if [[ -z "$POSTGRES_CONTAINER_ID" ]]; then
-    echo "ERROR: postgres container is not running. Start the docker compose stack before running this script to allow database backup." >&2
-    exit 1
-  fi
-  if docker compose -f "${COMPOSE_DIR}/docker-compose.yml" \
+    echo "WARNING: postgres container is not running — cannot back up database." >&2
+    read -r -p "Continue WITHOUT a backup? Type 'yes' to proceed: " skip_backup
+    if [[ "$skip_backup" != "yes" ]]; then
+      echo "Aborted. Start postgres first (docker compose up -d postgres) then re-run." >&2
+      exit 1
+    fi
+    echo "Proceeding without backup."
+  elif docker compose -f "${COMPOSE_DIR}/docker-compose.yml" \
       --env-file "$ENV_FILE" \
       exec -T postgres \
       pg_dump \
