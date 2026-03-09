@@ -41,6 +41,7 @@ fi
 PROD_HOSTNAME="reveal-market-prod"
 COMPOSE_DIR="/home/reveal/apps/reveal-market"
 BACKUP_DIR="/home/reveal/apps/reveal-market/db_backups"
+PROJECT_NAME="reveal-market"
 if [[ "$(hostname)" == "$PROD_HOSTNAME" ]]; then
   echo "Production server detected (hostname: $PROD_HOSTNAME)."
   echo "Backing up database to: $BACKUP_DIR before wipe..."
@@ -55,9 +56,21 @@ if [[ "$(hostname)" == "$PROD_HOSTNAME" ]]; then
   ENV_FILE="${COMPOSE_DIR}/.env.production"
   if [[ -z "${PGPASSWORD:-}" ]]; then
     if [[ -f "$ENV_FILE" ]]; then
-      PGPASSWORD=$(grep '^RM_DATABASE_URL=' "$ENV_FILE" \
-        | sed 's|.*://[^:]*:\([^@]*\)@.*|\1|' \
-        | head -1)
+      RM_DATABASE_URL_LINE=$(grep '^RM_DATABASE_URL=' "$ENV_FILE" | head -1 || true)
+      if [[ -n "$RM_DATABASE_URL_LINE" ]]; then
+        RM_DATABASE_URL_VALUE=${RM_DATABASE_URL_LINE#RM_DATABASE_URL=}
+        PGPASSWORD=$(python3 - "$RM_DATABASE_URL_VALUE" << 'PYEOF' 2>/dev/null || true
+import sys
+from urllib.parse import urlparse
+if len(sys.argv) < 2:
+    sys.exit(1)
+parsed = urlparse(sys.argv[1])
+if parsed.password is None:
+    sys.exit(1)
+print(parsed.password)
+PYEOF
+)
+      fi
     fi
   fi
   if [[ -z "${PGPASSWORD:-}" ]]; then
@@ -68,6 +81,11 @@ if [[ "$(hostname)" == "$PROD_HOSTNAME" ]]; then
 
   mkdir -p "$BACKUP_DIR"
   echo "Writing backup to $DEST ..."
+  POSTGRES_CONTAINER_ID=$(docker compose -f "${COMPOSE_DIR}/docker-compose.yml" ps -q postgres 2>/dev/null || true)
+  if [[ -z "$POSTGRES_CONTAINER_ID" ]]; then
+    echo "ERROR: postgres container is not running. Start the docker compose stack before running this script to allow database backup." >&2
+    exit 1
+  fi
   if docker compose -f "${COMPOSE_DIR}/docker-compose.yml" \
       --env-file "$ENV_FILE" \
       exec -T postgres \
@@ -93,28 +111,28 @@ else
   echo ""
 fi
 
-echo "Stopping running containers..."
-mapfile -t running_containers < <(docker ps -q)
+echo "Stopping running containers for project '${PROJECT_NAME}'..."
+mapfile -t running_containers < <(docker ps -q --filter "label=com.docker.compose.project=${PROJECT_NAME}")
 if (( ${#running_containers[@]} )); then
   docker stop "${running_containers[@]}"
 else
-  echo "No running containers."
+  echo "No running containers for project '${PROJECT_NAME}'."
 fi
 
-echo "Removing all containers..."
-mapfile -t all_containers < <(docker ps -aq)
+echo "Removing all containers for project '${PROJECT_NAME}'..."
+mapfile -t all_containers < <(docker ps -aq --filter "label=com.docker.compose.project=${PROJECT_NAME}")
 if (( ${#all_containers[@]} )); then
   docker rm -f "${all_containers[@]}"
 else
-  echo "No containers to remove."
+  echo "No containers to remove for project '${PROJECT_NAME}'."
 fi
 
-echo "Removing all volumes..."
-mapfile -t all_volumes < <(docker volume ls -q)
+echo "Removing all volumes for project '${PROJECT_NAME}'..."
+mapfile -t all_volumes < <(docker volume ls -q --filter "label=com.docker.compose.project=${PROJECT_NAME}")
 if (( ${#all_volumes[@]} )); then
   docker volume rm -f "${all_volumes[@]}"
 else
-  echo "No volumes to remove."
+  echo "No volumes to remove for project '${PROJECT_NAME}'."
 fi
 
 echo "Pruning images, layers, volumes, and cache..."
