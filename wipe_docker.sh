@@ -142,4 +142,9 @@ fi
 echo "Pruning images, layers, volumes, and cache..."
 docker system prune -a --volumes --force
 
+echo "Restarting Docker daemon to flush stale iptables rules..."
+sudo systemctl restart docker
+echo "Waiting for Docker daemon..."
+timeout 30 bash -c 'until docker info >/dev/null 2>&1; do sleep 1; done'
+
 echo "Docker environment wiped."
