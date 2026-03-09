@@ -48,7 +48,6 @@ if [[ "$(hostname)" == "$PROD_HOSTNAME" ]]; then
 
   POSTGRES_USER="market_admin"
   POSTGRES_DB="reveal_market"
-  RETAIN_DAYS=14
   DATE=$(date -u +%Y-%m-%d-%H%M%S)
   DEST="${BACKUP_DIR}/${DATE}.dump.gz"
 
@@ -101,8 +100,6 @@ PYEOF
     | gzip -9 > "$DEST"; then
     SIZE=$(du -sh "$DEST" | cut -f1)
     echo "Backup complete: $DEST ($SIZE)"
-    # Prune backups older than RETAIN_DAYS days
-    find "$BACKUP_DIR" -name "*.dump.gz" -mtime "+${RETAIN_DAYS}" -delete || true
   else
     echo "" >&2
     echo "ERROR: Database backup failed. Aborting wipe to protect data." >&2
