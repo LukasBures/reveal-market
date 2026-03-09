@@ -6,14 +6,14 @@ import { StakeQuoteCard } from "@/components/markets/StakeQuoteCard";
 const mockDefaultChain = vi.hoisted(
   () =>
     ({
-      id: 2651420,
+      id: 26514,
       name: "Horizen",
       nativeCurrency: { name: "Zen", symbol: "ZEN", decimals: 18 },
       rpcUrls: {
-        default: { http: ["https://horizen-testnet.rpc.caldera.xyz/http"] },
-        public: { http: ["https://horizen-testnet.rpc.caldera.xyz/http"] },
+        default: { http: ["https://horizen.calderachain.xyz/http"] },
+        public: { http: ["https://horizen.calderachain.xyz/http"] },
       },
-      blockExplorers: { default: { name: "Explorer", url: "https://horizen-testnet.explorer.caldera.xyz" } },
+      blockExplorers: { default: { name: "Explorer", url: "https://horizen.calderaexplorer.xyz" } },
     } as const),
 );
 
@@ -65,7 +65,7 @@ vi.mock("@/lib/pricing-client", () => ({
     worsen_percent: 0,
     rake_percent: 0,
     total_monetisation: 0,
-    chain_id: 2651420,
+    chain_id: 26514,
     quote_id: "q1",
     expires_at: new Date(Date.now() + 60_000).toISOString(),
     expiry_ts: Math.floor(Date.now() / 1000) + 60,

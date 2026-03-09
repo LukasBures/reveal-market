@@ -7,14 +7,14 @@ import { bigIntToHex32, computePoseidonLeaf, parseBigInt, poseidonHashPair } fro
 const mockDefaultChain = vi.hoisted(
   () =>
     ({
-      id: 2651420,
+      id: 26514,
       name: "Horizen",
       nativeCurrency: { name: "Zen", symbol: "ZEN", decimals: 18 },
       rpcUrls: {
-        default: { http: ["https://horizen-testnet.rpc.caldera.xyz/http"] },
-        public: { http: ["https://horizen-testnet.rpc.caldera.xyz/http"] },
+        default: { http: ["https://horizen.calderachain.xyz/http"] },
+        public: { http: ["https://horizen.calderachain.xyz/http"] },
       },
-      blockExplorers: { default: { name: "Explorer", url: "https://horizen-testnet.explorer.caldera.xyz" } },
+      blockExplorers: { default: { name: "Explorer", url: "https://horizen.calderaexplorer.xyz" } },
     } as const),
 );
 
@@ -81,7 +81,7 @@ describe("DashboardClient", () => {
       address: "0x9999999999999999999999999999999999999999",
       isConnected: true,
     });
-    hoisted.useChainId.mockReturnValue(2651420);
+    hoisted.useChainId.mockReturnValue(26514);
     const writeContract = vi.fn().mockResolvedValue("0xclaim");
     hoisted.useWriteContract.mockReturnValue({
       mutateAsync: writeContract,

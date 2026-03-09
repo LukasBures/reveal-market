@@ -119,7 +119,7 @@ vi.mock("wagmi", () => {
   return {
     WagmiProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
     useConnection: () => ({ address: undefined, chain: undefined, connector: undefined, status: "disconnected" }),
-    useChainId: () => 2651420,
+    useChainId: () => 26514,
     useConnect: () => ({ mutate: noop, status: "idle", error: null }),
     useConnectors: () => [],
     useDisconnect: () => ({ mutate: noop }),

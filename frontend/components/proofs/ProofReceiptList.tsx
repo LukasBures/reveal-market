@@ -9,7 +9,7 @@ type Props = {
   receipts: ProofReceipt[];
 };
 
-const explorerBase = process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL ?? "https://horizen-testnet.explorer.caldera.xyz";
+const explorerBase = process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL ?? "https://horizen.calderaexplorer.xyz";
 
 export function ProofReceiptList({ receipts }: Props) {
   if (!receipts.length) {

@@ -31,11 +31,11 @@ try:
 except ImportError:
     ExtraDataToPOAMiddleware = None  # type: ignore[assignment]
 
-DEFAULT_RPC_URL = os.getenv("NEXT_PUBLIC_RPC_URL", "https://horizen-testnet.rpc.caldera.xyz/http")
-DEFAULT_EXPLORER_URL = os.getenv("NEXT_PUBLIC_BLOCK_EXPLORER_URL", "https://horizen-testnet.explorer.caldera.xyz")
-DEFAULT_KEYFILE = Path(__file__).resolve().parent / "generated" / "testnet_zenith_token_random_1764886505.txt"
+DEFAULT_RPC_URL = os.getenv("RM_RPC_URL", os.getenv("NEXT_PUBLIC_RPC_URL", "https://horizen.calderachain.xyz/http"))
+DEFAULT_EXPLORER_URL = os.getenv("NEXT_PUBLIC_BLOCK_EXPLORER_URL", "https://horizen.calderaexplorer.xyz")
+DEFAULT_KEYFILE = Path(__file__).resolve().parent / "generated" / "mainnet_funding_wallet.txt"
 # Edit these to set a default token and amount.
-DEFAULT_TOKEN_ADDRESS = "0x070040A826B586b58569750ED43cb5979b171e8d"  # noqa: S105
+DEFAULT_TOKEN_ADDRESS = os.getenv("ZEN_TOKEN_ADDRESS", "0x57da2D504bf8b83Ef304759d9f2648522D7a9280")  # noqa: S105
 DEFAULT_TOKEN_AMOUNT = "2"  # noqa: S105
 # Optional default destination; leave blank to require --to.
 DEFAULT_DESTINATION = "0x9D9E384Fb4425B90A1537Dd106CeB3fc79887f56"  # noqa: S105

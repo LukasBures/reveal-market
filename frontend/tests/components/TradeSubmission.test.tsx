@@ -13,7 +13,7 @@ const defaultProps = {
   txConfirmed: false,
   txStatus: null,
   relayerJobId: null,
-  explorerBase: "https://horizen-testnet.explorer.caldera.xyz",
+  explorerBase: "https://horizen.calderaexplorer.xyz",
   error: null,
   stakeError: null,
   escrowInsufficient: false,
@@ -21,7 +21,7 @@ const defaultProps = {
   capExhausted: false,
   chainMismatch: false,
   chainName: "Horizen",
-  expectedChainId: 2651420,
+  expectedChainId: 26514,
   tradingDisabled: false,
   tradingReason: null,
 };
@@ -91,7 +91,7 @@ describe("TradeSubmission", () => {
     const link = screen.getByRole("link");
     expect(link).toHaveAttribute(
       "href",
-      `https://horizen-testnet.explorer.caldera.xyz/tx/${txHash}`,
+      `https://horizen.calderaexplorer.xyz/tx/${txHash}`,
     );
     expect(link).toHaveAttribute("target", "_blank");
   });
@@ -156,7 +156,7 @@ describe("TradeSubmission", () => {
       />,
     );
     expect(
-      screen.getByText(/switch to horizen \(chain 2651420\) to trade/i),
+      screen.getByText(/switch to horizen \(chain 26514\) to trade/i),
     ).toBeInTheDocument();
   });
 

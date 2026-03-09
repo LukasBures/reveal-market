@@ -39,10 +39,10 @@ variable "GOLANG_IMAGE" {
 variable "NEXT_PUBLIC_API_BASE_URL" { default = "http://localhost:8000" }
 variable "NEXT_PUBLIC_PRICE_STREAMER_URL" { default = "http://localhost:8100" }
 variable "NEXT_PUBLIC_SITE_URL" { default = "http://localhost:3000" }
-variable "NEXT_PUBLIC_CHAIN_ID" { default = "2651420" }
-variable "NEXT_PUBLIC_CHAIN_NAME" { default = "Horizen Testnet" }
-variable "NEXT_PUBLIC_RPC_URL" { default = "https://horizen-testnet.rpc.caldera.xyz/http" }
-variable "NEXT_PUBLIC_BLOCK_EXPLORER_URL" { default = "https://horizen-testnet.explorer.caldera.xyz" }
+variable "NEXT_PUBLIC_CHAIN_ID" { default = "26514" }
+variable "NEXT_PUBLIC_CHAIN_NAME" { default = "Horizen Mainnet" }
+variable "NEXT_PUBLIC_RPC_URL" { default = "https://horizen.calderachain.xyz/http" }
+variable "NEXT_PUBLIC_BLOCK_EXPLORER_URL" { default = "https://horizen.calderaexplorer.xyz" }
 variable "NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID" { default = "" }
 variable "NEXT_PUBLIC_ZEN_TOKEN_ADDRESS" { default = "" }
 variable "NEXT_DISABLE_MINIFY" { default = "false" }

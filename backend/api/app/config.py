@@ -120,7 +120,7 @@ class Settings(BaseSettings):
     factory_address: str | None = Field(default=None)
     market_implementation_address: str | None = Field(default=None)
     rake_manager_address: str | None = Field(default=None)
-    rpc_url: AnyUrl | None = Field(default=AnyUrl("https://horizen-testnet.rpc.caldera.xyz/http"))
+    rpc_url: AnyUrl | None = Field(default=AnyUrl("https://horizen.calderachain.xyz/http"))
     wallet_address: str | None = Field(default=None)
     wallet_private_key: SecretStr | None = Field(default=None)
     oracle_address: str | None = Field(default=None)
@@ -208,7 +208,7 @@ class Settings(BaseSettings):
     db_query_sample_max_length: int = Field(default=2000, ge=256)
     run_migrations_on_startup: bool = Field(default_factory=lambda: bool(PRESET.get("run_migrations_on_startup", True)))
     pricing_signer_private_key: SecretStr | None = Field(default=None)
-    pricing_chain_id: int | None = Field(default=2651420, ge=1, description="Chain id used for quote signatures")
+    pricing_chain_id: int | None = Field(default=26514, ge=1, description="Chain id used for quote signatures")
     pricing_verifying_contract: str = Field(
         default="0x0000000000000000000000000000000000000000",
         description="EIP-712 verifyingContract address for quote signatures",

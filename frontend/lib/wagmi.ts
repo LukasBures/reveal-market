@@ -14,10 +14,10 @@ const globalState = globalThis as typeof globalThis & {
   __wagmiWalletConnectors?: CreateConnectorFn[];
 };
 
-const EXPECTED_CHAIN_ID = 2651420;
-const FALLBACK_CHAIN_NAME = "Horizen";
-const FALLBACK_RPC_URL = "https://horizen-testnet.rpc.caldera.xyz/http";
-const FALLBACK_EXPLORER = "https://horizen-testnet.explorer.caldera.xyz";
+const EXPECTED_CHAIN_ID = 26514;
+const FALLBACK_CHAIN_NAME = "Horizen Mainnet";
+const FALLBACK_RPC_URL = "https://horizen.calderachain.xyz/http";
+const FALLBACK_EXPLORER = "https://horizen.calderaexplorer.xyz";
 
 const parseChainId = (raw?: string | number | null): number | null => {
   if (raw === undefined || raw === null) return null;

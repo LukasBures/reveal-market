@@ -15,8 +15,9 @@ from eth_account import Account  # noqa: E402
 from eth_account.messages import encode_defunct  # noqa: E402
 from web3 import HTTPProvider, Web3  # noqa: E402
 
-w3 = Web3(HTTPProvider("https://horizen-testnet.rpc.caldera.xyz/http"))
-CHAIN_ID = 2651420
+_RPC_URL = os.getenv("RM_RPC_URL", "https://horizen.calderachain.xyz/http")
+w3 = Web3(HTTPProvider(_RPC_URL))
+CHAIN_ID = int(os.getenv("RM_CHAIN_ID", "26514"))
 
 state = json.load(open("/tmp/prod_e2e_state.json"))  # noqa: S108
 market_address = state["market_address"]
@@ -24,7 +25,7 @@ market_id = state["market_id"]
 batch_root_bytes = bytes.fromhex(state["batch_root"][2:])
 ticket_count = len(state["tickets"])
 
-FACTORY = "0x07e13179E5231B3823f26ECBA2750834cBAfC9d3"
+FACTORY = os.getenv("RM_FACTORY_ADDRESS", "0x3144B525Ffbb99dF298E9B5a589011cF423b54a3")
 ORACLE_KEY = os.environ["RM_SETTLEMENT_SIGNER_PRIVATE_KEY"]
 RELAYER_KEY = os.environ["RM_RELAYER_PRIVATE_KEY"]
 

@@ -49,13 +49,13 @@ except ImportError:
 # Config
 # ---------------------------------------------------------------------------
 API_URL = os.getenv("API_URL", "https://api.revealmarket.xyz")
-RPC_URL = os.getenv("RM_RPC_URL", "https://horizen-testnet.rpc.caldera.xyz/http")
+RPC_URL = os.getenv("RM_RPC_URL", "https://horizen.calderachain.xyz/http")
 INTERNAL_SECRET =<REDACTED>
 TEST_WALLET_KEY = os.environ["TEST_WALLET_KEY"]
 STAKE_ZEN = Decimal("0.1000")
 
-ZEN_TOKEN = os.getenv("ZEN_TOKEN_ADDRESS", "0x070040A826B586b58569750ED43cb5979b171e8d")
-RELAYER_ESCROW = os.getenv("RM_RELAYER_ESCROW_ADDRESS", "0x5b0fA47675D07b018E2151d49d4aECc71b47E47D")
+ZEN_TOKEN = os.getenv("ZEN_TOKEN_ADDRESS", "0x57da2D504bf8b83Ef304759d9f2648522D7a9280")
+RELAYER_ESCROW = os.getenv("RM_RELAYER_ESCROW_ADDRESS", "0x5613c11E960950434444BA0580D9998F8540CfeD")
 
 log = logging.getLogger("api-e2e")
 

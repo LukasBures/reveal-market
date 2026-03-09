@@ -5,6 +5,54 @@
 
 ---
 
+## Migration Status (updated 2026-03-09)
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| 1 — Generate wallets | ✅ Done | 7 wallets generated, keys stored in `.env.production` |
+| 2 — Fund wallets | ✅ Done | ETH distributed to deployer/relayer/oracle/settlement |
+| 3 — Deploy ZEN token | ✅ Skipped | ZEN already live on Horizen Mainnet |
+| 4 — ZK artifacts | ✅ Done | Same circuit (chain-agnostic), artifacts reused |
+| 5 — Deploy contracts | ✅ Done | All 5 contracts deployed 2026-03-09 |
+| 6 — Update env files | ✅ Done | `.env.production`, `.env.local`, `frontend/.env.local`, `contracts/zen/.env` |
+| 7 — Update hardcoded defaults | ✅ Done | Chain IDs, RPC URLs, explorer URLs updated throughout codebase |
+| 8 — Update frontend | ✅ Done | wagmi.ts, next.config.mjs, components updated |
+| 9 — Update infrastructure | ✅ Done | docker-compose.yml, docker-bake.hcl defaults updated |
+| 10 — Update tests | ✅ Done | Chain IDs, explorer URLs, EIP-712 digest snapshot updated |
+| Seed ProtocolPool | 🔄 Partial | 2 ZEN deposited (MAX allowance set) |
+| 11 — Database & State | ⏳ Pending | Create mainnet DB on prod server |
+| 12 — Pre-launch validation | ⏳ Pending | |
+| 13 — Go-live | ⏳ Pending | |
+
+### Deployed Contracts (Horizen Mainnet, chain 26514)
+
+| Contract | Address |
+|----------|---------|
+| ProtocolPool | `0x3C8fC2C4bbe255ED8A8A343239a5EC8c016686B8` |
+| RelayerEscrow | `0x5613c11E960950434444BA0580D9998F8540CfeD` |
+| MarketFactory | `0x3144B525Ffbb99dF298E9B5a589011cF423b54a3` |
+| RevealMarket (impl) | `0x8a536445622aD4cdcCDf2b464b88F5bD037F0516` |
+| Verifier (Groth16) | `0x568c9395073D8132692Be68e8De0e859b7f05c33` |
+| ZEN token (bridged) | `0x57da2D504bf8b83Ef304759d9f2648522D7a9280` |
+
+### Wallet Addresses (Horizen Mainnet)
+
+| Role | Address | ETH balance (2026-03-09) |
+|------|---------|--------------------------|
+| Deployer / Owner | `0x5f7dCda0c23014c9133990739657A6d1f716d1DE` | 0.00098 |
+| Oracle | `0x9b99e6f210f3FB870016aA42BaF5002D08e3A6e3` | 0.00110 |
+| Auth Signer | `0xA2A0b13f53FE25E5ef9B1267D1C064d7A5BD4277` | 0 (off-chain only) |
+| Relayer | `0x0CFAb23562fD5E1F6aD97F143591a51Ec0F78746` | 0.00300 |
+| Settlement Signer | `0x84908EE89959837e755ffC56b5532171789aA8bc` | 0.00140 |
+| Treasury | `0x727ec3C62A26Bfe2c4bC5B291Be4a21E6437E810` | 0 |
+| Hedger Vault | `0x9a559DaF816ac59304A193825515e8E31436f797` | 0 (Polygon only) |
+
+### Circuit Identity
+- **circuitHash**: `0x181e1866c82c6c72f18cd61723f1f61cd0a02224250b988af5a3f32863f2b157`
+- **verifierKeyHash**: `0xf35b7242a4bb959ef653cfca376b51f1c263b85d3a164acfdeeb90a9205e98f9`
+
+---
+
 ## Table of Contents
 
 1. [Reference: Testnet vs Mainnet](#1-reference-testnet-vs-mainnet)
@@ -39,17 +87,21 @@
 | **Chain ID** | `2651420` | `26514` |
 | **RPC (HTTP)** | `https://horizen-testnet.rpc.caldera.xyz/http` | `https://horizen.calderachain.xyz/http` |
 | **RPC (WS)** | `wss://horizen-testnet.rpc.caldera.xyz/ws` | `wss://horizen.calderachain.xyz/ws` |
-| **Explorer** | `https://horizen-testnet.explorer.caldera.xyz` | `https://horizen.explorer.caldera.xyz` (confirm from hub) |
-| **Bridge** | `https://horizen-testnet.hub.caldera.xyz/` | `https://hub.horizen.io/` |
+| **Explorer** | `https://horizen-testnet.explorer.caldera.xyz` | `https://horizen.calderaexplorer.xyz` (confirm from hub) |
+| **ETH Bridge** | `https://horizen-testnet.hub.caldera.xyz/` | `https://bridge.horizen.io` (Base → Horizen Mainnet ETH) |
+| **ZEN Bridge** | N/A | `https://stargate.finance/?srcChain=base&srcToken=0xf43eB8De897Fbc7F2502483B2Bef7Bb9EA179229&dstChain=horizen&dstToken=0x57da2D504bf8b83Ef304759d9f2648522D7a9280` |
 | **Settlement Layer** | Base Sepolia (`84532`) | Base (`8453`) |
 | **Native Token** | ETH (testnet) | ETH (real) |
+| **Data Availability** | Ethereum Blobs | Ethereum Blobs |
 | **Rollup Stack** | OP Stack / Bedrock | OP Stack / Bedrock |
 | **Hub / Dashboard** | `https://horizen-testnet.hub.caldera.xyz/` | `https://hub.horizen.io/` |
+| **ZEN Token (L3)** | `0x070040A826B586b58569750ED43cb5979b171e8d` | `0x57da2D504bf8b83Ef304759d9f2648522D7a9280` (bridged via Stargate) |
+| **ZEN Token (Base)** | N/A | `0xf43eB8De897Fbc7F2502483B2Bef7Bb9EA179229` (source for bridging) |
 | **Faucet** | Available (testnet) | N/A (real money) |
 
 ---
 
-## 2. Phase 1: Generate Fresh Mainnet Wallets
+## 2. Phase 1: Generate Fresh Mainnet Wallets ✅ DONE
 
 > **CRITICAL: Never reuse testnet private keys on mainnet.** Generate all-new keys and store them in a password manager / hardware wallet / KMS.
 
@@ -117,7 +169,7 @@ You need fresh values for: `RELAYER_BEARER_TOKEN`, `RELAYER_API_BEARER_TOKEN`, `
 
 ---
 
-## 3. Phase 2: Fund Mainnet Wallets
+## 3. Phase 2: Fund Mainnet Wallets ✅ DONE
 
 ### Step 1: Acquire ETH on Base
 
@@ -128,7 +180,7 @@ You need real ETH on **Base** (chain ID 8453) to bridge to Horizen Mainnet. Opti
 
 ### Step 2: Bridge ETH from Base → Horizen Mainnet
 
-1. Go to **https://hub.horizen.io/**
+1. Go to **https://bridge.horizen.io** (the official ETH bridge for Base → Horizen Mainnet)
 2. Connect wallet containing Base ETH
 3. Select **Base → Horizen Mainnet**
 4. Bridge ETH in separate transactions to each wallet that needs gas:
@@ -153,46 +205,54 @@ cast balance <ADDRESS> --rpc-url https://horizen.calderachain.xyz/http
 
 ---
 
-## 4. Phase 3: Deploy ZEN ERC-20 Token
+## 4. Phase 3: ZEN Token — Already Deployed ✅ (Use Existing Canonical Address)
 
-> The ZEN token (`0x070040A826B586b58569750ED43cb5979b171e8d`) on testnet is a custom ERC-20. You need a mainnet instance.
+> **ZEN is already live on Horizen Mainnet as a bridged token. No deployment needed.**
+>
+> | Network | Token Address |
+> |---------|--------------|
+> | **Horizen Mainnet** (chain `26514`) | `0x57da2D504bf8b83Ef304759d9f2648522D7a9280` |
+> | **Base** (chain `8453`) — source for bridging | `0xf43eB8De897Fbc7F2502483B2Bef7Bb9EA179229` |
 
-### Option A: Deploy New ZEN Token (if you own the token contract)
-
-If you have the ZEN token source code:
-
-```bash
-# Deploy ZEN token to Horizen Mainnet
-forge create src/ZenToken.sol:ZenToken \
-  --rpc-url https://horizen.calderachain.xyz/http \
-  --private-key $DEPLOYER_KEY \
-  --chain-id 26514 \
-  --broadcast
-```
-
-Record the deployed address → this becomes `ZEN_TOKEN_ADDRESS` / `NEXT_PUBLIC_ZEN_TOKEN_ADDRESS`.
-
-### Option B: Use Existing Mainnet Token
-
-If ZEN is already deployed on Horizen Mainnet by another party, get the address from them and verify it:
+### Step 1: Verify ZEN Token on Horizen Mainnet
 
 ```bash
-# Verify it's a valid ERC-20:
-cast call <ZEN_ADDRESS> "name()(string)" --rpc-url https://horizen.calderachain.xyz/http
-cast call <ZEN_ADDRESS> "symbol()(string)" --rpc-url https://horizen.calderachain.xyz/http
-cast call <ZEN_ADDRESS> "decimals()(uint8)" --rpc-url https://horizen.calderachain.xyz/http
+# Confirm the canonical ZEN token is valid and matches expected decimals:
+ZEN=0x57da2D504bf8b83Ef304759d9f2648522D7a9280
+RPC=https://horizen.calderachain.xyz/http
+
+cast call $ZEN "name()(string)"     --rpc-url $RPC
+cast call $ZEN "symbol()(string)"   --rpc-url $RPC
+cast call $ZEN "decimals()(uint8)"  --rpc-url $RPC
+cast call $ZEN "totalSupply()(uint256)" --rpc-url $RPC
 ```
 
-### Step 4: Mint/Transfer Initial ZEN Supply
+### Step 2: Bridge ZEN from Base → Horizen Mainnet
 
-Mint or transfer ZEN tokens to:
-- **Protocol Pool** (will be funded after contract deployment)
-- **Treasury wallet** (reserve)
-- **Test wallets** (for initial testing)
+Use **Stargate Finance** to bridge ZEN from Base to Horizen Mainnet:
+
+1. Go to: https://stargate.finance/?srcChain=base&srcToken=0xf43eB8De897Fbc7F2502483B2Bef7Bb9EA179229&dstChain=horizen&dstToken=0x57da2D504bf8b83Ef304759d9f2648522D7a9280
+2. Connect the **Treasury** wallet (wallet #6) holding ZEN on Base
+3. Bridge the amount needed for **Protocol Pool** initial liquidity + reserve
+4. Destination: ZEN lands at the same address on Horizen Mainnet (`0x57da2D504bf8b83Ef304759d9f2648522D7a9280`)
+
+> **Note**: You need ZEN on Base first. Acquire ZEN on Base (e.g., via a DEX or directly) before bridging.
+
+### Step 3: Confirm ZEN Balance on Treasury Wallet
+
+```bash
+ZEN=0x57da2D504bf8b83Ef304759d9f2648522D7a9280
+TREASURY=0x<YOUR_TREASURY_ADDRESS>
+cast call $ZEN "balanceOf(address)(uint256)" $TREASURY --rpc-url https://horizen.calderachain.xyz/http
+```
+
+Use these addresses throughout the rest of the migration:
+- `ZEN_TOKEN_ADDRESS` = `0x57da2D504bf8b83Ef304759d9f2648522D7a9280`
+- `NEXT_PUBLIC_ZEN_TOKEN_ADDRESS` = `0x57da2D504bf8b83Ef304759d9f2648522D7a9280`
 
 ---
 
-## 5. Phase 4: Build & Upload ZK Artifacts
+## 5. Phase 4: Build & Upload ZK Artifacts ✅ DONE (artifacts reused — same circuit, chain-agnostic)
 
 > The Groth16 circuit + keys are **chain-agnostic**. The same `settlement.circom` circuit, proving key, and verification key work on any EVM chain. No rebuild is needed unless you want to change circuit parameters.
 
@@ -249,17 +309,24 @@ cd prover/circuits
 
 ---
 
-## 6. Phase 5: Deploy Contracts to Mainnet
+## 6. Phase 5: Deploy Contracts to Mainnet ✅ DONE (deployed 2026-03-09)
+
+> **Deployed addresses:**
+> - ProtocolPool: `0x3C8fC2C4bbe255ED8A8A343239a5EC8c016686B8`
+> - RelayerEscrow: `0x5613c11E960950434444BA0580D9998F8540CfeD`
+> - MarketFactory: `0x3144B525Ffbb99dF298E9B5a589011cF423b54a3`
+> - Verifier: `0x568c9395073D8132692Be68e8De0e859b7f05c33`
+> - RevealMarket impl: `0x8a536445622aD4cdcCDf2b464b88F5bD037F0516`
 
 ### Pre-Deployment Checklist
 
-- [ ] Deployer wallet funded with ≥0.5 ETH on Horizen Mainnet
-- [ ] ZEN token deployed and address known
-- [ ] Oracle address generated (Phase 1, wallet #2)
-- [ ] Authorization Signer address generated (Phase 1, wallet #3)
-- [ ] Verification key JSON available at `contracts/cache/settlement-vk.json`
-- [ ] Circuit hash known from `settlement_hashes.json`
-- [ ] `EXPECTED_VERIFIER_KEY_HASH` computed (from `settlement_hashes.json`)
+- [x] Deployer wallet funded with ≥0.5 ETH on Horizen Mainnet
+- [x] ZEN token deployed and address known
+- [x] Oracle address generated (Phase 1, wallet #2)
+- [x] Authorization Signer address generated (Phase 1, wallet #3)
+- [x] Verification key JSON available at `contracts/cache/settlement-vk.json`
+- [x] Circuit hash known from `settlement_hashes.json`
+- [x] `EXPECTED_VERIFIER_KEY_HASH` computed (from `settlement_hashes.json`)
 
 ### Step 1: Configure Contracts .env
 
@@ -268,7 +335,7 @@ cd prover/circuits
 RPC_URL=https://horizen.calderachain.xyz/http
 CHAIN_ID=26514
 PRIVATE_KEY=<REDACTED>
-ZEN_TOKEN_ADDRESS=0x<MAINNET_ZEN_TOKEN_ADDRESS>
+ZEN_TOKEN_ADDRESS=0x57da2D504bf8b83Ef304759d9f2648522D7a9280  # Canonical ZEN on Horizen Mainnet
 ORACLE_ADDRESS=0x<MAINNET_ORACLE_ADDRESS>
 AUTHORIZATION_SIGNER=0x<MAINNET_AUTH_SIGNER_ADDRESS>
 CIRCUIT_HASH=0x181e1866c82c6c72f18cd61723f1f61cd0a02224250b988af5a3f32863f2b157
@@ -378,7 +445,7 @@ VERIFIER_ADDRESS=0x<NEW_VERIFIER>
 
 ---
 
-## 7. Phase 6: Update Environment Files
+## 7. Phase 6: Update Environment Files ✅ DONE
 
 ### `.env.production` (on prod server)
 
@@ -390,7 +457,7 @@ RM_ENVIRONMENT=prod
 NEXT_PUBLIC_CHAIN_ID=26514
 NEXT_PUBLIC_CHAIN_NAME="Horizen Mainnet"
 NEXT_PUBLIC_RPC_URL=https://horizen.calderachain.xyz/http
-NEXT_PUBLIC_BLOCK_EXPLORER_URL=https://horizen.explorer.caldera.xyz
+NEXT_PUBLIC_BLOCK_EXPLORER_URL=https://horizen.calderaexplorer.xyz
 RM_RPC_URL=https://horizen.calderachain.xyz/http
 RM_PRICING_CHAIN_ID=26514
 
@@ -406,8 +473,8 @@ RM_PROTOCOL_POOL_ADDRESS=0x<NEW_POOL>
 RM_MARKET_IMPLEMENTATION_ADDRESS=0x<NEW_IMPLEMENTATION>
 RM_VERIFIER_ADDRESS=0x<NEW_VERIFIER>
 RM_ORACLE_ADDRESS=0x<NEW_ORACLE_ADDRESS>
-ZEN_TOKEN_ADDRESS=0x<NEW_ZEN_TOKEN>
-NEXT_PUBLIC_ZEN_TOKEN_ADDRESS=0x<NEW_ZEN_TOKEN>
+ZEN_TOKEN_ADDRESS=0x57da2D504bf8b83Ef304759d9f2648522D7a9280
+NEXT_PUBLIC_ZEN_TOKEN_ADDRESS=0x57da2D504bf8b83Ef304759d9f2648522D7a9280
 
 # ──── Escrow Address (TWO env vars, same value) ────
 # The relayer uses env_prefix="RM_" so it reads RM_RELAYER_ESCROW_ADDRESS (not bare RELAYER_ESCROW_ADDRESS).
@@ -520,7 +587,7 @@ Update all default values from testnet → mainnet so new developers see the cor
 RPC_URL=https://horizen.calderachain.xyz/http
 CHAIN_ID=26514
 PRIVATE_KEY=<REDACTED>
-ZEN_TOKEN_ADDRESS=0x<MAINNET_ZEN_TOKEN>
+ZEN_TOKEN_ADDRESS=0x57da2D504bf8b83Ef304759d9f2648522D7a9280
 ORACLE_ADDRESS=0x<MAINNET_ORACLE>
 AUTHORIZATION_SIGNER=0x<MAINNET_AUTH_SIGNER_ADDRESS>
 CIRCUIT_HASH=0x181e1866c82c6c72f18cd61723f1f61cd0a02224250b988af5a3f32863f2b157
@@ -534,14 +601,14 @@ USE_STUB_VERIFIER=0
 NEXT_PUBLIC_CHAIN_ID=26514
 NEXT_PUBLIC_CHAIN_NAME="Horizen Mainnet"
 NEXT_PUBLIC_RPC_URL=https://horizen.calderachain.xyz/http
-NEXT_PUBLIC_BLOCK_EXPLORER_URL=https://horizen.explorer.caldera.xyz
-NEXT_PUBLIC_ZEN_TOKEN_ADDRESS=0x<MAINNET_ZEN_TOKEN>
+NEXT_PUBLIC_BLOCK_EXPLORER_URL=https://horizen.calderaexplorer.xyz
+NEXT_PUBLIC_ZEN_TOKEN_ADDRESS=0x57da2D504bf8b83Ef304759d9f2648522D7a9280
 NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS=0x<MAINNET_ESCROW>
 ```
 
 ---
 
-## 8. Phase 7: Update Hardcoded Defaults in Code
+## 8. Phase 7: Update Hardcoded Defaults in Code ✅ DONE
 
 These files have **hardcoded** testnet values as fallbacks. They must be updated:
 
@@ -563,7 +630,7 @@ pricing_chain_id: int | None = Field(default=26514, ge=1, description="Chain id 
 const EXPECTED_CHAIN_ID = 26514;
 const FALLBACK_CHAIN_NAME = "Horizen Mainnet";
 const FALLBACK_RPC_URL = "https://horizen.calderachain.xyz/http";
-const FALLBACK_EXPLORER = "https://horizen.explorer.caldera.xyz";
+const FALLBACK_EXPLORER = "https://horizen.calderaexplorer.xyz";
 ```
 
 **`frontend/next.config.mjs`** (line ~11):
@@ -573,12 +640,12 @@ const DEFAULT_RPC_URL = "https://horizen.calderachain.xyz/http";
 
 **`frontend/components/proofs/ProofReceiptList.tsx`** (line 12):
 ```typescript
-const explorerBase = process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL ?? "https://horizen.explorer.caldera.xyz";
+const explorerBase = process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL ?? "https://horizen.calderaexplorer.xyz";
 ```
 
 **`frontend/components/markets/MarketDetailSidebar.tsx`** (line 99):
 ```typescript
-process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL ?? "https://horizen.explorer.caldera.xyz"
+process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL ?? "https://horizen.calderaexplorer.xyz"
 ```
 
 ### Contracts Monitoring
@@ -594,16 +661,16 @@ RPC_URL = "https://horizen.calderachain.xyz/http"
 ```python
 # Update hardcoded defaults:
 DEFAULT_RPC_URL = os.getenv("NEXT_PUBLIC_RPC_URL", "https://horizen.calderachain.xyz/http")
-DEFAULT_EXPLORER_URL = os.getenv("NEXT_PUBLIC_BLOCK_EXPLORER_URL", "https://horizen.explorer.caldera.xyz")
-DEFAULT_TOKEN_ADDRESS = "0x<MAINNET_ZEN_TOKEN>"  # was testnet ZEN
+DEFAULT_EXPLORER_URL = os.getenv("NEXT_PUBLIC_BLOCK_EXPLORER_URL", "https://horizen.calderaexplorer.xyz")
+DEFAULT_TOKEN_ADDRESS = "0x57da2D504bf8b83Ef304759d9f2648522D7a9280"  # was testnet ZEN
 ```
 
 **`scripts/send_to_protocol_pool.py`** (lines 36-40):
 ```python
 # Update hardcoded defaults:
 DEFAULT_RPC_URL = os.getenv("NEXT_PUBLIC_RPC_URL", "https://horizen.calderachain.xyz/http")
-DEFAULT_EXPLORER_URL = os.getenv("NEXT_PUBLIC_BLOCK_EXPLORER_URL", "https://horizen.explorer.caldera.xyz")
-DEFAULT_TOKEN_ADDRESS = "0x<MAINNET_ZEN_TOKEN>"  # was testnet ZEN
+DEFAULT_EXPLORER_URL = os.getenv("NEXT_PUBLIC_BLOCK_EXPLORER_URL", "https://horizen.calderaexplorer.xyz")
+DEFAULT_TOKEN_ADDRESS = "0x57da2D504bf8b83Ef304759d9f2648522D7a9280"  # was testnet ZEN
 DEFAULT_POOL_ADDRESS = os.getenv("RM_PROTOCOL_POOL_ADDRESS", "0x<MAINNET_POOL>")  # was testnet pool
 ```
 
@@ -612,7 +679,7 @@ DEFAULT_POOL_ADDRESS = os.getenv("RM_PROTOCOL_POOL_ADDRESS", "0x<MAINNET_POOL>")
 # Line 32-33 default to Base mainnet (for bridging), NOT Horizen. Update if you want
 # this script to default to Horizen Mainnet for gas top-ups:
 DEFAULT_RPC_URL = os.getenv("NEXT_PUBLIC_RPC_URL", "https://horizen.calderachain.xyz/http")
-DEFAULT_EXPLORER_URL = os.getenv("NEXT_PUBLIC_BLOCK_EXPLORER_URL", "https://horizen.explorer.caldera.xyz")
+DEFAULT_EXPLORER_URL = os.getenv("NEXT_PUBLIC_BLOCK_EXPLORER_URL", "https://horizen.calderaexplorer.xyz")
 
 # Line 34 references a testnet keyfile — update or remove:
 DEFAULT_KEYFILE = Path(__file__).resolve().parent / "generated" / "<mainnet_funding_wallet>.txt"
@@ -626,7 +693,7 @@ DEFAULT_KEYFILE = Path(__file__).resolve().parent / "generated" / "<mainnet_fund
 RM_CHAIN_ID="${RM_CHAIN_ID:-26514}"
 
 # Line 85: Change default explorer URL fallback
-NEXT_PUBLIC_BLOCK_EXPLORER_URL="${NEXT_PUBLIC_BLOCK_EXPLORER_URL:-https://horizen.explorer.caldera.xyz}"
+NEXT_PUBLIC_BLOCK_EXPLORER_URL="${NEXT_PUBLIC_BLOCK_EXPLORER_URL:-https://horizen.calderaexplorer.xyz}"
 ```
 
 ### E2E Test Scripts
@@ -652,7 +719,7 @@ These scripts have **hardcoded** testnet values with no env fallback. Update or 
 
 ---
 
-## 9. Phase 8: Update Frontend
+## 9. Phase 8: Update Frontend ✅ DONE
 
 ### Native Currency Display
 
@@ -693,7 +760,7 @@ No changes needed — WalletConnect uses the chain config from wagmi.
 
 ---
 
-## 10. Phase 9: Update Infrastructure
+## 10. Phase 9: Update Infrastructure ✅ DONE
 
 ### Docker Compose
 
@@ -705,7 +772,7 @@ args:
   NEXT_PUBLIC_CHAIN_ID: ${NEXT_PUBLIC_CHAIN_ID:-26514}
   NEXT_PUBLIC_CHAIN_NAME: ${NEXT_PUBLIC_CHAIN_NAME:-Horizen Mainnet}
   NEXT_PUBLIC_RPC_URL: ${NEXT_PUBLIC_RPC_URL:-https://horizen.calderachain.xyz/http}
-  NEXT_PUBLIC_BLOCK_EXPLORER_URL: ${NEXT_PUBLIC_BLOCK_EXPLORER_URL:-https://horizen.explorer.caldera.xyz}
+  NEXT_PUBLIC_BLOCK_EXPLORER_URL: ${NEXT_PUBLIC_BLOCK_EXPLORER_URL:-https://horizen.calderaexplorer.xyz}
 ```
 
 > These build args are baked into the Docker image at build time. If `.env.production` is set correctly they'll be overridden, but the fallback defaults should still be mainnet to prevent accidents.
@@ -718,7 +785,7 @@ args:
 variable "NEXT_PUBLIC_CHAIN_ID" { default = "26514" }
 variable "NEXT_PUBLIC_CHAIN_NAME" { default = "Horizen Mainnet" }
 variable "NEXT_PUBLIC_RPC_URL" { default = "https://horizen.calderachain.xyz/http" }
-variable "NEXT_PUBLIC_BLOCK_EXPLORER_URL" { default = "https://horizen.explorer.caldera.xyz" }
+variable "NEXT_PUBLIC_BLOCK_EXPLORER_URL" { default = "https://horizen.calderaexplorer.xyz" }
 ```
 
 ### Caddyfile
@@ -745,13 +812,13 @@ However, verify:
 | `RM_VERIFIER_ADDRESS` | `0x<NEW_VERIFIER>` |
 | `RM_AUTHORIZATION_SIGNER` | `0x<NEW_AUTH_SIGNER_ADDRESS>` |
 | `RM_ORACLE_ADDRESS` | `0x<NEW_ORACLE_ADDRESS>` |
-| `ZEN_TOKEN_ADDRESS` | `0x<NEW_ZEN_TOKEN>` |
+| `ZEN_TOKEN_ADDRESS` | `0x57da2D504bf8b83Ef304759d9f2648522D7a9280` |
 | `RM_WALLET_ADDRESS` | `0x<NEW_DEPLOYER_ADDRESS>` |
 | `PROVER_CIRCUIT_HASH` | `0x181e1866...` (unchanged if reusing artifacts) |
 | `PRICING_SIGNER_ADDRESS` | `0x<NEW_PRICING_SIGNER_ADDRESS>` |
 | `NEXT_PUBLIC_CHAIN_ID` | `26514` |
 | `NEXT_PUBLIC_RPC_URL` | `https://horizen.calderachain.xyz/http` |
-| `NEXT_PUBLIC_BLOCK_EXPLORER_URL` | `https://horizen.explorer.caldera.xyz` |
+| `NEXT_PUBLIC_BLOCK_EXPLORER_URL` | `https://horizen.calderaexplorer.xyz` |
 
 These variables are used by the circuit hash check job (lines 442-443) and the deploy job (lines 544-563).
 
@@ -770,7 +837,7 @@ On `159.69.29.255`:
 
 ---
 
-## 11. Phase 10: Update Tests
+## 11. Phase 10: Update Tests ✅ DONE (all 188 tests passing, EIP-712 digest snapshot updated)
 
 Tests hardcode chain ID `2651420` for mocking. They should continue using a test chain ID, but some tests validate the actual default config.
 
@@ -798,7 +865,7 @@ Tests hardcode chain ID `2651420` for mocking. They should continue using a test
 Global find-and-replace in test files:
 - `2651420` → `26514`
 - `horizen-testnet.rpc.caldera.xyz` → `horizen.calderachain.xyz`
-- `horizen-testnet.explorer.caldera.xyz` → `horizen.explorer.caldera.xyz`
+- `horizen-testnet.explorer.caldera.xyz` → `horizen.calderaexplorer.xyz`
 
 Then run full test suite to verify:
 ```bash
@@ -814,7 +881,7 @@ cd backend/api && uv run --project . --extra dev pytest tests/test_openapi_snaps
 
 ---
 
-## 12. Phase 11: Database & State
+## 12. Phase 11: Database & State ⏳ NEXT STEP
 
 ### Fresh Database (Recommended for Mainnet Launch)
 

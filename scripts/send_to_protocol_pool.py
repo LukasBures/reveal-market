@@ -33,11 +33,13 @@ try:
 except ImportError:
     ExtraDataToPOAMiddleware = None  # type: ignore[assignment]
 
-DEFAULT_RPC_URL = os.getenv("NEXT_PUBLIC_RPC_URL", "https://horizen-testnet.rpc.caldera.xyz/http")
-DEFAULT_EXPLORER_URL = os.getenv("NEXT_PUBLIC_BLOCK_EXPLORER_URL", "https://horizen-testnet.explorer.caldera.xyz")
-DEFAULT_KEYFILE = Path(__file__).resolve().parent / "generated" / "testnet_zen_funding_wallet_1764886505.txt"
-DEFAULT_TOKEN_ADDRESS = "0x070040A826B586b58569750ED43cb5979b171e8d"  # ZEN ERC-20 on Horizen testnet  # noqa: S105
-DEFAULT_POOL_ADDRESS = os.getenv("RM_PROTOCOL_POOL_ADDRESS", "0x613FC63d5FCAE6ED62694f3b7A171a72d18Cb429")
+DEFAULT_RPC_URL = os.getenv("RM_RPC_URL", os.getenv("NEXT_PUBLIC_RPC_URL", "https://horizen.calderachain.xyz/http"))
+DEFAULT_EXPLORER_URL = os.getenv("NEXT_PUBLIC_BLOCK_EXPLORER_URL", "https://horizen.calderaexplorer.xyz")
+DEFAULT_KEYFILE = Path(__file__).resolve().parent / "generated" / "mainnet_funding_wallet.txt"
+DEFAULT_TOKEN_ADDRESS = os.getenv(
+    "ZEN_TOKEN_ADDRESS", "0x57da2D504bf8b83Ef304759d9f2648522D7a9280"
+)  # ZEN ERC-20 on Horizen Mainnet  # noqa: S105
+DEFAULT_POOL_ADDRESS = os.getenv("RM_PROTOCOL_POOL_ADDRESS", "0x3C8fC2C4bbe255ED8A8A343239a5EC8c016686B8")
 DEFAULT_TOKEN_AMOUNT = "2.0"  # noqa: S105
 
 ERC20_ABI: list[dict[str, Any]] = [
@@ -271,14 +273,15 @@ def main() -> int:
         )
         return tx_hex, receipt
 
-    # Approve if needed
+    # Approve if needed (always approve MAX so future deposits need no re-approval)
+    max_uint256 = 2**256 - 1
     if allowance < amount_int and not args.skip_approve:
         try:
-            est = token.functions.approve(pool_address, amount_int).estimate_gas({"from": sender_address})
+            est = token.functions.approve(pool_address, max_uint256).estimate_gas({"from": sender_address})
         except Web3Exception as exc:
             log.error("Gas estimation for approve failed: %s", exc)
             return 1
-        approve_tx = token.functions.approve(pool_address, amount_int).build_transaction(
+        approve_tx = token.functions.approve(pool_address, max_uint256).build_transaction(
             {
                 "from": sender_address,
                 "nonce": nonce,
@@ -287,7 +290,7 @@ def main() -> int:
                 "chainId": web3.eth.chain_id,
             }
         )
-        log.info("Allowance %s < %s %s; sending approve()", allowance, amount_int, symbol)
+        log.info("Allowance %s < %s %s; sending approve(max)", allowance, amount_int, symbol)
         try:
             send_and_wait(approve_tx)
         except Exception as exc:  # pragma: no cover - CLI path

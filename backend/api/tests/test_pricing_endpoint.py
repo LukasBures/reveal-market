@@ -112,7 +112,7 @@ def test_pricing_quote_and_submit_signature_roundtrip(client, monkeypatch):
     signer = Account.create()
     user = Account.create()
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 20, raising=False)
     monkeypatch.setattr(settings, "haircut_percent", 0.12, raising=False)
@@ -139,7 +139,7 @@ def test_pricing_quote_and_submit_signature_roundtrip(client, monkeypatch):
     assert quote_resp.status_code == 200
     quote = quote_resp.json()
     assert quote["signature"]
-    assert quote["chain_id"] == 2651420
+    assert quote["chain_id"] == 26514
 
     submit_resp = client.post("/pricing/submit", json={"quote": quote})
     assert submit_resp.status_code == 200
@@ -158,7 +158,7 @@ def test_pricing_quote_signature_recovers_signer(client, monkeypatch):
     signer = Account.create()
     user = Account.create()
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "pricing_verifying_contract", "0x" + "0" * 40, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 10, raising=False)
@@ -209,7 +209,7 @@ def test_pricing_quote_rejects_stale_fx(client, monkeypatch):
     signer = Account.create()
     user = Account.create()
     settings = get_settings()
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 1, raising=False)
     monkeypatch.setattr(settings, "haircut_percent", 0.12, raising=False)
@@ -243,7 +243,7 @@ def test_pricing_quote_blocks_pending_resolution(client, db_session, monkeypatch
     signer = Account.create()
     user = Account.create()
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 5, raising=False)
     monkeypatch.setattr(settings, "haircut_percent", 0.12, raising=False)
@@ -283,7 +283,7 @@ def test_pricing_quote_blocks_cutoff_window(client, db_session, monkeypatch):
     signer = Account.create()
     user = Account.create()
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 5, raising=False)
     monkeypatch.setattr(settings, "haircut_percent", 0.12, raising=False)
@@ -325,7 +325,7 @@ def test_pricing_quote_rejects_missing_price(client, monkeypatch):
     signer = Account.create()
     user = Account.create()
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 1, raising=False)
     monkeypatch.setattr(settings, "haircut_percent", 0.12, raising=False)
@@ -367,7 +367,7 @@ def test_public_pricing_quote_requires_nonce_and_timestamp(client, monkeypatch):
     signer = Account.create()
     user = Account.create()
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "pricing_quote_signature_required", True, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", int(Decimal("1e17")), raising=False)
@@ -410,7 +410,7 @@ def test_public_pricing_quote_rejects_replayed_signature(client, monkeypatch):
     signer = Account.create()
     user = Account.create()
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "pricing_quote_signature_required", True, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", int(Decimal("1e17")), raising=False)

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -8,7 +9,7 @@ from typing import Any
 from web3 import Web3
 from web3.providers.rpc import HTTPProvider
 
-RPC_URL = "https://horizen-testnet.rpc.caldera.xyz/http"
+RPC_URL = os.getenv("RM_RPC_URL", "https://horizen.calderachain.xyz/http")
 RPC_TIMEOUT_SECONDS = 10
 ROOT = Path(__file__).resolve().parents[2]
 ZEN_BROADCAST_DIR = ROOT / "contracts" / "zen" / "broadcast" / "Deploy.s.sol"

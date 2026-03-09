@@ -19,7 +19,7 @@ async def test_pricing_submit_rejects_fx_drift(client, monkeypatch):
     signer = Account.create()
     user = Account.create()
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 1, raising=False)
     monkeypatch.setattr(settings, "haircut_percent", 0.12, raising=False)
@@ -63,7 +63,7 @@ async def test_pricing_submit_rejects_stale_fx(client, monkeypatch):
     signer = Account.create()
     user = Account.create()
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 1, raising=False)
     monkeypatch.setattr(settings, "haircut_percent", 0.12, raising=False)

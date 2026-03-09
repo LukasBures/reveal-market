@@ -11,7 +11,7 @@ def _configure_signer(monkeypatch):
     import app.runtime as runtime
 
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr("0x" + "2" * 64), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 1, raising=False)
     monkeypatch.setattr(settings, "max_user_stake_per_market_zen", 10, raising=False)

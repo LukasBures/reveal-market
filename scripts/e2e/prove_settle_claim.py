@@ -20,8 +20,9 @@ BATCH_SIZE = _mod.BATCH_SIZE
 from eth_account import Account  # noqa: E402
 from web3 import HTTPProvider, Web3  # noqa: E402
 
-w3 = Web3(HTTPProvider("https://horizen-testnet.rpc.caldera.xyz/http"))
-CHAIN_ID = 2651420
+_RPC_URL = os.getenv("RM_RPC_URL", "https://horizen.calderachain.xyz/http")
+w3 = Web3(HTTPProvider(_RPC_URL))
+CHAIN_ID = int(os.getenv("RM_CHAIN_ID", "26514"))
 CIRCUIT_HASH = "0x181e1866c82c6c72f18cd61723f1f61cd0a02224250b988af5a3f32863f2b157"
 ORACLE_KEY = os.environ["RM_SETTLEMENT_SIGNER_PRIVATE_KEY"]
 PROVER_URL = os.environ.get("RM_PROVER_URL", "http://prover:8085")
@@ -88,7 +89,12 @@ ESCROW_ABI = [
 ]
 
 mc = w3.eth.contract(address=w3.to_checksum_address(market_address), abi=MARKET_ABI)
-escrow = w3.eth.contract(address=w3.to_checksum_address("0x5b0fA47675D07b018E2151d49d4aECc71b47E47D"), abi=ESCROW_ABI)
+escrow = w3.eth.contract(
+    address=w3.to_checksum_address(
+        os.getenv("RM_RELAYER_ESCROW_ADDRESS", "0x5613c11E960950434444BA0580D9998F8540CfeD")
+    ),
+    abi=ESCROW_ABI,
+)
 
 
 def send(key, fn, label):

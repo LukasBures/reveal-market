@@ -56,9 +56,9 @@ describe("wagmi chain defaults", () => {
 
       const module = await import("@/lib/wagmi");
 
-      expect(module.defaultChain.id).toBe(2651420);
-      expect(module.defaultChain.rpcUrls.default.http[0]).toBe("https://horizen-testnet.rpc.caldera.xyz/http");
-      expect(module.defaultChain.blockExplorers?.default?.url).toBe("https://horizen-testnet.explorer.caldera.xyz");
+      expect(module.defaultChain.id).toBe(26514);
+      expect(module.defaultChain.rpcUrls.default.http[0]).toBe("https://horizen.calderachain.xyz/http");
+      expect(module.defaultChain.blockExplorers?.default?.url).toBe("https://horizen.calderaexplorer.xyz");
 
       const warnEvents = loggerMock.warn.mock.calls.map(([event]) => event);
       expect(warnEvents).toContain("wagmi.chain_id_missing");
@@ -78,7 +78,7 @@ describe("wagmi chain defaults", () => {
 
       const module = await import("@/lib/wagmi");
 
-      expect(module.defaultChain.id).toBe(2651420);
+      expect(module.defaultChain.id).toBe(26514);
       expect(module.defaultChain.name).toBe("Wrong Chain"); // name is kept, but chain id is enforced
 
       const warnEvents = loggerMock.warn.mock.calls.map(([event]) => event);

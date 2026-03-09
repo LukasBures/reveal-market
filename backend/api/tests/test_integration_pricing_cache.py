@@ -14,7 +14,7 @@ from eth_account import Account
 def test_quote_issue_and_submit_returns_signed_payload(client, monkeypatch, db_session):
     signer = Account.create()
     user = Account.create()
-    monkeypatch.setattr(api_main.settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(api_main.settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(api_main.settings, "pricing_signer_private_key", signer._private_key.hex(), raising=False)
     monkeypatch.setattr(api_main.settings, "max_stake_zen", 10.0, raising=False)
     monkeypatch.setattr(api_main.settings, "haircut_percent", 0.12, raising=False)
@@ -60,7 +60,7 @@ def test_quote_issue_and_submit_returns_signed_payload(client, monkeypatch, db_s
 def test_quote_expires_and_sweeper_marks_expired(client, monkeypatch, db_session):
     signer = Account.create()
     user = Account.create()
-    monkeypatch.setattr(api_main.settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(api_main.settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(api_main.settings, "pricing_signer_private_key", signer._private_key.hex(), raising=False)
     monkeypatch.setattr(api_main.settings, "pricing_quote_ttl_seconds", 1, raising=False)
     monkeypatch.setattr(api_main.settings, "quote_expiry_sweep_interval_seconds", 1, raising=False)
@@ -109,7 +109,7 @@ def test_cap_edges_enforced_and_reported(client, monkeypatch):
     signer = Account.create()
     user = Account.create()
     other_user = Account.create()
-    monkeypatch.setattr(api_main.settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(api_main.settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(api_main.settings, "pricing_signer_private_key", signer._private_key.hex(), raising=False)
     monkeypatch.setattr(api_main.settings, "max_stake_zen", 0.1, raising=False)
     monkeypatch.setattr(api_main.settings, "max_user_stake_per_market_zen", 0.15, raising=False)

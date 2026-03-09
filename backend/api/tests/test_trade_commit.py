@@ -39,7 +39,7 @@ def _seed_quote(
     user_address: str = "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     market_id: str = "mkt-commit",
     market_address: str = "0x1111111111111111111111111111111111111111",
-    chain_id: int = 2651420,
+    chain_id: int = 26514,
     expired: bool = False,
     stake_wei: int = 1_000_000_000_000_000_000,
 ):
@@ -272,7 +272,7 @@ def test_commit_rejects_wrong_chain_id(client, db_session, monkeypatch):
         raising=False,
     )
     monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     _seed_commit_market(db_session, event_id="mkt-chain")
     _seed_quote(db_session, quote_id="q-wrong-chain", market_id="mkt-chain", chain_id=1)
 
@@ -296,7 +296,7 @@ def test_commit_rejects_stake_mismatch(client, db_session, monkeypatch):
         raising=False,
     )
     monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", 5_000_000_000_000_000_000, raising=False)
     _seed_commit_market(db_session, event_id="mkt-stake")
     _seed_quote(db_session, quote_id="q-stake-mismatch", market_id="mkt-stake", stake_wei=1_000_000_000_000_000_000)
@@ -343,7 +343,7 @@ def test_commit_rejects_escrow_insufficient(client, db_session, monkeypatch):
     user = Account.create()
     market = _seed_commit_market(db_session, event_id="mkt-escrow")
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", 1_000_000_000_000_000_000, raising=False)
     monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
     monkeypatch.setattr(
@@ -391,7 +391,7 @@ def test_commit_returns_tx_hash_from_relayer(client, db_session, monkeypatch):
     tx_hash = "0x" + "a" * 64
     market = _seed_commit_market(db_session, event_id="mkt-tx-hash")
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", 1_000_000_000_000_000_000, raising=False)
     monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
     monkeypatch.setattr(settings, "relayer_escrow_address", None, raising=False)
@@ -428,7 +428,7 @@ def test_commit_returns_job_id_when_relayer_queues(client, db_session, monkeypat
     user = Account.create()
     market = _seed_commit_market(db_session, event_id="mkt-job")
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", 1_000_000_000_000_000_000, raising=False)
     monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
     monkeypatch.setattr(settings, "relayer_escrow_address", None, raising=False)
@@ -467,7 +467,7 @@ def test_commit_enqueues_when_relayer_fails_and_queue_enabled(client, db_session
     user = Account.create()
     market = _seed_commit_market(db_session, event_id="mkt-enqueue")
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", 1_000_000_000_000_000_000, raising=False)
     monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
     monkeypatch.setattr(settings, "relayer_escrow_address", None, raising=False)
@@ -516,7 +516,7 @@ def test_commit_raises_502_when_relayer_fails_and_queue_disabled(client, db_sess
     user = Account.create()
     market = _seed_commit_market(db_session, event_id="mkt-502")
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", 1_000_000_000_000_000_000, raising=False)
     monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
     monkeypatch.setattr(settings, "relayer_escrow_address", None, raising=False)
@@ -561,7 +561,7 @@ def test_commit_persists_commitment_to_db(client, db_session, monkeypatch):
     tx_hash = "0x" + "c" * 64
     market = _seed_commit_market(db_session, event_id="mkt-persist")
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", 1_000_000_000_000_000_000, raising=False)
     monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
     monkeypatch.setattr(settings, "relayer_escrow_address", None, raising=False)
@@ -609,7 +609,7 @@ def test_commit_persists_salt_within_field_modulus(client, db_session, monkeypat
     user = Account.create()
     market = _seed_commit_market(db_session, event_id="mkt-salt")
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", 1_000_000_000_000_000_000, raising=False)
     monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
     monkeypatch.setattr(settings, "relayer_escrow_address", None, raising=False)
@@ -647,7 +647,7 @@ def test_commit_response_includes_required_fields(client, db_session, monkeypatc
     user = Account.create()
     market = _seed_commit_market(db_session, event_id="mkt-fields")
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", 1_000_000_000_000_000_000, raising=False)
     monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
     monkeypatch.setattr(settings, "relayer_escrow_address", None, raising=False)
@@ -693,7 +693,7 @@ def test_commit_rejects_market_settled(client, db_session, monkeypatch):
     """Market with resolved_at set → 400 market_settled."""
     user = Account.create()
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", 1_000_000_000_000_000_000, raising=False)
     monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
     monkeypatch.setattr(settings, "relayer_escrow_address", None, raising=False)
@@ -738,7 +738,7 @@ def test_commit_rejects_invalid_wallet_signature(client, db_session, monkeypatch
     wrong_key = Account.create()
     market = _seed_commit_market(db_session, event_id="mkt-bad-sig")
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", 1_000_000_000_000_000_000, raising=False)
     monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
     monkeypatch.setattr(settings, "relayer_escrow_address", None, raising=False)
@@ -769,7 +769,7 @@ def test_commit_rejects_market_cancelled(client, db_session, monkeypatch):
     """Market.status = 'cancelled' → 400 market_settled (same error as settled)."""
     user = Account.create()
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", 1_000_000_000_000_000_000, raising=False)
     monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
     monkeypatch.setattr(settings, "relayer_escrow_address", None, raising=False)
@@ -812,7 +812,7 @@ def test_commit_rejects_market_onchain_id_none(client, db_session, monkeypatch):
     user = Account.create()
     market = _seed_commit_market(db_session, event_id="mkt-no-onchain")
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", 1_000_000_000_000_000_000, raising=False)
     monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
     monkeypatch.setattr(settings, "relayer_escrow_address", None, raising=False)
@@ -850,7 +850,7 @@ def test_commit_rejects_escrow_check_unavailable(client, db_session, monkeypatch
     user = Account.create()
     market = _seed_commit_market(db_session, event_id="mkt-escrow-unav")
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", 1_000_000_000_000_000_000, raising=False)
     monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
     # Escrow address is configured → check will run
@@ -889,7 +889,7 @@ def test_commit_skips_escrow_when_check_disabled(client, db_session, monkeypatch
     user = Account.create()
     market = _seed_commit_market(db_session, event_id="mkt-escrow-skip")
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", 1_000_000_000_000_000_000, raising=False)
     monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
     monkeypatch.setattr(settings, "relayer_escrow_address", None, raising=False)  # check disabled
@@ -935,7 +935,7 @@ def test_commit_quote_lock_released_on_relayer_failure(client, db_session, monke
     user = Account.create()
     market = _seed_commit_market(db_session, event_id="mkt-lock-fail")
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", 1_000_000_000_000_000_000, raising=False)
     monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
     monkeypatch.setattr(settings, "relayer_escrow_address", None, raising=False)
@@ -987,7 +987,7 @@ def test_commit_relayer_retries_on_503(client, db_session, monkeypatch):
     tx_hash = "0x" + "b" * 64
     market = _seed_commit_market(db_session, event_id="mkt-retry")
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", 1_000_000_000_000_000_000, raising=False)
     monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
     monkeypatch.setattr(settings, "relayer_escrow_address", None, raising=False)
@@ -1054,7 +1054,7 @@ def test_commit_ticket_id_monotonically_increases(client, db_session, monkeypatc
     user = Account.create()
     market = _seed_commit_market(db_session, event_id="mkt-tickets")
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", 1_000_000_000_000_000_000, raising=False)
     monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
     monkeypatch.setattr(settings, "relayer_escrow_address", None, raising=False)
@@ -1107,7 +1107,7 @@ def test_commit_updates_quote_market_address_when_differs(client, db_session, mo
     new_address = "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
     market = _seed_commit_market(db_session, event_id="mkt-addr-update", address=old_address)
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", 1_000_000_000_000_000_000, raising=False)
     monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
     monkeypatch.setattr(settings, "relayer_escrow_address", None, raising=False)
@@ -1149,7 +1149,7 @@ def test_commit_nonce_recorded_for_idempotency(client, db_session, monkeypatch):
     user = Account.create()
     market = _seed_commit_market(db_session, event_id="mkt-nonce")
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", 1_000_000_000_000_000_000, raising=False)
     monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
     monkeypatch.setattr(settings, "relayer_escrow_address", None, raising=False)
@@ -1202,7 +1202,7 @@ def test_commit_auth_digest_uses_market_onchain_id(client, db_session, monkeypat
     user = Account.create()
     market = _seed_commit_market(db_session, event_id="mkt-onchain-id")
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", 1_000_000_000_000_000_000, raising=False)
     monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
     monkeypatch.setattr(settings, "relayer_escrow_address", None, raising=False)
@@ -1254,7 +1254,7 @@ def test_commit_auth_digest_uses_market_onchain_id(client, db_session, monkeypat
             payload["nonce"],
             payload["expiry"],
             ticket_size_wei,
-            2651420,
+            26514,
         ],
     )
     recovered = Account.recover_message(
@@ -1270,7 +1270,7 @@ def test_commit_verifies_wallet_recovers_correct_address(client, db_session, mon
     user_b = Account.create()
     market = _seed_commit_market(db_session, event_id="mkt-wrong-user")
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "ticket_size_wei", 1_000_000_000_000_000_000, raising=False)
     monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
     monkeypatch.setattr(settings, "relayer_escrow_address", None, raising=False)

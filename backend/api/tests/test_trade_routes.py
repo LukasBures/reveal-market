@@ -96,7 +96,7 @@ def test_claim_rejected_when_resolution_pending(client, db_session, monkeypatch)
     signer = Account.create()
     user = Account.create()
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     market = models.Market(
         event_id="claim-pending",
@@ -132,7 +132,7 @@ def test_pricing_quote_allows_missing_address(client, db_session, monkeypatch):
     user = Account.create()
     market = _seed_market(db_session, event_id="auto-mkt", address=None)
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 1, raising=False)
     monkeypatch.setattr(settings, "max_user_stake_per_market_zen", 10, raising=False)
@@ -165,7 +165,7 @@ def test_pricing_quote_does_not_deploy_market_when_enabled(client, db_session, m
     user = Account.create()
     market = _seed_market(db_session, event_id="auto-mkt-enabled", address=None)
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 1, raising=False)
     monkeypatch.setattr(settings, "max_user_stake_per_market_zen", 10, raising=False)
@@ -205,7 +205,7 @@ def test_trade_commit_and_positions_roundtrip(client, db_session, monkeypatch):
     user = Account.create()
     market = _seed_market(db_session, event_id="commit-mkt", address="0x3333333333333333333333333333333333333333")
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 1, raising=False)
     monkeypatch.setattr(settings, "max_user_stake_per_market_zen", 10, raising=False)
@@ -976,7 +976,7 @@ def test_commit_rejects_none_market_onchain_id(client, db_session, monkeypatch):
     user = Account.create()
     market = _seed_market(db_session, event_id="onchain-none", address="0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
     settings = runtime.settings
-    monkeypatch.setattr(settings, "pricing_chain_id", 2651420, raising=False)
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
     monkeypatch.setattr(settings, "pricing_signer_private_key", SecretStr(signer._private_key.hex()), raising=False)
     monkeypatch.setattr(settings, "max_stake_zen", 1, raising=False)
     monkeypatch.setattr(settings, "max_user_stake_per_market_zen", 10, raising=False)

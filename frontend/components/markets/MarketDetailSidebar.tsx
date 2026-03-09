@@ -96,7 +96,7 @@ export function MarketDetailSidebar({ market }: Props) {
   const gamma = toRecord(extraData?.gamma);
   const sources: Array<LooseRecord | null> = [extraData, gamma];
   const explorerBase = (
-    process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL ?? "https://horizen-testnet.explorer.caldera.xyz"
+    process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL ?? "https://horizen.calderaexplorer.xyz"
   ).replace(/\/+$/, "");
   const resolutionTxRaw =
     typeof resolution?.transactionHash === "string" && resolution.transactionHash.trim()

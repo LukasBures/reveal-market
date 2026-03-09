@@ -16,7 +16,7 @@ const baseQuote: PricingQuote = {
   worsen_percent: 0,
   rake_percent: 2,
   total_monetisation: 2,
-  chain_id: 2651420,
+  chain_id: 26514,
   quote_id: "q-abcdef123456",
   expires_at: new Date(Date.now() + 60_000).toISOString(),
   expiry_ts: Math.floor(Date.now() / 1000) + 60,

@@ -188,7 +188,7 @@ def test_model_schema_shape_is_stable(model, expected):
 
 def test_quote_digest_constant():
     digest = build_quote_digest(
-        chain_id=2651420,
+        chain_id=26514,
         market_address="0x1111111111111111111111111111111111111111",
         wallet_address="0x2222222222222222222222222222222222222222",
         outcome_id=1,
@@ -197,4 +197,4 @@ def test_quote_digest_constant():
         expiry_ts=1700000000,
         quote_id_hex="0x" + "ab" * 32,
     ).hex()
-    assert digest == "127c094def20e39c2dc4622be68f84baba236a55f915d49669482d0569508226"
+    assert digest == "20c715bc67f0e4579c1a3e1d3d3e01167cda64846251409588af228efdfee707"
