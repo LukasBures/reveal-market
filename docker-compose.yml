@@ -164,7 +164,7 @@ services:
       <<: *backend-env
       RM_ENVIRONMENT: ${RM_ENVIRONMENT:-local}
       APP_WORKERS: ${APP_WORKERS:-2}
-      UVICORN_WORKERS: 2
+
       PYTHONUNBUFFERED: 1
       HOST: 0.0.0.0
     depends_on:
@@ -211,7 +211,7 @@ services:
       <<: *backend-env
       # Keep worker footprint light to avoid OOM restarts during sync.
       APP_WORKERS: ${APP_WORKERS:-1}
-      UVICORN_WORKERS: 1
+
       PYTHONUNBUFFERED: 1
     depends_on:
       api:
@@ -434,7 +434,7 @@ services:
       STREAMER_API_HOST: 0.0.0.0
       STREAMER_API_PORT: 8100
       APP_WORKERS: ${APP_WORKERS:-2}
-      UVICORN_WORKERS: 2
+
       PYTHONUNBUFFERED: 1
     depends_on:
       redis:
