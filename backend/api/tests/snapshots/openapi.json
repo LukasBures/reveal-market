@@ -4036,6 +4036,24 @@
               "description": "Only return markets closing within this many hours",
               "title": "Closes Within Hours"
             }
+          },
+          {
+            "description": "'list' strips heavy fields for card views; default returns everything",
+            "in": "query",
+            "name": "view",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "'list' strips heavy fields for card views; default returns everything",
+              "title": "View"
+            }
           }
         ],
         "responses": {

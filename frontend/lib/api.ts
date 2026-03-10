@@ -469,6 +469,10 @@ export async function fetchFeaturedEvents(limit = 6, options?: FetchFeaturedMark
       // Offsets do not combine with the backend trending slice; keep the hottest markets only.
       params.delete("offset");
     }
+    // Use slim list view to reduce response size (~3.4 MB → ~200 KB for 30 events).
+    // This keeps responses under Next.js's 2 MB data-cache limit and prevents
+    // frontend OOM crashes during SSR.
+    params.set("view", "list");
     const url = new URL(endpoint, DEFAULT_API_BASE);
     params.forEach((value, key) => url.searchParams.set(key, value));
     logger.debug("fetchFeaturedEvents:request", {

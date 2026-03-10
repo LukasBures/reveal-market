@@ -1304,8 +1304,14 @@ async def attach_group_fields(
                 market.liquidity_usd = aggregate_liquidity
 
 
-async def load_normalized_fields(session: AsyncSession, markets: list[schemas.MarketResponse]) -> None:
-    """Populate outcomes, prices, tags, clob tokens, and gamma metadata onto market models."""
+async def load_normalized_fields(
+    session: AsyncSession, markets: list[schemas.MarketResponse], *, slim: bool = False
+) -> None:
+    """Populate outcomes, prices, tags, clob tokens, and gamma metadata onto market models.
+
+    When *slim* is True, skip tags, clob tokens, and description to produce a
+    smaller footprint suitable for list/card views.
+    """
 
     id_map: dict[int, schemas.MarketResponse] = {}
     for market in markets:
@@ -1347,46 +1353,49 @@ async def load_normalized_fields(session: AsyncSession, markets: list[schemas.Ma
             else None
         )
 
-    tag_rows = (
-        await session.execute(
-            select(models.MarketTag).where(models.MarketTag.market_id.in_(market_ids)).order_by(models.MarketTag.tag)
-        )
-    ).scalars()
-    tag_map: dict[int, list[str]] = {}
-    tag_iter: Iterable[models.MarketTag] = cast(Iterable[models.MarketTag], tag_rows)
-    for tag_row in tag_iter:
-        mid = getattr(tag_row, "market_id", None)
-        try:
-            mid_int = int(mid) if mid is not None else None
-        except (TypeError, ValueError):
-            mid_int = None
-        if mid_int is None or tag_row.tag is None:
-            continue
-        tag_map.setdefault(mid_int, []).append(str(tag_row.tag))
-    for mid, target in id_map.items():
-        target.tags = tag_map.get(mid) or None
+    if not slim:
+        tag_rows = (
+            await session.execute(
+                select(models.MarketTag)
+                .where(models.MarketTag.market_id.in_(market_ids))
+                .order_by(models.MarketTag.tag)
+            )
+        ).scalars()
+        tag_map: dict[int, list[str]] = {}
+        tag_iter: Iterable[models.MarketTag] = cast(Iterable[models.MarketTag], tag_rows)
+        for tag_row in tag_iter:
+            mid = getattr(tag_row, "market_id", None)
+            try:
+                mid_int = int(mid) if mid is not None else None
+            except (TypeError, ValueError):
+                mid_int = None
+            if mid_int is None or tag_row.tag is None:
+                continue
+            tag_map.setdefault(mid_int, []).append(str(tag_row.tag))
+        for mid, target in id_map.items():
+            target.tags = tag_map.get(mid) or None
 
-    token_rows = (
-        await session.execute(
-            select(models.MarketClobToken)
-            .where(models.MarketClobToken.market_id.in_(market_ids))
-            .order_by(models.MarketClobToken.id)
-        )
-    ).scalars()
-    token_map: dict[int, list[str]] = {}
-    token_iter: Iterable[models.MarketClobToken] = cast(Iterable[models.MarketClobToken], token_rows)
-    for token_row in token_iter:
-        mid = getattr(token_row, "market_id", None)
-        try:
-            mid_int = int(mid) if mid is not None else None
-        except (TypeError, ValueError):
-            mid_int = None
-        if mid_int is None or not token_row.token_id:
-            continue
-        token_map.setdefault(mid_int, []).append(str(token_row.token_id))
-    for mid, target in id_map.items():
-        tokens = token_map.get(mid, [])
-        target.clob_token_ids = tokens or None
+        token_rows = (
+            await session.execute(
+                select(models.MarketClobToken)
+                .where(models.MarketClobToken.market_id.in_(market_ids))
+                .order_by(models.MarketClobToken.id)
+            )
+        ).scalars()
+        token_map: dict[int, list[str]] = {}
+        token_iter: Iterable[models.MarketClobToken] = cast(Iterable[models.MarketClobToken], token_rows)
+        for token_row in token_iter:
+            mid = getattr(token_row, "market_id", None)
+            try:
+                mid_int = int(mid) if mid is not None else None
+            except (TypeError, ValueError):
+                mid_int = None
+            if mid_int is None or not token_row.token_id:
+                continue
+            token_map.setdefault(mid_int, []).append(str(token_row.token_id))
+        for mid, target in id_map.items():
+            tokens = token_map.get(mid, [])
+            target.clob_token_ids = tokens or None
 
     meta_rows = (
         await session.execute(
@@ -1408,7 +1417,7 @@ async def load_normalized_fields(session: AsyncSession, markets: list[schemas.Ma
         meta = meta_map.get(mid)
         if not meta:
             continue
-        if meta.description:
+        if not slim and meta.description:
             target.description = meta.description
         if meta.resolution_source:
             target.resolution_source = meta.resolution_source
@@ -1502,6 +1511,40 @@ def augment_market_models(markets: list[schemas.MarketResponse]) -> list[schemas
     for market in markets:
         apply_market_caps(market)
     return markets
+
+
+def strip_events_for_list_view(events: list[schemas.EventResponse]) -> list[schemas.EventResponse]:
+    """Remove heavy fields from event responses for list/card rendering.
+
+    This dramatically reduces response size (e.g. 3.4 MB → ~200 KB for 30
+    crypto events) so that Next.js can cache responses under its 2 MB limit
+    and the frontend SSR process stays within memory budgets.
+    """
+    for event in events:
+        for market in event.markets:
+            market.description = None
+            market.resolution = None
+            market.siblings = None
+            market.caps = None
+            market.batch_roots = None
+            market.batch_counts = None
+            market.image_variants = None
+            market.clob_token_ids = None
+            market.tags = None
+            market.merkle_root = None
+            market.commitments_count = None
+            market.proof_status = None
+            market.proof_request_id = None
+            market.proof_hash = None
+            market.submission_status = None
+            market.settlement_tx_hash = None
+            market.settlement_submitted_at = None
+            market.clob_pair_id = None
+            market.metadata_uri = None
+            market.condition_id = None
+            market.question_id = None
+            market.uma_resolution_status = None
+    return events
 
 
 def compute_market_popularity(market: schemas.MarketResponse) -> float:
@@ -1616,24 +1659,33 @@ def attach_settlement_to_market(
 
 
 async def enrich_market_models(
-    session: AsyncSession, markets: list[schemas.MarketResponse], *, include_siblings: bool = False
+    session: AsyncSession,
+    markets: list[schemas.MarketResponse],
+    *,
+    include_siblings: bool = False,
+    slim: bool = False,
 ) -> list[schemas.MarketResponse]:
-    """Attach normalized fields, group data, caps, and resolutions to markets."""
+    """Attach normalized fields, group data, caps, and resolutions to markets.
 
-    await load_normalized_fields(session, markets)
+    When *slim* is True, skip loading descriptions, resolutions, and settlement
+    records — producing a lighter response suitable for list/card views.
+    """
+
+    await load_normalized_fields(session, markets, slim=slim)
     await attach_group_fields(session, markets, include_siblings=include_siblings)
     augment_market_models(markets)
-    resolution_map = await load_resolution_records(session, markets)
-    settlement_map = await load_settlement_records(session, markets)
-    for market in markets:
-        condition = getattr(market, "condition_id", None)
-        if isinstance(condition, str):
-            resolution = resolution_map.get(condition.lower())
-            if resolution:
-                attach_resolution_to_market(market, resolution)
-        settlement = settlement_map.get(getattr(market, "id", 0))
-        if settlement:
-            attach_settlement_to_market(market, settlement)
+    if not slim:
+        resolution_map = await load_resolution_records(session, markets)
+        settlement_map = await load_settlement_records(session, markets)
+        for market in markets:
+            condition = getattr(market, "condition_id", None)
+            if isinstance(condition, str):
+                resolution = resolution_map.get(condition.lower())
+                if resolution:
+                    attach_resolution_to_market(market, resolution)
+            settlement = settlement_map.get(getattr(market, "id", 0))
+            if settlement:
+                attach_settlement_to_market(market, settlement)
     return markets
 
 

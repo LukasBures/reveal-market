@@ -95,9 +95,15 @@ async def list_markets(
         int | None,
         Query(ge=1, le=720, description="Only return markets closing within this many hours"),
     ] = None,
+    view: Annotated[
+        str | None,
+        Query(description="'list' strips heavy fields for card views; default returns everything"),
+    ] = None,
     session: AsyncSession = Depends(get_session),
 ) -> list[schemas.EventResponse]:
     """List events with optional filters and heavy reliance on Redis caches."""
+
+    slim_mode = (view or "").strip().lower() == "list"
 
     if category:
         resolved = canonical_category_from_slug(category)
@@ -164,7 +170,7 @@ async def list_markets(
             # Trigger background refresh when PER signals near-expiry (stampede protection)
             if per_result is not None and per_result.should_refresh:
                 asyncio.create_task(market_svc.hydrate_markets_cache(source="per_refresh"))
-            hydrated = await market_svc.enrich_market_models(session, hydrated)
+            hydrated = await market_svc.enrich_market_models(session, hydrated, slim=slim_mode)
             update_cache_context(request, cache_key=cache_key, hit=True, source="markets:list")
             MARKETS_CACHE_COUNTER.labels(outcome="hit", status=status or "*", category=category or "*").inc()
             duration = (time.perf_counter() - start) * 1000
@@ -182,6 +188,8 @@ async def list_markets(
             cached_events = market_svc.build_event_responses(cached_models)
             # Page caches (from hydration) are pre-sliced; trim to limit only.
             cached_events = cached_events[:limit]
+            if slim_mode:
+                cached_events = market_svc.strip_events_for_list_view(cached_events)
             log_event(
                 logger,
                 logging.INFO,
@@ -251,7 +259,7 @@ async def list_markets(
             break
         batch_offset += batch_limit
     markets = collected
-    market_models = await market_svc.enrich_market_models(session, markets)
+    market_models = await market_svc.enrich_market_models(session, markets, slim=slim_mode)
     market_models = market_svc.filter_markets_for_visibility(
         market_models, hide_settled=(status or "").lower() == "active"
     )
@@ -363,6 +371,8 @@ async def list_markets(
             trending=bool(trending),
             closes_within_hours=closes_within_hours,
         )
+    if slim_mode:
+        page_events = market_svc.strip_events_for_list_view(page_events)
     return page_events
 
 
