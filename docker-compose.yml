@@ -357,7 +357,7 @@ services:
       TZ: UTC
       NODE_ENV: production
       HOSTNAME: 0.0.0.0
-      NODE_OPTIONS: --max-old-space-size=256
+      NODE_OPTIONS: --max-old-space-size=448
       RUNNING_IN_DOCKER: "true"
     depends_on:
       api:
@@ -377,10 +377,10 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 256M
+          memory: 512M
         reservations:
           cpus: "0.5"
-          memory: 128M
+          memory: 256M
 
   prover:
     build:
