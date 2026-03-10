@@ -7,7 +7,7 @@ from decimal import Decimal
 
 from .fx import FxOracle
 from .local_logging import log_event
-from .metrics import update_exposure_metrics
+from .metrics import remove_exposure_metrics, update_exposure_metrics
 from .risk import RiskEngine, RiskLimits
 from .storage import HedgerRepository
 from .types import CommitEvent, HedgeAction, HedgeInstruction, MarketExposureSnapshot, OutcomeSide, RiskBreach
@@ -274,4 +274,4 @@ class ExposureLedger:
     async def finalize_market(self, market_id: str) -> None:
         async with self._lock:
             self._markets.pop(market_id, None)
-        update_exposure_metrics(market_id, 0.0, 0.0, 0.0)
+        remove_exposure_metrics(market_id)

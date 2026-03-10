@@ -102,10 +102,11 @@
     }
     health_interval 10s
     health_timeout 3s
-    max_fails 2
+    max_fails 3
     fail_duration 10s
     transport http {
       versions 1.1
+      dial_timeout 5s
       keepalive_idle_conns 64
       read_timeout 60s
     }
@@ -121,10 +122,11 @@
     }
     health_interval 10s
     health_timeout 3s
-    max_fails 2
+    max_fails 3
     fail_duration 10s
     transport http {
       versions 1.1
+      dial_timeout 5s
       keepalive_idle_conns 64
       read_timeout 60s
     }

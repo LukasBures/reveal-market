@@ -18,7 +18,7 @@ class StreamerMetrics:
         self.stream_deliveries = Counter(
             "streamer_stream_deliveries_total",
             "Events delivered to clients",
-            ["transport", "market_id", "source"],
+            ["transport", "source"],
             registry=registry,
         )
         self.stream_dropped = Counter(
@@ -106,7 +106,6 @@ class StreamerMetrics:
     def record_delivery(self, transport: str, payload: Any) -> None:
         """Increment delivery counter with parsed labels."""
 
-        market_id = "unknown"
         source = "unknown"
         parsed: dict[str, Any] | None = None
         raw = payload
@@ -123,15 +122,8 @@ class StreamerMetrics:
         elif isinstance(raw, dict):
             parsed = raw
         if parsed:
-            market_id = str(
-                parsed.get("market_id")
-                or parsed.get("market")
-                or parsed.get("id")
-                or parsed.get("conditionId")
-                or "unknown"
-            )
             source = str(parsed.get("source") or parsed.get("type") or parsed.get("event_type") or "unknown")
-        self.stream_deliveries.labels(transport=transport, market_id=market_id, source=source).inc()
+        self.stream_deliveries.labels(transport=transport, source=source).inc()
         self._sample_payload(transport, raw)
 
     def record_drop(self, transport: str, reason: str) -> None:

@@ -170,7 +170,7 @@ class DataStreamer:
             DataStreamer._metric_ticks_shared = Counter(
                 "streamer_ticks_total",
                 "Published ticks",
-                ["source", "market", "outcome", "stale"],
+                ["source", "stale"],
                 registry=REGISTRY,
             )
         self.metric_ticks = DataStreamer._metric_ticks_shared
@@ -793,7 +793,7 @@ class DataStreamer:
             try:
                 if self.metric_ticks:
                     self.metric_ticks.labels(
-                        source=source, market=str(market_id), outcome=str(idx), stale=str(fx.stale)
+                        source=source, stale=str(fx.stale)
                     ).inc()
             except Exception as exc:
                 logger.debug(

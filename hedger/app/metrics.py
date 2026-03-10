@@ -66,6 +66,15 @@ def update_exposure_metrics(market_id: str, yes_usd: float, no_usd: float, cover
         COVERAGE_RATIO_GAUGE.labels(market_id=market_id).set(coverage_ratio)
 
 
+def remove_exposure_metrics(market_id: str) -> None:
+    """Remove per-market gauge labels after finalization to prevent cardinality leak."""
+
+    EXPOSURE_GAUGE.remove(market_id, "yes")
+    EXPOSURE_GAUGE.remove(market_id, "no")
+    NET_EXPOSURE_GAUGE.remove(market_id)
+    COVERAGE_RATIO_GAUGE.remove(market_id)
+
+
 def record_risk_breach(code: str, severity: str) -> None:
     """Increment counters when a risk rule is triggered."""
 
