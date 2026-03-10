@@ -87,7 +87,9 @@ def _should_refresh_resolution(existing, now: datetime) -> bool:
     """Decide whether to refresh a resolution snapshot.
 
     - Always fetch if we have no record or the record is not resolved.
-    - Once resolved (final), we fetch at most once; no periodic refresh is needed.
+    - Re-fetch when resolved but missing winning outcome (Goldsky may have
+      returned ``resolved: true`` before payout data was indexed).
+    - Once resolved with a known winner, no periodic refresh is needed.
     """
     if existing is None:
         return True
@@ -95,7 +97,12 @@ def _should_refresh_resolution(existing, now: datetime) -> bool:
         return True
     if existing.checked_at is None:
         return True
-    # Already resolved and checked once: do not refresh again.
+    # Re-fetch if the subgraph reported resolved but the payout data was empty
+    # at the time of the initial fetch.  This handles the race where Goldsky
+    # marks a condition as resolved before indexing payoutNumerators.
+    if existing.winning_outcome_id is None:
+        return True
+    # Already resolved with a winner and checked: do not refresh again.
     return False
 
 

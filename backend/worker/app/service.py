@@ -6,6 +6,7 @@ import asyncio
 import gc
 import json
 import logging
+import os
 import random
 import secrets
 import time
@@ -289,7 +290,26 @@ async def _enqueue_backfill_proof_jobs(redis_client: Redis | None) -> int:
     summary = SyncSummary()
     for market, settlement in rows:
         if settlement_needs_refresh(settlement):
-            continue
+            # Best-effort: hydrate settlement from chain before giving up.
+            if getattr(market, "market_address", None) and runtime.settings.rpc_url:
+                try:
+                    async with session_scope() as hydrate_session:
+                        hydrated_market = await hydrate_session.get(shared_models.Market, market.id)
+                        if hydrated_market:
+                            refreshed = await _upsert_settlement_from_chain(hydrate_session, hydrated_market)
+                            if refreshed is not None:
+                                settlement = refreshed
+                except Exception as exc:
+                    log_event(
+                        logger,
+                        logging.INFO,
+                        event="worker.proof.backfill_hydrate_failed",
+                        message="failed to hydrate settlement from chain during backfill",
+                        market_id=getattr(market, "event_id", None),
+                        error=str(exc),
+                    )
+            if settlement_needs_refresh(settlement):
+                continue
         if (settlement.commitments_count or 0) <= 0:
             continue
         try:
@@ -380,6 +400,14 @@ async def _recover_settlement_state(redis_client: Redis | None) -> int:
                         shared_models.Settlement.merkle_root.is_(None),
                         shared_models.Settlement.merkle_root
                         == "0x0000000000000000000000000000000000000000000000000000000000000000",
+                        shared_models.Settlement.circuit_hash.is_(None),
+                        shared_models.Settlement.batch_roots.is_(None),
+                        shared_models.Settlement.total_escrow.is_(None),
+                        shared_models.Settlement.total_liability.is_(None),
+                        shared_models.Settlement.rake_bps.is_(None),
+                        shared_models.Settlement.pool_total_yes.is_(None),
+                        shared_models.Settlement.pool_total_no.is_(None),
+                        shared_models.Settlement.commitments_count.is_(None),
                     )
                 )
                 .order_by(shared_models.Market.resolved_at.asc().nulls_last(), shared_models.Market.id.asc())
@@ -2352,6 +2380,31 @@ async def run_worker() -> None:
         poll_interval_seconds=runtime.settings.poll_interval_seconds,
         page_size=runtime.settings.polymarket_page_size,
     )
+
+    # Validate that the settlement signer matches the configured oracle address.
+    # A mismatch means lockBatches will fail for every market (oracle_mismatch).
+    _signer_key = runtime.settings.settlement_signer_private_key
+    if _signer_key is not None:
+        try:
+            from eth_account import Account as _Account
+
+            _signer_addr = _Account.from_key(_signer_key.get_secret_value()).address
+            _oracle_addr = getattr(runtime.settings, "oracle_address", None) or os.environ.get("RM_ORACLE_ADDRESS")
+            if _oracle_addr and _signer_addr.lower() != _oracle_addr.lower():
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    event="worker.startup.oracle_signer_mismatch",
+                    message=(
+                        "RM_SETTLEMENT_SIGNER_PRIVATE_KEY derives a different address than RM_ORACLE_ADDRESS. "
+                        "lockBatches will fail for all markets until this is fixed."
+                    ),
+                    settlement_signer=_signer_addr,
+                    oracle_address=_oracle_addr,
+                )
+        except Exception:
+            logging.debug("oracle/signer validation skipped", exc_info=True)
+
     heartbeat_stop = start_heartbeat_logger(
         logger,
         service_name="reveal_market.worker",

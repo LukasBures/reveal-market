@@ -221,11 +221,13 @@ async def enqueue_proof_jobs(redis_client: Redis | None, summary: SyncSummary) -
         )
         return 0
     for snapshot, payload, condition in summary.proof_jobs:
+        # Use the same identifier priority as maybe_generate_settlement_proof
+        # so that enqueue and generation share the same retry key.
         job_id = str(
-            snapshot.get("market_address")
-            or snapshot.get("id")
+            snapshot.get("id")
             or snapshot.get("market_id")
             or snapshot.get("event_id")
+            or snapshot.get("market_address")
             or condition
             or "",
         )
