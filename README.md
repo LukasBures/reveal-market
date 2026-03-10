@@ -48,7 +48,7 @@ This happens automatically. No manual review. No waiting period. No operator app
 
 ### 6. Claim Your Winnings (Payout)
 
-Winners receive their payout automatically. The relayer submits the claim transaction on your behalf — you don't need to pay gas, sign anything, or even be online. Your winnings land in your escrow balance, ready to withdraw or stake on the next market.
+Winners claim their payout through the dashboard. Click "Prepare to claim" to load your Merkle proof data, then click "Claim" to submit the on-chain transaction. Your winnings are sent directly to your wallet as a ZEN token transfer — no intermediary, no escrow, no withdrawal step.
 
 Losers? Their stake goes to the winners. That's how prediction markets work.
 
@@ -61,7 +61,7 @@ Losers? Their stake goes to the winners. That's how prediction markets work.
 | **Trust** | Trust the operator to pay you | Smart contract guarantees payout |
 | **Transparency** | Opaque payout calculations | ZK proof verifies every calculation on-chain |
 | **Speed** | Can take days to settle | Settles in minutes after resolution |
-| **Cost** | You pay gas to claim | Relayer claims for you, gasless |
+| **Cost** | High L1 gas fees | Low gas on Horizen L2 |
 | **Custody** | Platform holds and controls funds | Funds locked in smart contract, not a company wallet |
 | **Fairness** | "Trust us" | Mathematically proven, publicly verifiable |
 
@@ -79,7 +79,7 @@ The result: a prediction market where the entire payout calculation is provably 
 
 ---
 
-**In one sentence:** You bet, the market closes, a zero-knowledge proof mathematically guarantees every payout is correct, and winners get paid automatically — no trust required.
+**In one sentence:** You bet, the market closes, a zero-knowledge proof mathematically guarantees every payout is correct, and winners claim their payout directly to their wallet — no trust required.
 
 ---
 
@@ -123,7 +123,7 @@ make down       # stop everything
 
 Commitments use **Poseidon hashing** (BN254) with `BATCH_SIZE=256` and `MERKLE_DEPTH=8`. These constants must stay aligned across contracts, prover, backend, and relayer.
 
-Flow: commit on-chain → worker builds batch Merkle root → `lockBatches` → prover generates Groth16 proof → `verifyAndSettleBatched` (or `verifyAndSettle` for single-batch markets) → relayer enqueues claim.
+Flow: commit on-chain → worker builds batch Merkle root → `lockBatches` → prover generates Groth16 proof → `verifyAndSettleBatched` (or `verifyAndSettle` for single-batch markets) → user claims payout via dashboard.
 
 ## Key Environment Variables
 
