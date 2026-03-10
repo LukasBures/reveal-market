@@ -98,7 +98,10 @@ contract ProtocolPool is Ownable2Step, ReentrancyGuard {
     }
 
     /// @notice Registers a new market with its liability cap.
+    ///         Reverts if the market already has an active reservation to prevent
+    ///         desynchronising reservedTotal from the per-market counter.
     function registerMarket(address market, uint256 cap) external onlyFactory {
+        if (reservedLiability[market] > 0) revert ActiveReservations();
         allowedMarket[market] = true;
         liabilityCap[market] = cap;
         consumedLiability[market] = 0;
@@ -204,11 +207,18 @@ contract ProtocolPool is Ownable2Step, ReentrancyGuard {
 
     /// @notice Owner can force-release an orphaned reservation for a market that will never
     ///         call releaseLiabilityReservation (e.g., bricked market, stuck settlement).
+    ///         Also restores capacity budget when capacity tracking is enabled.
     function forceReleaseLiability(address market) external onlyOwner {
         uint256 reserved = reservedLiability[market];
         if (reserved == 0) revert InvalidAmount();
         reservedLiability[market] = 0;
         reservedTotal -= reserved;
+        if (capacityEnabled) {
+            capacity += reserved;
+            if (capacity > capacityLimit) {
+                capacity = capacityLimit;
+            }
+        }
         emit LiabilityReservationReleased(market, reserved);
     }
 
