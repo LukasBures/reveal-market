@@ -67,11 +67,18 @@ def addr(address: str | None) -> str:
     return f"[`{short}`]({_EXPLORER}/address/{address})"
 
 
+def _looks_like_tx(value: str) -> bool:
+    """Return True if *value* looks like a 0x-prefixed 64-hex tx hash."""
+    return len(value) == 66 and value[:2] == "0x" and all(c in "0123456789abcdefABCDEF" for c in value[2:])
+
+
 def tx(tx_hash: str | None) -> str:
     """Clickable block-explorer link for a transaction."""
     if not tx_hash:
         return "\u2014"
-    short = f"{tx_hash[:10]}\u2026{tx_hash[-6:]}" if len(tx_hash) > 16 else tx_hash
+    if not _looks_like_tx(tx_hash):
+        return f"`{tx_hash}`"
+    short = f"{tx_hash[:10]}\u2026{tx_hash[-6:]}"
     return f"[`{short}`]({_EXPLORER}/tx/{tx_hash})"
 
 
@@ -96,7 +103,7 @@ def _side(outcome_id: int | None) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _field(name: str, value: str, inline: bool = True) -> dict[str, Any]:
+def _field(name: str, value: str, inline: bool = False) -> dict[str, Any]:
     return {"name": name, "value": value, "inline": inline}
 
 

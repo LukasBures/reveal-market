@@ -2028,7 +2028,7 @@ async def trade_commit(
         wallet=quote.wallet_address,
         outcome_id=outcome_id,
         stake_zen=f"{stake_zen:.2f}",
-        tx_hash=str(tx_hash) if tx_hash else None,
+        tx_hash=_normalize_tx_hash(tx_hash),
     )
     return schemas.TradeCommitResponse(
         tx_hash=str(tx_hash) if tx_hash else "",
@@ -2504,7 +2504,7 @@ async def trade_claim(
             market_address=market.market_address,
             wallet=payload.wallet_address,
             payout_zen=f"{payout_zen:.2f}",
-            tx_hash=str(tx_hash) if tx_hash else None,
+            tx_hash=_normalize_tx_hash(tx_hash),
         )
         return schemas.TradeClaimResponse(
             tx_hash=str(tx_hash),
