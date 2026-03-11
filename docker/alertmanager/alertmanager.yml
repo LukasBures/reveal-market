@@ -29,6 +29,9 @@ route:
     - matchers:
         - severity="critical"
       receiver: discord
+      # Wait 10m between state changes to dampen flapping services
+      # (e.g. streamer restart cycles) while still alerting promptly.
+      group_interval: 10m
       repeat_interval: 1h
       continue: false
 

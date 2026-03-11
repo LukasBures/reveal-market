@@ -1,4 +1,36 @@
+# Production overrides — sets RM_ENVIRONMENT=production so env_presets
+# resolves prod CORS/hosts/URLs automatically, and overrides frontend
+# build args with production public URLs.
+
 services:
+  api:
+    environment:
+      RM_ENVIRONMENT: production
+
+  worker:
+    environment:
+      RM_ENVIRONMENT: production
+
+  hedger:
+    environment:
+      RM_ENVIRONMENT: production
+
+  streamer:
+    environment:
+      RM_ENVIRONMENT: production
+
+  relayer:
+    environment:
+      RM_ENVIRONMENT: production
+
+  frontend:
+    build:
+      args:
+        NEXT_PUBLIC_API_BASE_URL: https://api.revealmarket.xyz
+        NEXT_PUBLIC_PRICE_STREAMER_URL: https://stream.revealmarket.xyz
+        NEXT_PUBLIC_SITE_URL: https://revealmarket.xyz
+        NEXT_PUBLIC_RM_ENVIRONMENT: production
+
   caddy:
     build:
       context: ./docker/caddy
@@ -21,7 +53,7 @@ services:
       - caddy_config:/config
     environment:
       TZ: UTC
-      CADDY_TLS_PROFILE: ${CADDY_TLS_PROFILE}
+      CADDY_TLS_PROFILE: ${CADDY_TLS_PROFILE:-tls_prod}
       CF_API_TOKEN: ${CF_API_TOKEN:-}
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://127.0.0.1:2019/config/ >/dev/null"]

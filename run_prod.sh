@@ -244,18 +244,8 @@ validate_required_vars() {
     RM_INTERNAL_API_SECRET
     RM_PROVER_SHARED_SECRET
     GRAFANA_ADMIN_PASSWORD
-    # Chain & contract addresses
-    RM_RPC_URL
-    RM_CHAIN_ID
-    RM_FACTORY_ADDRESS
-    RM_PROTOCOL_POOL_ADDRESS
-    RM_RELAYER_ESCROW_ADDRESS
-    RM_MARKET_IMPLEMENTATION_ADDRESS
-    RM_VERIFIER_ADDRESS
-    RM_AUTHORIZATION_SIGNER
-    RM_ORACLE_ADDRESS
-    ZEN_TOKEN_ADDRESS
-    PROVER_CIRCUIT_HASH
+    # Chain config, contract addresses, and PROVER_CIRCUIT_HASH now live in
+    # docker-compose.yml (x-chain-env anchor) — no longer required in env file.
   )
   local missing=()
   for var in "${required_vars[@]}"; do

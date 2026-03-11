@@ -7,6 +7,22 @@ x-backend-env: &backend-env
   TZ: UTC
   RM_ENVIRONMENT: ${RM_ENVIRONMENT:-local}
 
+# Horizen Mainnet chain config, contract addresses, and derived public
+# addresses. Shared by backend services; not secrets (all on-chain / public).
+x-chain-env: &chain-env
+  RM_RPC_URL: https://horizen.calderachain.xyz/http
+  RM_CHAIN_ID: "26514"
+  RM_FACTORY_ADDRESS: "0x3144B525Ffbb99dF298E9B5a589011cF423b54a3"
+  RM_PROTOCOL_POOL_ADDRESS: "0x3C8fC2C4bbe255ED8A8A343239a5EC8c016686B8"
+  RM_RELAYER_ESCROW_ADDRESS: "0x5613c11E960950434444BA0580D9998F8540CfeD"
+  RM_MARKET_IMPLEMENTATION_ADDRESS: "0x8a536445622aD4cdcCDf2b464b88F5bD037F0516"
+  RM_VERIFIER_ADDRESS: "0x568c9395073D8132692Be68e8De0e859b7f05c33"
+  ZEN_TOKEN_ADDRESS: "0x57da2D504bf8b83Ef304759d9f2648522D7a9280"
+  RM_AUTHORIZATION_SIGNER: "0xA2A0b13f53FE25E5ef9B1267D1C064d7A5BD4277"
+  RM_ORACLE_ADDRESS: "0x84908EE89959837e755ffC56b5532171789aA8bc"
+  RM_WALLET_ADDRESS: "0x5f7dCda0c23014c9133990739657A6d1f716d1DE"
+  PROVER_CIRCUIT_HASH: "0x181e1866c82c6c72f18cd61723f1f61cd0a02224250b988af5a3f32863f2b157"
+
 services:
   postgres:
     image: postgres:15-alpine
@@ -161,11 +177,13 @@ services:
     env_file:
       - ${ENV_FILE:-.env.local}
     environment:
-      <<: *backend-env
-      RM_ENVIRONMENT: ${RM_ENVIRONMENT:-local}
+      <<: [*backend-env, *chain-env]
       APP_WORKERS: ${APP_WORKERS:-2}
-
-      PYTHONUNBUFFERED: 1
+      RM_FX_FEED_URL: http://streamer:8100/fx/zen-usd
+      RM_PROVER_BASE_URL: http://prover:8085
+      RM_RELAYER_BASE_URL: http://relayer:8088
+      RM_HEDGER_BASE_URL: http://hedger:8090
+      PYTHONUNBUFFERED: "1"
       HOST: 0.0.0.0
     depends_on:
       postgres:
@@ -208,11 +226,12 @@ services:
     env_file:
       - ${ENV_FILE:-.env.local}
     environment:
-      <<: *backend-env
+      <<: [*backend-env, *chain-env]
       # Keep worker footprint light to avoid OOM restarts during sync.
       APP_WORKERS: ${APP_WORKERS:-1}
-
-      PYTHONUNBUFFERED: 1
+      RM_PROVER_BASE_URL: http://prover:8085
+      RM_RELAYER_BASE_URL: http://relayer:8088
+      PYTHONUNBUFFERED: "1"
     depends_on:
       api:
         condition: service_healthy
@@ -259,6 +278,8 @@ services:
     environment:
       TZ: UTC
       RM_ENVIRONMENT: ${RM_ENVIRONMENT:-local}
+      HEDGER_FX_FEED_URL: http://streamer:8100/fx/zen-usd
+      HEDGER_PROVER_BASE_URL: http://prover:8085
     depends_on:
       api:
         condition: service_healthy
@@ -304,9 +325,11 @@ services:
     env_file:
       - ${ENV_FILE:-.env.local}
     environment:
+      <<: *chain-env
       TZ: UTC
       RM_RELAYER_HOST: ${RM_RELAYER_HOST:-0.0.0.0}
       RM_RELAYER_PORT: ${RM_RELAYER_PORT:-8088}
+      RM_RELAYER_API_BASE_URL: http://api:8000
     logging:
       driver: "json-file"
       options:
@@ -345,8 +368,8 @@ services:
         NEXT_PUBLIC_RPC_URL: ${NEXT_PUBLIC_RPC_URL:-https://horizen.calderachain.xyz/http}
         NEXT_PUBLIC_BLOCK_EXPLORER_URL: ${NEXT_PUBLIC_BLOCK_EXPLORER_URL:-https://horizen.calderaexplorer.xyz}
         NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ${NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID}
-        NEXT_PUBLIC_ZEN_TOKEN_ADDRESS: ${NEXT_PUBLIC_ZEN_TOKEN_ADDRESS}
-        NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS: ${NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS}
+        NEXT_PUBLIC_ZEN_TOKEN_ADDRESS: ${NEXT_PUBLIC_ZEN_TOKEN_ADDRESS:-0x57da2D504bf8b83Ef304759d9f2648522D7a9280}
+        NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS: ${NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS:-0x5613c11E960950434444BA0580D9998F8540CfeD}
         NEXT_DISABLE_MINIFY: ${NEXT_DISABLE_MINIFY:-false}
     container_name: reveal-market-frontend
     restart: unless-stopped
@@ -397,7 +420,8 @@ services:
       TZ: UTC
       PROVER_LISTEN_ADDR: 0.0.0.0:8085
       PROVER_HEARTBEAT_SECONDS: 60
-      PYTHONUNBUFFERED: 1
+      PROVER_CIRCUIT_HASH: "0x181e1866c82c6c72f18cd61723f1f61cd0a02224250b988af5a3f32863f2b157"
+      PYTHONUNBUFFERED: "1"
     labels:
       - "prometheus.scrape=true"
       - "prometheus.port=8085"

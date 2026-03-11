@@ -14,12 +14,12 @@ groups:
     rules:
       - alert: ServiceDown
         expr: up{job!~"postgres|redis"} == 0
-        for: 2m
+        for: 5m
         labels:
           severity: critical
         annotations:
           summary: "Service {{ $labels.job }} is down"
-          description: "{{ $labels.job }} has been unreachable for more than 2 minutes."
+          description: "{{ $labels.job }} has been unreachable for more than 5 minutes."
 
       - alert: HighErrorRate
         expr: |
@@ -53,13 +53,13 @@ groups:
             sum(rate(api_cache_requests_total{outcome="hit"}[15m]))
             /
             sum(rate(api_cache_requests_total[15m]))
-          ) < 0.6
-        for: 15m
+          ) < 0.5
+        for: 30m
         labels:
           severity: warning
         annotations:
-          summary: "API cache hit rate below 60%"
-          description: "Cache hit rate has been {{ $value | humanizePercentage }} for 15 minutes."
+          summary: "API cache hit rate below 50%"
+          description: "Cache hit rate has been {{ $value | humanizePercentage }} for 30 minutes."
 
   - name: worker_health
     interval: 15s
