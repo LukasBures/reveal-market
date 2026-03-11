@@ -36,16 +36,20 @@ variable "GOLANG_IMAGE" {
 }
 
 # Frontend build-time env vars (passed as build args).
+# run_prod.sh exports vars from .env.production into the shell before calling
+# bake, so any env var set there overrides these defaults. Defaults here are
+# for local dev; production values must be in .env.production.
 variable "NEXT_PUBLIC_API_BASE_URL" { default = "http://localhost:8000" }
 variable "NEXT_PUBLIC_PRICE_STREAMER_URL" { default = "http://localhost:8100" }
 variable "NEXT_PUBLIC_SITE_URL" { default = "http://localhost:3000" }
+variable "NEXT_PUBLIC_RM_ENVIRONMENT" { default = "" }
 variable "NEXT_PUBLIC_CHAIN_ID" { default = "26514" }
 variable "NEXT_PUBLIC_CHAIN_NAME" { default = "Horizen Mainnet" }
 variable "NEXT_PUBLIC_RPC_URL" { default = "https://horizen.calderachain.xyz/http" }
 variable "NEXT_PUBLIC_BLOCK_EXPLORER_URL" { default = "https://horizen.calderaexplorer.xyz" }
 variable "NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID" { default = "" }
-variable "NEXT_PUBLIC_ZEN_TOKEN_ADDRESS" { default = "" }
-variable "NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS" { default = "" }
+variable "NEXT_PUBLIC_ZEN_TOKEN_ADDRESS" { default = "0x57da2D504bf8b83Ef304759d9f2648522D7a9280" }
+variable "NEXT_PUBLIC_RELAYER_ESCROW_ADDRESS" { default = "0x5613c11E960950434444BA0580D9998F8540CfeD" }
 variable "NEXT_DISABLE_MINIFY" { default = "false" }
 
 # ---------------------------------------------------------------------------
@@ -149,6 +153,7 @@ target "frontend" {
     NEXT_PUBLIC_API_BASE_URL             = NEXT_PUBLIC_API_BASE_URL
     NEXT_PUBLIC_PRICE_STREAMER_URL       = NEXT_PUBLIC_PRICE_STREAMER_URL
     NEXT_PUBLIC_SITE_URL                 = NEXT_PUBLIC_SITE_URL
+    NEXT_PUBLIC_RM_ENVIRONMENT           = NEXT_PUBLIC_RM_ENVIRONMENT
     NEXT_PUBLIC_CHAIN_ID                 = NEXT_PUBLIC_CHAIN_ID
     NEXT_PUBLIC_CHAIN_NAME               = NEXT_PUBLIC_CHAIN_NAME
     NEXT_PUBLIC_RPC_URL                  = NEXT_PUBLIC_RPC_URL
