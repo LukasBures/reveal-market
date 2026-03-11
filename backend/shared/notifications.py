@@ -19,6 +19,7 @@ logger = logging.getLogger("reveal_market.notifications")
 
 _WEBHOOK_URL: <REDACTED>
 _EXPLORER: str = (os.getenv("RM_BLOCK_EXPLORER_URL") or "https://horizen.calderaexplorer.xyz").rstrip("/")
+_SITE_URL: str = (os.getenv("NEXT_PUBLIC_SITE_URL") or "https://revealmarket.xyz").rstrip("/")
 
 _client: httpx.AsyncClient | None = None
 
@@ -74,6 +75,14 @@ def tx(tx_hash: str | None) -> str:
     return f"[`{short}`]({_EXPLORER}/tx/{tx_hash})"
 
 
+def market_link(title: str | None, event_id: str | None) -> str:
+    """Market title as a clickable link to the frontend event page."""
+    label = title or event_id or "\u2014"
+    if event_id:
+        return f"[{label}]({_SITE_URL}/events/{event_id})"
+    return label
+
+
 def _side(outcome_id: int | None) -> str:
     if outcome_id == 0:
         return "YES"
@@ -94,51 +103,50 @@ def _field(name: str, value: str, inline: bool = True) -> dict[str, Any]:
 def _build_embed(event: Event, **kw: Any) -> dict[str, Any]:
     desc = ""
     fields: list[dict[str, Any]] = []
+    mkt = market_link(kw.get("title"), kw.get("event_id"))
 
     if event == Event.CREATED:
-        desc = f"**{kw.get('title', '\u2014')}**"
+        desc = f"**{mkt}**"
         if kw.get("category"):
             fields.append(_field("Category", kw["category"]))
         if kw.get("oracle"):
             fields.append(_field("Oracle", addr(kw["oracle"])))
-        if kw.get("market_address"):
-            fields.append(_field("Contract", addr(kw["market_address"])))
 
     elif event == Event.COMMITTED:
         side = _side(kw.get("outcome_id"))
         amount = kw.get("stake_zen", "?")
-        desc = f"**{amount} ZEN** on **{side}**\n{kw.get('title', '')}"
+        desc = f"**{amount} ZEN** on **{side}**\n{mkt}"
         if kw.get("wallet"):
             fields.append(_field("Wallet", addr(kw["wallet"])))
         if kw.get("tx_hash"):
             fields.append(_field("Tx", tx(kw["tx_hash"])))
 
     elif event == Event.PROOF_GENERATED:
-        desc = kw.get("title", "\u2014")
+        desc = mkt
         if kw.get("batch_count") is not None:
             fields.append(_field("Batches", str(kw["batch_count"])))
         if kw.get("prover_version"):
             fields.append(_field("Prover", kw["prover_version"]))
-        if kw.get("market_address"):
-            fields.append(_field("Contract", addr(kw["market_address"])))
 
     elif event == Event.SETTLED:
         winner = _side(kw.get("winning_outcome_id"))
-        desc = f"Winner: **{winner}**\n{kw.get('title', '')}"
+        desc = f"Winner: **{winner}**\n{mkt}"
         if kw.get("tx_hash"):
             fields.append(_field("Tx", tx(kw["tx_hash"])))
         if kw.get("block_number") is not None:
             fields.append(_field("Block", str(kw["block_number"])))
-        if kw.get("market_address"):
-            fields.append(_field("Contract", addr(kw["market_address"])))
 
     elif event == Event.CLAIMED:
         payout = kw.get("payout_zen", "?")
-        desc = f"**{payout} ZEN**\n{kw.get('title', '')}"
+        desc = f"**{payout} ZEN**\n{mkt}"
         if kw.get("wallet"):
             fields.append(_field("Wallet", addr(kw["wallet"])))
         if kw.get("tx_hash"):
             fields.append(_field("Tx", tx(kw["tx_hash"])))
+
+    # Every event gets an on-chain contract link when available.
+    if kw.get("market_address"):
+        fields.append(_field("Contract", addr(kw["market_address"])))
 
     return {
         "title": _TITLES.get(event, event.value),

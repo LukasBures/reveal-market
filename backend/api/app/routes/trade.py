@@ -2023,6 +2023,8 @@ async def trade_commit(
     lifecycle.notify(
         lifecycle.Event.COMMITTED,
         title=getattr(market_record, "title", None) or quote.market_id,
+        event_id=getattr(market_record, "event_id", None) or quote.market_id,
+        market_address=getattr(market_record, "market_address", None),
         wallet=quote.wallet_address,
         outcome_id=outcome_id,
         stake_zen=f"{stake_zen:.2f}",
@@ -2498,6 +2500,8 @@ async def trade_claim(
         lifecycle.notify(
             lifecycle.Event.CLAIMED,
             title=market.title,
+            event_id=market.event_id,
+            market_address=market.market_address,
             wallet=payload.wallet_address,
             payout_zen=f"{payout_zen:.2f}",
             tx_hash=str(tx_hash) if tx_hash else None,

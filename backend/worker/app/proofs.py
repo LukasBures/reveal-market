@@ -868,6 +868,7 @@ async def maybe_generate_settlement_proof(
             lifecycle.notify(
                 lifecycle.Event.PROOF_GENERATED,
                 title=market_snapshot.get("title") or market_event_id,
+                event_id=market_event_id,
                 batch_count=len(results),
                 prover_version=results[0][1].prover_version if results else None,
                 market_address=market_address,

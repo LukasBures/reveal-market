@@ -1802,6 +1802,7 @@ async def run_settlement_jobs(summary, redis_client: Redis | None, market_id: st
                 lifecycle.notify(
                     lifecycle.Event.SETTLED,
                     title=getattr(market, "title", None),
+                    event_id=getattr(market, "event_id", None),
                     winning_outcome_id=settlement.winning_outcome_id,
                     tx_hash=tx_hash,
                     block_number=block_number,

@@ -1563,6 +1563,7 @@ async def upsert_market(
     lifecycle.notify(
         lifecycle.Event.CREATED,
         title=market.title,
+        event_id=market.event_id,
         category=market.category,
         oracle=market.oracle,
         market_address=market.market_address,
