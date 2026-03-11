@@ -49,10 +49,10 @@ def _make_market(
     )
 
 
-def _cache_metric(outcome: str, status: str = "*", category: str = "*") -> float:
+def _cache_metric(outcome: str, status: str = "*") -> float:
     sample = REGISTRY.get_sample_value(
         "markets_cache_requests_total",
-        labels={"outcome": outcome, "status": status, "category": category},
+        labels={"outcome": outcome, "status": status},
     )
     return float(sample or 0.0)
 

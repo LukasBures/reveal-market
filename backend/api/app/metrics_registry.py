@@ -39,7 +39,7 @@ CACHE_REQUESTS = Counter(
 MARKETS_CACHE_COUNTER = Counter(
     "markets_cache_requests_total",
     "Cache hits and misses for /markets",
-    ["outcome", "status", "category"],
+    ["outcome", "status"],
 )
 PRICING_COUNTER = Counter(
     "pricing_quote_events_total",

@@ -172,7 +172,7 @@ async def list_markets(
                 asyncio.create_task(market_svc.hydrate_markets_cache(source="per_refresh"))
             hydrated = await market_svc.enrich_market_models(session, hydrated, slim=slim_mode)
             update_cache_context(request, cache_key=cache_key, hit=True, source="markets:list")
-            MARKETS_CACHE_COUNTER.labels(outcome="hit", status=status or "*", category=category or "*").inc()
+            MARKETS_CACHE_COUNTER.labels(outcome="hit", status=status or "*").inc()
             duration = (time.perf_counter() - start) * 1000
             cached_models = market_svc.filter_markets_for_visibility(
                 hydrated, hide_settled=(status or "").lower() == "active"
@@ -209,10 +209,10 @@ async def list_markets(
                 closes_within_hours=closes_within_hours,
             )
             return cached_events
-        MARKETS_CACHE_COUNTER.labels(outcome="miss", status=status or "*", category=category or "*").inc()
+        MARKETS_CACHE_COUNTER.labels(outcome="miss", status=status or "*").inc()
         update_cache_context(request, cache_key=cache_key, hit=False, source="markets:list")
     else:
-        MARKETS_CACHE_COUNTER.labels(outcome="bypass", status=status or "*", category=category or "*").inc()
+        MARKETS_CACHE_COUNTER.labels(outcome="bypass", status=status or "*").inc()
         update_cache_context(request, cache_key=None, hit=False, source="markets:list")
 
     query_limit = limit

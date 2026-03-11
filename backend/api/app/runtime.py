@@ -56,7 +56,15 @@ def _sanitize_settings() -> dict[str, object]:
 
 sanitized_config = _sanitize_settings()
 
-instrumentator = Instrumentator()
+instrumentator = Instrumentator(
+    should_instrument_requests_inprogress=False,  # we track ACTIVE_REQUESTS ourselves
+    excluded_handlers=["/health", "/live", "/healthz", "/metrics"],
+)
+# Add a no-op handler to prevent the default handler (http_request_duration_seconds,
+# http_request_size_bytes, http_response_size_bytes) from being registered.  Those
+# default histograms duplicate our custom REQUEST_LATENCY and add ~300-400 KB to
+# every /metrics scrape without being referenced by any dashboard or alert rule.
+instrumentator.add(lambda info: None)
 # RequestMetrics tracks rolling latency/throughput to publish API heartbeats.
 request_metrics = RequestMetrics(settings.slow_request_threshold_ms)
 
