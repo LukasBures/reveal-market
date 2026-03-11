@@ -792,9 +792,7 @@ class DataStreamer:
             }
             try:
                 if self.metric_ticks:
-                    self.metric_ticks.labels(
-                        source=source, stale=str(fx.stale)
-                    ).inc()
+                    self.metric_ticks.labels(source=source, stale=str(fx.stale)).inc()
             except Exception as exc:
                 logger.debug(
                     "failed to emit metric_ticks",

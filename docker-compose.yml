@@ -229,6 +229,7 @@ services:
       <<: [*backend-env, *chain-env]
       # Keep worker footprint light to avoid OOM restarts during sync.
       APP_WORKERS: ${APP_WORKERS:-1}
+      RM_POLYMARKET_API_BASE: https://gamma-api.polymarket.com
       RM_PROVER_BASE_URL: http://prover:8085
       RM_RELAYER_BASE_URL: http://relayer:8088
       PYTHONUNBUFFERED: "1"
