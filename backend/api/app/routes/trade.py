@@ -19,6 +19,7 @@ from eth_account.messages import encode_defunct, encode_typed_data
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from shared import cache_async as shared_cache
 from shared import models
+from shared import notifications as lifecycle
 from shared.logging import log_event
 from shared.merkle import build_merkle_path, build_merkle_root_and_paths
 from shared.onchain import OnChainConfigurationError, get_async_web3, load_account, to_checksum
@@ -2019,6 +2020,14 @@ async def trade_commit(
     )
     await session.flush()
 
+    lifecycle.notify(
+        lifecycle.Event.COMMITTED,
+        title=getattr(market_record, "title", None) or quote.market_id,
+        wallet=quote.wallet_address,
+        outcome_id=outcome_id,
+        stake_zen=f"{stake_zen:.2f}",
+        tx_hash=str(tx_hash) if tx_hash else None,
+    )
     return schemas.TradeCommitResponse(
         tx_hash=str(tx_hash) if tx_hash else "",
         quote_id=payload.quote_id,
@@ -2485,6 +2494,14 @@ async def trade_claim(
         commitment.claimed_at = datetime.now(tz=UTC)
         session.add(commitment)
         await session.flush()
+        payout_zen = int(commitment.payout_wei) / 10**18
+        lifecycle.notify(
+            lifecycle.Event.CLAIMED,
+            title=market.title,
+            wallet=payload.wallet_address,
+            payout_zen=f"{payout_zen:.2f}",
+            tx_hash=str(tx_hash) if tx_hash else None,
+        )
         return schemas.TradeClaimResponse(
             tx_hash=str(tx_hash),
             market_id=market.event_id,

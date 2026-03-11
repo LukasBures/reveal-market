@@ -11,6 +11,7 @@ from typing import Any, TypeVar
 from redis.asyncio import Redis
 from shared import cache_async as shared_cache
 from shared import models as shared_models
+from shared import notifications as lifecycle
 from shared import repository_async as shared_repository
 from shared.async_utils import resolve_awaitable as _resolve_awaitable
 from shared.cache_keys import proof_receipt_cache_key
@@ -862,6 +863,14 @@ async def maybe_generate_settlement_proof(
                 prover_version=response.prover_version,
                 nonce=getattr(response, "request_id", None),
                 batch_index=payload.get("batchIndex"),
+            )
+        if results:
+            lifecycle.notify(
+                lifecycle.Event.PROOF_GENERATED,
+                title=market_snapshot.get("title") or market_event_id,
+                batch_count=len(results),
+                prover_version=results[0][1].prover_version if results else None,
+                market_address=market_address,
             )
     except Exception as exc:  # pragma: no cover - best effort
         log_event(

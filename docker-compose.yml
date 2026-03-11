@@ -12,6 +12,7 @@ x-backend-env: &backend-env
 x-chain-env: &chain-env
   RM_RPC_URL: https://horizen.calderachain.xyz/http
   RM_CHAIN_ID: "26514"
+  RM_BLOCK_EXPLORER_URL: https://horizen.calderaexplorer.xyz
   RM_FACTORY_ADDRESS: "0x3144B525Ffbb99dF298E9B5a589011cF423b54a3"
   RM_PROTOCOL_POOL_ADDRESS: "0x3C8fC2C4bbe255ED8A8A343239a5EC8c016686B8"
   RM_RELAYER_ESCROW_ADDRESS: "0x5613c11E960950434444BA0580D9998F8540CfeD"

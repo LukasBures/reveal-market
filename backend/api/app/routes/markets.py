@@ -14,6 +14,7 @@ import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.encoders import jsonable_encoder
 from py_clob_client.client import ClobClient
+from shared import notifications as lifecycle
 from shared.cache_async import add_tag, add_tags, get_json, get_json_per, get_schema_tag, set_json
 from shared.cache_keys import (
     clob_prices_history_cache_key,
@@ -1558,6 +1559,13 @@ async def upsert_market(
         event_id=market.event_id,
         category=market.category,
         duration_ms=round(duration, 2),
+    )
+    lifecycle.notify(
+        lifecycle.Event.CREATED,
+        title=market.title,
+        category=market.category,
+        oracle=market.oracle,
+        market_address=market.market_address,
     )
     response = (await market_svc.enrich_market_models(session, [schemas.MarketResponse.model_validate(market)]))[0]
     return response

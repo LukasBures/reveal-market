@@ -15,6 +15,7 @@ from eth_account import Account
 from eth_typing import ChecksumAddress, HexStr
 from redis.asyncio import Redis
 from shared import models as shared_models
+from shared import notifications as lifecycle
 from shared import repository_async as shared_repository
 from shared.async_utils import resolve_awaitable as _resolve_awaitable
 from shared.logging import log_event
@@ -1797,6 +1798,14 @@ async def run_settlement_jobs(summary, redis_client: Redis | None, market_id: st
                     market_id=getattr(market, "event_id", None),
                     tx_hash=tx_hash,
                     block_number=block_number,
+                )
+                lifecycle.notify(
+                    lifecycle.Event.SETTLED,
+                    title=getattr(market, "title", None),
+                    winning_outcome_id=settlement.winning_outcome_id,
+                    tx_hash=tx_hash,
+                    block_number=block_number,
+                    market_address=market.market_address,
                 )
                 if relayer_enabled:
                     enqueued = await _enqueue_relayer_claims(redis_client, market, settlement)
