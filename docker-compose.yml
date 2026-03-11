@@ -487,9 +487,13 @@ services:
   # ---- Monitoring ----
 
   # Item 10: alertmanager-discord sidecar — converts Alertmanager's JSON
-  # webhook payload to Discord embed format and POSTs to DISCORD_WEBHOOK.
+  # webhook payload to Discord embeds with severity-based colors:
+  #   critical → red, warning → yellow, watchdog → green, other → grey.
   alertmanager-discord:
-    image: benjojo/alertmanager-discord:latest
+    build:
+      context: ./docker/alertmanager-discord
+      dockerfile: Dockerfile
+    image: reveal-market-alertmanager-discord
     container_name: reveal-market-alertmanager-discord
     restart: unless-stopped
     environment:

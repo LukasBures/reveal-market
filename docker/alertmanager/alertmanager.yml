@@ -5,9 +5,9 @@
 # JSON payload to Discord's embed format and forwards to DISCORD_ALERT_WEBHOOK_URL.
 #
 # Severity routing:
-#   watchdog → silenced        (Discord can't detect absence; heartbeat is noise-only)
-#   critical → discord         (repeat every 1h)
-#   warning  → discord         (grouped, repeat every 4h)
+#   watchdog → discord-watchdog  (heartbeat, repeat every 24h, no resolved message)
+#   critical → discord           (repeat every 1h)
+#   warning  → discord           (grouped, repeat every 4h)
 #
 # Inhibition: a firing critical suppresses matching warnings to reduce noise.
 
@@ -23,7 +23,8 @@ route:
   routes:
     - matchers:
         - severity="watchdog"
-      receiver: devnull
+      receiver: discord-watchdog
+      repeat_interval: 24h
       continue: false
     - matchers:
         - severity="critical"
@@ -40,10 +41,10 @@ receivers:
       - url: "http://alertmanager-discord:9094"
         send_resolved: true
 
-  - name: devnull
-    # Watchdog is silenced — Discord has no absence detection, so the
-    # heartbeat adds noise without value. Verify the pipeline is alive
-    # via Alertmanager UI (http://alertmanager:9093) or Grafana instead.
+  - name: discord-watchdog
+    webhook_configs:
+      - url: "http://alertmanager-discord:9094"
+        send_resolved: false
 
 inhibit_rules:
   - source_matchers:
