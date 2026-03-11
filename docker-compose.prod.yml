@@ -14,8 +14,8 @@ services:
   hedger:
     environment:
       RM_ENVIRONMENT: production
-      HEDGER_ALLOWED_HOSTS: hedger,localhost,127.0.0.1
-      HEDGER_CORS_ALLOW_ORIGINS: http://api:8000
+      HEDGER_ALLOWED_HOSTS: '["hedger","localhost","127.0.0.1"]'
+      HEDGER_CORS_ALLOW_ORIGINS: '["http://api:8000"]'
 
   streamer:
     environment:
