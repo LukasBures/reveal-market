@@ -2118,7 +2118,7 @@ async def list_positions(
             claim_deadline = claim_deadlines.get(market.market_address)
             if claim_deadline and now_ts > int(claim_deadline):
                 claimable = False
-        if market.resolved_at:
+        if market.resolved_at or getattr(market, "status", None) == models.MarketStatusEnum.SETTLED.value:
             position_status = "settled"
         if (
             getattr(market, "resolution_status", None)
