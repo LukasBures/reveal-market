@@ -16,7 +16,7 @@ class CommitRequest(BaseModel):
     market_id: str | None = Field(default=None, description="Optional market id for ingest")
     outcome_id: int | None = Field(default=None, description="Outcome id for ingest")
     salt: str | None = Field(default=None, description="Commitment salt for ingest")
-    ticket_id: int | None = Field(default=None, description="Leaf index/ticket id for ingest")
+    ticket_id: int = Field(..., description="Leaf index/ticket id for ingest")
     merkle_path: list[str] | None = Field(default=None, description="Merkle proof for ingest (optional)")
 
 

@@ -152,6 +152,7 @@ def test_commit_route_with_queue(tmp_path):
         expiry=int(time.time()) + 600,
         chain_id=1,
         ticket_value_wei=1,
+        ticket_id=0,
         signature="0x" + "1" * 130,
     ).model_dump()
     resp = client.post("/commit", json=payload)
@@ -184,6 +185,21 @@ def test_claim_route_with_queue(tmp_path):
     assert body["status"] == "queued"
     assert "jobId" in body
     assert service.claims == []
+
+
+def test_commit_route_requires_ticket_id(client):
+    payload = {
+        "user": "0x0000000000000000000000000000000000000001",
+        "market": "0x0000000000000000000000000000000000000002",
+        "commitment": "0x" + "0" * 64,
+        "nonce": 1,
+        "expiry": int(time.time()) + 600,
+        "chain_id": 1,
+        "ticket_value_wei": 1,
+        "signature": "0x" + "1" * 130,
+    }
+    resp = client.post("/commit", json=payload)
+    assert resp.status_code == 422
 
 
 def test_admin_deadletter_endpoints(tmp_path):
@@ -219,6 +235,7 @@ def test_commit_route(client):
         expiry=int(time.time()) + 600,
         chain_id=1,
         ticket_value_wei=1,
+        ticket_id=0,
         signature="0x" + "1" * 130,
     ).model_dump()
     resp = client.post("/commit", json=payload)
@@ -303,6 +320,7 @@ def test_commit_route_triggers_ingest():
         expiry=int(time.time()) + 600,
         chain_id=1,
         ticket_value_wei=1,
+        ticket_id=0,
         signature="0x" + "1" * 130,
     ).model_dump()
 
@@ -372,6 +390,7 @@ def test_commit_route_returns_502_when_ingest_fails():
         expiry=int(time.time()) + 600,
         chain_id=1,
         ticket_value_wei=1,
+        ticket_id=0,
         signature="0x" + "1" * 130,
     ).model_dump()
     resp = client.post("/commit", json=payload)
@@ -392,11 +411,34 @@ def test_commit_route_rejects_missing_ingest_fields_when_api_enabled():
         expiry=int(time.time()) + 600,
         chain_id=1,
         ticket_value_wei=1,
+        ticket_id=0,
         signature="0x" + "1" * 130,
     ).model_dump()
     resp = client.post("/commit", json=payload)
     assert resp.status_code == 400
     assert resp.json()["detail"] == "invalid_payload"
+
+
+def test_commit_route_returns_expiry_error_when_queue_rejects_expired_commit(tmp_path):
+    service = FakeService()
+    queue = TxQueue(str(tmp_path / "queue.db"), service, start_worker=False)
+    app = create_app(service, 1, "http://localhost", tx_queue=queue)
+    client = TestClient(app)
+
+    payload = {
+        "user": "0x0000000000000000000000000000000000000001",
+        "market": "0x0000000000000000000000000000000000000002",
+        "commitment": "0x" + "0" * 64,
+        "nonce": 1,
+        "expiry": int(time.time()) - 60,
+        "chain_id": 1,
+        "ticket_value_wei": 1,
+        "ticket_id": 0,
+        "signature": "0x" + "1" * 130,
+    }
+    resp = client.post("/commit", json=payload)
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "commit_already_expired"
 
 
 def test_claim_route_returns_502_when_ingest_fails():
@@ -451,6 +493,7 @@ def test_commit_requires_auth_when_enabled():
         expiry=int(time.time()) + 600,
         chain_id=1,
         ticket_value_wei=1,
+        ticket_id=0,
         signature="0x" + "1" * 130,
     ).model_dump()
 
@@ -526,6 +569,7 @@ def test_commit_invalid_address(client):
         expiry=int(time.time()) + 600,
         chain_id=1,
         ticket_value_wei=1,
+        ticket_id=0,
         signature="0x" + "1" * 130,
     ).model_dump()
     resp = client.post("/commit", json=payload)
@@ -597,6 +641,7 @@ def test_queue_rejects_oversized_payload(tmp_path):
         expiry=int(time.time()) + 600,
         chain_id=1,
         ticket_value_wei=1,
+        ticket_id=0,
         signature="0x" + "1" * 130,
         event_id="evt-" + ("x" * 256),
     ).model_dump()
@@ -633,6 +678,7 @@ def test_rate_limit_blocks_commit_requests():
         expiry=int(time.time()) + 600,
         chain_id=1,
         ticket_value_wei=1,
+        ticket_id=0,
         signature="0x" + "1" * 130,
     ).model_dump()
     headers = {"Authorization": "Bearer secret"}

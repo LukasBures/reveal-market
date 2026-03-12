@@ -224,6 +224,21 @@ def test_queue_init_preserves_running_jobs(tmp_path):
     assert row["status"] == "running"
 
 
+def test_get_last_stored_nonce_reads_succeeded_jobs(tmp_path):
+    db_path = tmp_path / "queue.db"
+    svc = DummyService()
+    queue = TxQueue(str(db_path), svc, start_worker=False)
+
+    job_id = queue._enqueue_sync("commit", {"foo": "bar"})  # noqa: SLF001
+    with queue._connect() as conn:  # noqa: SLF001
+        conn.execute(
+            "UPDATE jobs SET status = 'succeeded', nonce = 7 WHERE id = ?",
+            (job_id,),
+        )
+
+    assert queue._get_last_stored_nonce() == 7  # noqa: SLF001
+
+
 def test_queue_reclaims_stale_running_jobs(tmp_path):
     db_path = tmp_path / "queue.db"
     svc = DummyService()

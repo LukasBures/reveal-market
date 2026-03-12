@@ -460,6 +460,8 @@ def test_commit_returns_job_id_when_relayer_queues(client, db_session, monkeypat
     body = resp.json()
     assert body["tx_hash"] == "my-job-123"
     assert body["relayer_job_id"] == "my-job-123"
+    assert body["status"] == "queued"
+    assert db_session.query(models.Commitment).count() == 0
 
 
 def test_commit_enqueues_when_relayer_fails_and_queue_enabled(client, db_session, monkeypatch):
@@ -506,9 +508,11 @@ def test_commit_enqueues_when_relayer_fails_and_queue_enabled(client, db_session
     )
     assert resp.status_code == 200
     body = resp.json()
+    assert body["status"] == "queued"
     assert body["relayer_status"] == "queued"
     assert len(enqueued_jobs) == 1
     assert enqueued_jobs[0]["kind"] == "commit"
+    assert db_session.query(models.Commitment).count() == 0
 
 
 def test_commit_raises_502_when_relayer_fails_and_queue_disabled(client, db_session, monkeypatch):

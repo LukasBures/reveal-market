@@ -1169,6 +1169,11 @@ async def run_lock_batches_jobs(summary, redis_client: Redis | None) -> int:
                             headers["Authorization"] = f"Bearer {runtime.settings.relayer_bearer_token}"
                         if runtime.settings.relayer_internal_secret:
                             headers["X-Internal-Secret"] = runtime.settings.relayer_internal_secret.get_secret_value()
+                        relayer_sig = None
+                        if runtime.settings.relayer_private_key:
+                            relayer_sig = _normalize_bytes32(
+                                await _compute_relayer_lock_sig(web3, market.market_address, batch_roots, batch_counts)
+                            )
                         ticket_payloads = []
                         for commitment in commitments:
                             if not commitment.user_address or not commitment.salt:
@@ -1192,6 +1197,8 @@ async def run_lock_batches_jobs(summary, redis_client: Redis | None) -> int:
                             "market_id": market.event_id,
                             "tickets": ticket_payloads,
                         }
+                        if relayer_sig:
+                            payload["relayer_sig"] = relayer_sig
                         result = await _call_relayer_lock_batches(
                             relayer_base_url=str(runtime.settings.relayer_base_url),
                             payload=payload,
@@ -1497,31 +1504,6 @@ async def _enqueue_relayer_claims(
             market_id=getattr(market, "event_id", None),
         )
     return enqueued
-
-
-async def _mark_winning_commitments_claimed(
-    session: AsyncSession, market: shared_models.Market, settlement: shared_models.Settlement
-) -> None:
-    """Optimistically set claimed_at on winning commitments after relayer claims are enqueued."""
-    if settlement.winning_outcome_id is None:
-        return
-    try:
-        commitments = await shared_repository.list_commitments_by_market(session, market.id)
-        now_dt = datetime.now(UTC)
-        for c in commitments:
-            if c.outcome_id == settlement.winning_outcome_id and c.claimed_at is None:
-                c.claimed_at = now_dt
-                session.add(c)
-        await session.commit()
-    except Exception as exc:  # pragma: no cover - defensive
-        log_event(
-            logger,
-            logging.WARNING,
-            event="worker.relayer.claimed_at_update_failed",
-            message="failed to mark winning commitments as claimed",
-            market_id=getattr(market, "event_id", None),
-            error=str(exc),
-        )
 
 
 async def _update_settlement_stale_gauge() -> None:
@@ -1902,8 +1884,6 @@ async def run_settlement_jobs(summary, redis_client: Redis | None, market_id: st
                 if relayer_enabled:
                     enqueued = await _enqueue_relayer_claims(redis_client, market, settlement)
                     submitted += enqueued
-                    if enqueued:
-                        await _mark_winning_commitments_claimed(session, market, settlement)
             finally:
                 await _release_settlement_submission_lock(
                     redis_client,

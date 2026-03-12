@@ -23,6 +23,7 @@ import type { ClaimBundle, PositionRecord } from "@/lib/api-types";
 import { defaultChain } from "@/lib/wagmi";
 import { RELAYER_ESCROW_ADDRESS, ZEN_TOKEN_ADDRESS } from "@/lib/tokens";
 import { formatDateTime, normalizeTxHash, roundDown } from "@/lib/formatters";
+import { logger } from "@/lib/logging";
 import {
   computePoseidonLeaf,
   parseBigInt,
@@ -72,6 +73,7 @@ const STAT_TOOLTIPS = {
 type PositionLifecycleKey =
   | typeof POSITION_LIFECYCLE_STAGES[number]["key"]
   | "cancelled";
+type ClaimMessageTone = "info" | "success" | "error";
 
 const normalizePositionStatus = (
   status: string | null | undefined
@@ -328,6 +330,8 @@ export function DashboardClient() {
     () => new Set()
   );
   const [claimMessage, setClaimMessage] = useState<string | null>(null);
+  const [claimMessageTone, setClaimMessageTone] =
+    useState<ClaimMessageTone>("info");
   const [claimTxHash, setClaimTxHash] = useState<string | null>(null);
   const [claimBundles, setClaimBundles] = useState<ClaimBundle[]>([]);
   const [bundleError, setBundleError] = useState<string | null>(null);
@@ -434,6 +438,15 @@ export function DashboardClient() {
     const cleaned = message.replace(/^Details:\s*/i, "").trim();
     return cleaned || "Action cancelled";
   }, []);
+  const updateClaimMessage = useCallback(
+    (message: string | null, tone: ClaimMessageTone = "info") => {
+      setClaimMessage(message);
+      if (message) {
+        setClaimMessageTone(tone);
+      }
+    },
+    []
+  );
   const txHref = useCallback(
     (hash?: string | null) => {
       if (!hash || !explorerBase) return null;
@@ -453,9 +466,17 @@ export function DashboardClient() {
         setPositions(res.positions || []);
         setEscrowBalance(res.escrowBalance ?? null);
         if (res.error) {
+          logger.clientWarn("dashboard.positions.load_failed", {
+            wallet,
+            error: res.error,
+          });
           setError(res.error);
         }
       } catch (err) {
+        logger.clientError("dashboard.positions.load_error", {
+          wallet,
+          error: err instanceof Error ? err.message : String(err),
+        });
         setError(
           err instanceof Error ? err.message : "Failed to load positions"
         );
@@ -589,7 +610,7 @@ export function DashboardClient() {
       setClaimBundles([]);
       setBundleSignature(null);
       setPreparingBundles(new Set());
-      setClaimMessage(null);
+      updateClaimMessage(null);
       setClaimTxHash(null);
       setEscrowStatus(null);
       setClaimingTickets(new Set());
@@ -598,7 +619,7 @@ export function DashboardClient() {
     startTransition(() => {
       void load(address);
     });
-  }, [address, load]);
+  }, [address, load, updateClaimMessage]);
 
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
@@ -620,6 +641,8 @@ export function DashboardClient() {
   const handlePrepareBundle = async (marketId: string, ticketId?: number | null) => {
     if (!address) return;
     const key = `${marketId}:${ticketId ?? "na"}`;
+    setBundleError(null);
+    updateClaimMessage(null);
     setPreparingBundles((prev) => {
       const next = new Set(prev);
       next.add(key);
@@ -628,21 +651,67 @@ export function DashboardClient() {
     try {
       const signature = await ensureBundleSignature();
       if (!signature) return;
-      const res = await fetchClaimBundles(address, signature);
-      if (res.status === "pending") {
-        setClaimMessage("Your proof is being generated. Please check back in a few minutes.");
+      const res = await fetchClaimBundles(address, signature, { marketId });
+      const pendingForMarket = Array.isArray(res.pendingMarkets)
+        ? res.pendingMarkets.includes(marketId)
+        : false;
+      if (res.status === "pending" || res.status === "queued" || pendingForMarket) {
+        logger.clientWarn("dashboard.claim.bundle_pending", {
+          wallet: address,
+          marketId,
+          ticketId,
+          status: res.status,
+          pendingMarkets: res.pendingMarkets,
+        });
+        updateClaimMessage(
+          "Proof for this market is still being prepared. Please check back in a few minutes.",
+          "info"
+        );
         return;
       }
       if (res.error) {
+        logger.clientWarn("dashboard.claim.bundle_failed", {
+          wallet: address,
+          marketId,
+          ticketId,
+          error: res.error,
+          status: res.status,
+        });
         setBundleError(sanitizeUserActionError(res.error));
         return;
       }
       if (Array.isArray(res.bundles)) {
-        setClaimBundles(res.bundles);
-        setClaimMessage(null);
+        const scopedBundles = res.bundles.filter(
+          (bundle) =>
+            bundle.marketId === marketId &&
+            (ticketId === undefined ||
+              ticketId === null ||
+              String(bundle.ticketId) === String(ticketId))
+        );
+        if (!scopedBundles.length) {
+          logger.clientWarn("dashboard.claim.bundle_missing", {
+            wallet: address,
+            marketId,
+            ticketId,
+            status: res.status,
+          });
+          setBundleError("Claim data is not ready yet for this position. Please try again shortly.");
+          return;
+        }
+        setClaimBundles((prev) => {
+          const retained = prev.filter((bundle) => bundle.marketId !== marketId);
+          return [...retained, ...res.bundles];
+        });
+        updateClaimMessage(null);
       }
     } catch (err) {
       const message = sanitizeUserActionError(err) || "Failed to load claim bundles";
+      logger.clientError("dashboard.claim.bundle_error", {
+        wallet: address,
+        marketId,
+        ticketId,
+        error: message,
+      });
       setBundleError(message);
     } finally {
       setPreparingBundles((prev) => {
@@ -659,15 +728,15 @@ export function DashboardClient() {
     setClaimTxHash(null);
     let bundle = bundleLookup.get(key);
     if (!bundle) {
-      setClaimMessage("Payment data not loaded for this market.");
+      updateClaimMessage("Payment data not loaded for this market.", "error");
       return;
     }
     if (!bundle.marketAddress) {
-      setClaimMessage("Market address missing for claim.");
+      updateClaimMessage("Market address missing for claim.", "error");
       return;
     }
     if (!bundle.salt) {
-      setClaimMessage("Claim data missing salt.");
+      updateClaimMessage("Claim data missing salt.", "error");
       return;
     }
     let ticketIdValue: bigint;
@@ -691,7 +760,7 @@ export function DashboardClient() {
       );
       const storedLeaf = parseBigInt(bundle.leaf);
       if (leafValue !== storedLeaf) {
-        setClaimMessage("Bundle integrity check failed (leaf mismatch).");
+        updateClaimMessage("Bundle integrity check failed (leaf mismatch).", "error");
         return;
       }
       let computed = leafValue;
@@ -708,15 +777,16 @@ export function DashboardClient() {
       if (providedRoot) {
         const rootValue = parseBigInt(providedRoot);
         if (computed !== rootValue) {
-          setClaimMessage("Bundle integrity check failed (root mismatch).");
+          updateClaimMessage("Bundle integrity check failed (root mismatch).", "error");
           return;
         }
       }
     } catch (err) {
-      setClaimMessage(
+      updateClaimMessage(
         err instanceof Error
           ? `Bundle validation failed: ${err.message}`
-          : "Bundle validation failed"
+          : "Bundle validation failed",
+        "error"
       );
       return;
     }
@@ -725,7 +795,7 @@ export function DashboardClient() {
       next.add(key);
       return next;
     });
-    setClaimMessage(null);
+    updateClaimMessage(null);
     try {
       let gasLimit = MIN_CLAIM_GAS;
       if (publicClient) {
@@ -751,7 +821,7 @@ export function DashboardClient() {
           gasLimit = MIN_CLAIM_GAS;
         }
       }
-      setClaimMessage("Claiming...");
+      updateClaimMessage("Submitting claim...", "info");
       const txHash = await claimTicket({
         marketAddress: bundle.marketAddress as Address,
         user: bundle.user as Address,
@@ -763,26 +833,33 @@ export function DashboardClient() {
         merkleProof: (bundle.merkleProof ?? []) as Hex[],
         gasLimit,
       });
-      setClaimMessage("Claim sent");
+      setClaimTxHash(txHash as string);
+      updateClaimMessage("Claim submitted. Waiting for confirmation...", "info");
+      if (!publicClient) {
+        logger.clientWarn("dashboard.claim.receipt_unavailable", {
+          wallet: address,
+          marketId,
+          ticketId,
+          txHash,
+        });
+        return;
+      }
+      await waitForReceipt(txHash as Hex, "Claim");
       setClaimBundles((prev) =>
         prev.filter((b) => `${b.marketId}:${b.ticketId}` !== key)
       );
-      setClaimTxHash(txHash as string);
-      setPositions((prev) =>
-        prev.map((position) =>
-          `${position.market_id}:${position.ticket_id ?? "na"}` === key
-            ? {
-                ...position,
-                status: "claimed",
-                claimable: false,
-                tx_hash: txHash as string,
-              }
-            : position
-        )
-      );
-      await refetchTokenBalance();
+      await refetchTokenBalance?.();
+      await load(address);
+      updateClaimMessage("Claim confirmed on-chain.", "success");
     } catch (err) {
-      setClaimMessage(err instanceof Error ? err.message : "Claim failed");
+      const message = sanitizeUserActionError(err) || "Claim failed";
+      logger.clientError("dashboard.claim.failed", {
+        wallet: address,
+        marketId,
+        ticketId,
+        error: message,
+      });
+      updateClaimMessage(message, "error");
     } finally {
       setClaimingTickets((prev) => {
         const next = new Set(prev);
@@ -1587,7 +1664,16 @@ export function DashboardClient() {
             }
           )}
           {claimMessage && (
-            <p className="text-sm text-emerald-200">
+            <p
+              className={clsx(
+                "text-sm",
+                claimMessageTone === "success"
+                  ? "text-emerald-200"
+                  : claimMessageTone === "error"
+                  ? "text-rose-200"
+                  : "text-amber-200"
+              )}
+            >
               {claimMessage}
               {claimTxHash ? (
                 <>

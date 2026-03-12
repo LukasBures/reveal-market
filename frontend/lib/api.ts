@@ -680,7 +680,7 @@ type ProofReceiptFilters = {
 export async function fetchTradeStatus(
   txHash?: string | null,
   jobId?: string | null,
-): Promise<{ status: string; txHash?: string; blockNumber?: number | null }> {
+): Promise<{ status: string; txHash?: string; blockNumber?: number | null; error?: string }> {
   if (!txHash && !jobId) {
     return { status: "unknown" };
   }
@@ -694,16 +694,30 @@ export async function fetchTradeStatus(
       DEFAULT_FETCH_TIMEOUT_MS,
     );
     if (!response.ok) {
-      return { status: "unknown" };
+      const detail = await response.text().catch(() => "");
+      logger.warn("fetchTradeStatus:failed", {
+        status: response.status,
+        endpoint: url.toString(),
+        detail,
+      });
+      return {
+        status: "unknown",
+        error: detail || `trade_status_http_${response.status}`,
+      };
     }
     const payload = await response.json();
     return {
       status: payload?.status ?? "unknown",
       txHash: payload?.tx_hash ?? txHash ?? undefined,
       blockNumber: payload?.block_number ?? null,
+      error: typeof payload?.error === "string" ? payload.error : undefined,
     };
-  } catch {
-    return { status: "unknown" };
+  } catch (error) {
+    logOfflineAwareError("fetchTradeStatus", error, { endpoint: url.toString() });
+    return {
+      status: "unknown",
+      error: error instanceof Error ? error.message : String(error ?? "unknown"),
+    };
   }
 }
 
@@ -747,6 +761,7 @@ export async function fetchPositions(
 export async function fetchClaimBundles(
   wallet: string,
   signature: string,
+  options?: { marketId?: string },
 ): Promise<{
   bundles: ClaimBundle[];
   status?: string;
@@ -758,6 +773,9 @@ export async function fetchClaimBundles(
   }
   const url = new URL(`${DEFAULT_API_BASE}/claim/bundles`);
   url.searchParams.set("wallet", wallet);
+  if (options?.marketId) {
+    url.searchParams.set("market_id", options.marketId);
+  }
   try {
     const response = await fetchWithTimeout(
       url.toString(),
@@ -775,13 +793,26 @@ export async function fetchClaimBundles(
     }
     const payload = await response.json();
     const bundles = Array.isArray(payload?.bundles) ? (payload.bundles as ClaimBundle[]) : [];
+    const payloadError = typeof payload?.error === "string" ? payload.error : undefined;
+    if (payloadError) {
+      const loggerExt = logger as Record<string, unknown>;
+      const clientWarn =
+        typeof loggerExt.clientWarn === "function" ? (loggerExt.clientWarn as typeof logger.warn) : logger.warn;
+      clientWarn("fetchClaimBundles:payload_error", {
+        endpoint: url.toString(),
+        wallet,
+        marketId: options?.marketId,
+        error: payloadError,
+        status: payload?.status,
+      });
+    }
     return {
       bundles,
       status: payload?.status,
       pendingMarkets: Array.isArray(payload?.pendingMarkets)
         ? (payload.pendingMarkets as string[])
         : undefined,
-      error: payload?.error,
+      error: payloadError,
     };
   } catch (error) {
     logOfflineAwareError("fetchClaimBundles", error);

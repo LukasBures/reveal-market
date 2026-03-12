@@ -224,6 +224,9 @@ def create_app(
                     status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                     detail="payload_too_large",
                 ) from err
+            if str(err) == "commit_already_expired":
+                logger.warning("commit_invalid_payload", error=str(err))
+                raise HTTPException(status_code=400, detail="commit_already_expired") from err
             logger.warning("commit_invalid_address", error=str(err))
             raise HTTPException(status_code=400, detail="invalid_address") from err
         except (Web3Exception, RuntimeError, OverflowError) as err:

@@ -15,7 +15,7 @@ from app import settlement as settlement_module
 from eth_account import Account
 from pydantic import SecretStr
 from shared import models as shared_models
-from shared.models import Base, Market, Settlement
+from shared.models import Base, Commitment, Market, Settlement
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -487,6 +487,19 @@ async def test_settlement_jobs_enqueues_relayer_claims_after_confirmation(monkey
         )
         session.add(market)
         await session.flush()
+        session.add(
+            Commitment(
+                market_id=market.id,
+                user_address="0x" + "B" * 40,
+                outcome_id=0,
+                amount_wei=10,
+                payout_wei=10,
+                salt="0x" + "1" * 64,
+                ticket_hash="0x" + "2" * 64,
+                leaf="0x" + "2" * 64,
+                leaf_index=0,
+            )
+        )
         settlement = Settlement(
             market_id=market.id,
             proof_status="generated",
@@ -519,6 +532,8 @@ async def test_settlement_jobs_enqueues_relayer_claims_after_confirmation(monkey
         s = (await session.execute(select(Settlement).where(Settlement.market_id == market_id))).scalar_one()
         assert s.submission_status == shared_models.SettlementSubmissionStatus.CONFIRMED.value
         assert s.settlement_block_number == 42
+        commitment = (await session.execute(select(Commitment).where(Commitment.market_id == market_id))).scalar_one()
+        assert commitment.claimed_at is None
 
 
 async def test_settlement_jobs_sets_processing_status_before_submission(monkeypatch):

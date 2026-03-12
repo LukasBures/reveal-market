@@ -221,8 +221,6 @@ async def _sync_claimed_commitments(
         return
     markets_to_check: dict[str, list[models.Commitment]] = {}
     for commitment, market, settlement in rows:
-        if commitment.claimed_at is not None:
-            continue
         if commitment.leaf_index is None or not market.market_address:
             continue
         if settlement is None or settlement.winning_outcome_id is None:
@@ -244,8 +242,15 @@ async def _sync_claimed_commitments(
         for commitment in commitments:
             if commitment.leaf_index is None:
                 continue
-            if claimed_map.get(int(commitment.leaf_index)):
+            ticket_id = int(commitment.leaf_index)
+            if ticket_id not in claimed_map:
+                continue
+            ticket_claimed = bool(claimed_map[ticket_id])
+            if ticket_claimed:
                 commitment.claimed_at = now
+                session.add(commitment)
+            elif commitment.claimed_at is not None:
+                commitment.claimed_at = None
                 session.add(commitment)
     await session.flush()
 
@@ -254,9 +259,8 @@ async def _fetch_claim_deadlines(market_addresses: list[str]) -> dict[str, int]:
     if not settings.rpc_url or not market_addresses:
         return {}
     web3 = get_async_web3(str(settings.rpc_url))
-    tasks = []
-    addresses: list[str] = []
-    for address in market_addresses:
+
+    async def _fetch_effective_deadline(address: str) -> tuple[str, int] | None:
         try:
             contract = web3.eth.contract(address=to_checksum(address), abi=REVEAL_MARKET_ABI)
         except Exception as exc:
@@ -268,20 +272,39 @@ async def _fetch_claim_deadlines(market_addresses: list[str]) -> dict[str, int]:
                 market_address=address,
                 error=str(exc),
             )
-            continue
-        addresses.append(address)
-        tasks.append(contract.functions.claimDeadline().call())
+            return None
+        try:
+            raw_deadline, claims_paused, pause_total_duration, pause_started_at = await asyncio.gather(
+                contract.functions.claimDeadline().call(),
+                contract.functions.claimsPaused().call(),
+                contract.functions.claimPauseTotalDuration().call(),
+                contract.functions.claimPauseStartedAt().call(),
+            )
+        except Exception:
+            return None
+        try:
+            deadline = int(raw_deadline or 0)
+            if deadline == 0:
+                return address, 0
+            effective_deadline = deadline + int(pause_total_duration or 0)
+            if bool(claims_paused) and int(pause_started_at or 0) > 0:
+                effective_deadline += max(0, int(time.time()) - int(pause_started_at))
+        except (TypeError, ValueError):
+            return None
+        return address, effective_deadline
+
+    tasks = []
+    for address in market_addresses:
+        tasks.append(_fetch_effective_deadline(address))
     if not tasks:
         return {}
     results = await asyncio.gather(*tasks, return_exceptions=True)
     deadlines: dict[str, int] = {}
-    for address, result in zip(addresses, results, strict=False):
-        if isinstance(result, BaseException):
+    for result in results:
+        if isinstance(result, BaseException) or result is None:
             continue
-        try:
-            deadlines[address] = int(result)
-        except (TypeError, ValueError):
-            continue
+        address, effective_deadline = result
+        deadlines[address] = effective_deadline
     return deadlines
 
 
@@ -890,7 +913,6 @@ async def _next_ticket_id_onchain(market_address: str, market_db_id: int, sessio
             )
         if onchain_next != db_count and settings.relayer_queue_enabled:
             direction = "onchain_ahead" if onchain_next > db_count else "db_ahead"
-            resolved = max(onchain_next, db_count)
             log_event(
                 logger,
                 logging.WARNING,
@@ -899,10 +921,10 @@ async def _next_ticket_id_onchain(market_address: str, market_db_id: int, sessio
                 onchain=onchain_next,
                 db=db_count,
                 direction=direction,
-                resolved_next=resolved,
+                resolved_next=onchain_next,
                 market_address=market_address,
             )
-        return onchain_next if onchain_next == db_count else max(onchain_next, db_count)
+        return onchain_next
     except HTTPException:
         raise
     except Exception as exc:
@@ -939,7 +961,6 @@ async def _next_ticket_id_onchain(market_address: str, market_db_id: int, sessio
             ) from None
         if onchain_count != db_count and settings.relayer_queue_enabled:
             direction = "onchain_ahead" if onchain_count > db_count else "db_ahead"
-            resolved = max(onchain_count, db_count)
             log_event(
                 logger,
                 logging.WARNING,
@@ -948,10 +969,10 @@ async def _next_ticket_id_onchain(market_address: str, market_db_id: int, sessio
                 onchain=onchain_count,
                 db=db_count,
                 direction=direction,
-                resolved_next=resolved,
+                resolved_next=onchain_count,
                 market_address=market_address,
             )
-        return onchain_count if onchain_count == db_count else max(onchain_count, db_count)
+        return onchain_count
 
 
 async def _reserve_ticket_id(market_address: str, tentative_next: int) -> int:
@@ -1996,45 +2017,47 @@ async def trade_commit(
     relayer_job = relayer_job or _extract_job_id(relayer_result)
     if relayer_job is not None:
         relayer_job = str(relayer_job)
-    # When the relayer only returns a job id, stash it so /trade/status can later swap in the real tx hash.
-    if tx_hash is None and relayer_job is not None:
-        tx_hash = relayer_job
     tx_hash = _normalize_tx_hash(tx_hash) or tx_hash
-
-    # Persist commitment snapshot.
-    await repository_async.record_commitments(
-        session,
-        market_db_id,
-        [
-            {
-                "ticketHash": commitment,
-                "leaf": commitment,
-                "user": quote.wallet_address,
-                "outcomeId": quote.outcome_id,
-                "amount": net_amount_wei,
-                "payout": payout_wei,
-                "salt": salt_hex,
-                "merkleIndex": ticket_id,
-                "merklePath": [],
-                "txHash": tx_hash,
-            }
-        ],
-        tx_hash=str(tx_hash) if tx_hash else None,
+    response_tx_hash = str(tx_hash) if tx_hash else (str(relayer_job) if relayer_job else "")
+    queued_commit = (relayer_job is not None and not _is_hex_tx(response_tx_hash)) or (
+        relayer_status is not None and relayer_status.lower() == "queued" and not _is_hex_tx(response_tx_hash)
     )
-    await session.flush()
 
-    lifecycle.notify(
-        lifecycle.Event.COMMITTED,
-        title=getattr(market_record, "title", None) or quote.market_id,
-        event_id=getattr(market_record, "event_id", None) or quote.market_id,
-        market_address=getattr(market_record, "market_address", None),
-        wallet=quote.wallet_address,
-        outcome_id=outcome_id,
-        stake_zen=f"{stake_zen:.2f}",
-        tx_hash=_normalize_tx_hash(tx_hash),
-    )
+    if tx_hash and _is_hex_tx(str(tx_hash)):
+        await repository_async.record_commitments(
+            session,
+            market_db_id,
+            [
+                {
+                    "ticketHash": commitment,
+                    "leaf": commitment,
+                    "user": quote.wallet_address,
+                    "outcomeId": quote.outcome_id,
+                    "amount": net_amount_wei,
+                    "payout": payout_wei,
+                    "salt": salt_hex,
+                    "merkleIndex": ticket_id,
+                    "merklePath": [],
+                    "txHash": tx_hash,
+                }
+            ],
+            tx_hash=str(tx_hash),
+        )
+        await session.flush()
+
+    if tx_hash and _is_hex_tx(str(tx_hash)):
+        lifecycle.notify(
+            lifecycle.Event.COMMITTED,
+            title=getattr(market_record, "title", None) or quote.market_id,
+            event_id=getattr(market_record, "event_id", None) or quote.market_id,
+            market_address=getattr(market_record, "market_address", None),
+            wallet=quote.wallet_address,
+            outcome_id=outcome_id,
+            stake_zen=f"{stake_zen:.2f}",
+            tx_hash=_normalize_tx_hash(tx_hash),
+        )
     return schemas.TradeCommitResponse(
-        tx_hash=str(tx_hash) if tx_hash else "",
+        tx_hash=response_tx_hash,
         quote_id=payload.quote_id,
         market_id=quote.market_id or "",
         outcome_id=outcome_id,
@@ -2043,7 +2066,7 @@ async def trade_commit(
         potential_payout_zen=potential,
         protocol_topup_zen=protocol_topup,
         rake_zen=rake_zen_value,
-        status="committed",
+        status="queued" if queued_commit else "committed",
         ticket_id=ticket_id,
         salt=salt_hex,
         escrow_balance_wei=int(escrow_balance) if escrow_balance is not None else None,
@@ -2439,9 +2462,10 @@ async def trade_claim(
             session.add(commitment)
             await session.flush()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="ticket_already_claimed")
-    if commitment.claimed_at is not None:
+    if commitment.claimed_at is not None or commitment.claim_tx_hash is not None:
         # On-chain says not claimed — clear stale claimed_at from a failed relayer job
         commitment.claimed_at = None
+        commitment.claim_tx_hash = None
         session.add(commitment)
         await session.flush()
     merkle_proof = [row.sibling_hash for row in path_rows] if path_rows else []
@@ -2455,11 +2479,6 @@ async def trade_claim(
     if not settings.relayer_base_url:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="relayer_unconfigured")
     claim_lock_key = await _claim_rate_and_lock(market.event_id, payload.wallet_address, ticket_id)
-    if claim_lock_key is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="claim_lock_unavailable",
-        )
     relayer_payload = {
         "user": payload.wallet_address,
         "market": market.market_address,
@@ -2482,6 +2501,7 @@ async def trade_claim(
         "event_id": market.event_id,
     }
     relayer_job = None
+    relayer_status = None
     try:
         try:
             claim_url = _relayer_url("claim")
@@ -2489,34 +2509,49 @@ async def trade_claim(
         except HTTPException as exc:
             if settings.relayer_queue_enabled:
                 relayer_job = await _enqueue_relayer_job("claim", claim_url, relayer_payload)
+                relayer_status = "queued"
                 result = {}
             else:
                 raise exc
         except Exception as exc:  # pragma: no cover - network errors
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
-        tx_hash = _extract_tx_hash(result) or _extract_job_id(result) or relayer_job or ""
-        commitment.claimed_at = datetime.now(tz=UTC)
+        tx_hash = _extract_tx_hash(result)
+        relayer_status = relayer_status or result.get("status") or result.get("state")
+        if relayer_status is not None:
+            relayer_status = str(relayer_status)
+        relayer_job = relayer_job or _extract_job_id(result)
+        if relayer_job is not None:
+            relayer_job = str(relayer_job)
+        response_tx_hash = str(tx_hash) if tx_hash else (str(relayer_job) if relayer_job else "")
+        response_tx_hash = _normalize_tx_hash(response_tx_hash) or response_tx_hash
+        queued_claim = (relayer_job is not None and not _is_hex_tx(response_tx_hash)) or (
+            relayer_status is not None and relayer_status.lower() == "queued" and not _is_hex_tx(response_tx_hash)
+        )
+        commitment.claim_tx_hash = response_tx_hash or None
+        if response_tx_hash and _is_hex_tx(response_tx_hash) and not queued_claim:
+            commitment.claimed_at = datetime.now(tz=UTC)
         session.add(commitment)
         await session.flush()
         payout_zen = int(commitment.payout_wei) / 10**18
-        lifecycle.notify(
-            lifecycle.Event.CLAIMED,
-            title=market.title,
-            event_id=market.event_id,
-            market_address=market.market_address,
-            wallet=payload.wallet_address,
-            payout_zen=f"{payout_zen:.2f}",
-            tx_hash=_normalize_tx_hash(tx_hash),
-        )
+        if response_tx_hash and _is_hex_tx(response_tx_hash) and not queued_claim:
+            lifecycle.notify(
+                lifecycle.Event.CLAIMED,
+                title=market.title,
+                event_id=market.event_id,
+                market_address=market.market_address,
+                wallet=payload.wallet_address,
+                payout_zen=f"{payout_zen:.2f}",
+                tx_hash=_normalize_tx_hash(response_tx_hash),
+            )
         return schemas.TradeClaimResponse(
-            tx_hash=str(tx_hash),
+            tx_hash=response_tx_hash,
             market_id=market.event_id,
             ticket_id=ticket_id,
             outcome_id=winning_outcome,
             amount_wei=int(commitment.amount_wei),
             payout_wei=int(commitment.payout_wei),
-            status="claimed",
+            status="queued" if queued_claim else "claimed",
         )
     finally:
         await _release_claim_lock(claim_lock_key)

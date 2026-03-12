@@ -49,6 +49,61 @@ vi.mock("@/lib/api", () => ({
 }));
 
 describe("DashboardClient", () => {
+  const basePosition = {
+    market_id: "m-1",
+    market_title: "Yes/No",
+    outcome_id: 0,
+    stake_wei: "100000000000000000",
+    stake_zen: 0.1,
+    status: "settled",
+    ticket_id: 0,
+    claimable: true,
+    created_at: "2024-01-01T00:00:00Z",
+    merkle_root: "0x" + "ab".repeat(32),
+    closes_at: "2024-01-02T00:00:00Z",
+    market_summary: {
+      title: "Yes/No",
+      outcomes: ["Yes", "No"],
+    },
+  };
+  const claimBundle = (() => {
+    const salt = "0x" + "00".repeat(32);
+    const user = "0x9999999999999999999999999999999999999999";
+    const payout = 110000000000000000n;
+    const leafValue = computePoseidonLeaf(
+      0n,
+      0n,
+      100000000000000000n,
+      payout,
+      parseBigInt(user),
+      parseBigInt(salt),
+    );
+    const leaf = bigIntToHex32(leafValue);
+    const merkleProof = Array.from({ length: 8 }, () => bigIntToHex32(0n));
+    let computed = leafValue;
+    let idx = 0n;
+    for (const sibling of merkleProof) {
+      const siblingValue = parseBigInt(sibling);
+      computed =
+        idx % 2n === 1n ? poseidonHashPair(siblingValue, computed) : poseidonHashPair(computed, siblingValue);
+      idx >>= 1n;
+    }
+    const commitmentsRoot = bigIntToHex32(computed);
+    return {
+      marketId: "m-1",
+      marketAddress: "0x1111111111111111111111111111111111111111",
+      commitmentsRoot,
+      ticketId: "0",
+      outcomeId: "0",
+      amountWei: "100000000000000000",
+      payoutWei: payout.toString(),
+      salt,
+      merkleProof,
+      leaf,
+      user,
+    };
+  })();
+
   beforeEach(() => {
     hoisted.useConnection.mockReset();
     hoisted.useChainId.mockReset();
@@ -83,6 +138,7 @@ describe("DashboardClient", () => {
     });
     hoisted.useChainId.mockReturnValue(26514);
     const writeContract = vi.fn().mockResolvedValue("0xclaim");
+    const waitForTransactionReceipt = vi.fn().mockResolvedValue({ status: "success" });
     hoisted.useWriteContract.mockReturnValue({
       mutateAsync: writeContract,
       isPending: false,
@@ -90,70 +146,21 @@ describe("DashboardClient", () => {
     });
     hoisted.useReadContract.mockReturnValue({ data: 0n });
     hoisted.usePublicClient.mockReturnValue({
-      waitForTransactionReceipt: vi.fn(),
+      waitForTransactionReceipt,
       estimateContractGas: vi.fn().mockResolvedValue(5_000_000n),
     });
     hoisted.useSignMessage.mockReturnValue({ mutateAsync: vi.fn().mockResolvedValue("0xsig") });
-    hoisted.fetchPositions.mockResolvedValue({
-      positions: [
-        {
-          market_id: "m-1",
-          market_title: "Yes/No",
-          outcome_id: 0,
-          stake_wei: "100000000000000000",
-          stake_zen: 0.1,
-          status: "settled",
-          ticket_id: 0,
-          claimable: true,
-          created_at: "2024-01-01T00:00:00Z",
-          merkle_root: "0x" + "ab".repeat(32),
-          closes_at: "2024-01-02T00:00:00Z",
-          market_summary: {
-            title: "Yes/No",
-            outcomes: ["Yes", "No"],
-          },
-        },
-      ],
-      escrowBalance: "100000000000000000",
-    });
-    const salt = "0x" + "00".repeat(32);
-    const user = "0x9999999999999999999999999999999999999999";
-    const payout = 110000000000000000n;
-    const leafValue = computePoseidonLeaf(
-      0n,
-      0n,
-      100000000000000000n,
-      payout,
-      parseBigInt(user),
-      parseBigInt(salt),
-    );
-    const leaf = bigIntToHex32(leafValue);
-    const merkleProof = Array.from({ length: 8 }, () => bigIntToHex32(0n));
-    let computed = leafValue;
-    let idx = 0n;
-    for (const sibling of merkleProof) {
-      const siblingValue = parseBigInt(sibling);
-      computed =
-        idx % 2n === 1n ? poseidonHashPair(siblingValue, computed) : poseidonHashPair(computed, siblingValue);
-      idx >>= 1n;
-    }
-    const commitmentsRoot = bigIntToHex32(computed);
+    hoisted.fetchPositions
+      .mockResolvedValueOnce({
+        positions: [basePosition],
+        escrowBalance: "100000000000000000",
+      })
+      .mockResolvedValueOnce({
+        positions: [{ ...basePosition, status: "claimed", claimable: false, tx_hash: "0xclaim" }],
+        escrowBalance: "100000000000000000",
+      });
     hoisted.fetchClaimBundles.mockResolvedValue({
-      bundles: [
-        {
-          marketId: "m-1",
-          marketAddress: "0x1111111111111111111111111111111111111111",
-          commitmentsRoot,
-          ticketId: "0",
-          outcomeId: "0",
-          amountWei: "100000000000000000",
-          payoutWei: payout.toString(),
-          salt,
-          merkleProof,
-          leaf,
-          user,
-        },
-      ],
+      bundles: [claimBundle],
       status: "ready",
     });
 
@@ -173,7 +180,11 @@ describe("DashboardClient", () => {
     fireEvent.click(getPaymentButton!);
 
     await waitFor(() =>
-      expect(hoisted.fetchClaimBundles).toHaveBeenCalledTimes(1),
+      expect(hoisted.fetchClaimBundles).toHaveBeenCalledWith(
+        "0x9999999999999999999999999999999999999999",
+        "0xsig",
+        { marketId: "m-1" },
+      ),
     );
 
     const claimButton = screen
@@ -181,8 +192,48 @@ describe("DashboardClient", () => {
       .find((btn) => btn.textContent?.trim().toLowerCase() === "claim");
     expect(claimButton).toBeTruthy();
     fireEvent.click(claimButton!);
+
     await waitFor(() => expect(writeContract).toHaveBeenCalledTimes(1));
-    expect(hoisted.fetchPositions).toHaveBeenCalledTimes(1);
-    expect(hoisted.fetchClaimBundles).toHaveBeenCalledTimes(1);
+    await waitFor(() =>
+      expect(waitForTransactionReceipt).toHaveBeenCalledWith({ hash: "0xclaim" }),
+    );
+    await waitFor(() => expect(hoisted.fetchPositions).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.getByText(/claim confirmed on-chain/i)).toBeInTheDocument(),
+    );
+  });
+
+  it("shows a scoped pending-proof message when claim bundles are queued", async () => {
+    hoisted.useConnection.mockReturnValue({
+      address: "0x9999999999999999999999999999999999999999",
+      isConnected: true,
+    });
+    hoisted.useChainId.mockReturnValue(26514);
+    hoisted.usePublicClient.mockReturnValue({
+      waitForTransactionReceipt: vi.fn(),
+      estimateContractGas: vi.fn().mockResolvedValue(5_000_000n),
+    });
+    hoisted.fetchPositions.mockResolvedValue({
+      positions: [basePosition],
+      escrowBalance: "100000000000000000",
+    });
+    hoisted.fetchClaimBundles.mockResolvedValue({
+      bundles: [],
+      status: "queued",
+      pendingMarkets: ["m-1"],
+    });
+
+    render(<DashboardClient />);
+
+    await waitFor(() => expect(screen.getByText(/yes\/no/i)).toBeInTheDocument());
+    const prepareButton = screen
+      .getAllByRole("button")
+      .find((btn) => btn.textContent?.trim().toLowerCase() === "prepare to claim");
+    expect(prepareButton).toBeTruthy();
+    fireEvent.click(prepareButton!);
+
+    await waitFor(() =>
+      expect(screen.getByText(/proof for this market is still being prepared/i)).toBeInTheDocument(),
+    );
   });
 });

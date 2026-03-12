@@ -39,6 +39,22 @@ db_retry = retry(
 )
 
 
+def _is_hex_tx_hash(value: str | None) -> bool:
+    if value is None:
+        return False
+    return value.startswith("0x") and len(value) == 66
+
+
+def _countable_commitment_predicate() -> ColumnElement[bool]:
+    return or_(
+        models.Commitment.tx_hash.is_(None),
+        and_(
+            models.Commitment.tx_hash.like("0x%"),
+            func.length(models.Commitment.tx_hash) == 66,
+        ),
+    )
+
+
 @db_retry
 async def get_market_by_event_id(session: AsyncSession, event_id: str) -> models.Market | None:
     """Return a market by its unique event identifier."""
@@ -308,21 +324,24 @@ async def record_commitments(
         dialect_name = bind.sync_engine.dialect.name
     else:
         dialect_name = ""
-    existing_hashes = {
-        row[0]
-        for row in (
-            await session.execute(select(models.Commitment.ticket_hash).where(models.Commitment.market_id == market_id))
+    existing_rows = {
+        commitment.ticket_hash: commitment
+        for commitment in (
+            await session.scalars(select(models.Commitment).where(models.Commitment.market_id == market_id))
         ).all()
     }
 
     # Phase 1: Parse all tickets up front, deduplicating against existing hashes.
     commitment_rows: list[dict[str, Any]] = []
     ticket_siblings: dict[str, list] = {}
+    updated_commitments: list[models.Commitment] = []
+    pending_hashes: set[str] = set()
     for ticket in tickets:
         ticket_hash = str(ticket.get("ticketHash") or ticket.get("ticket_hash") or "").lower()
-        if not ticket_hash or ticket_hash in existing_hashes:
+        if not ticket_hash:
             continue
-        existing_hashes.add(ticket_hash)
+        if ticket_hash in pending_hashes:
+            continue
         raw_index = ticket.get("merkleIndex")
         if raw_index is None:
             raw_index = ticket.get("leaf_index")
@@ -332,6 +351,24 @@ async def record_commitments(
                 leaf_index = int(raw_index)
             except (TypeError, ValueError):
                 leaf_index = None
+        normalized_tx_hash = str(ticket.get("txHash") or ticket.get("tx_hash") or tx_hash or "") or None
+        existing = existing_rows.get(ticket_hash)
+        if existing is not None:
+            pending_hashes.add(ticket_hash)
+            if _is_hex_tx_hash(normalized_tx_hash) and not _is_hex_tx_hash(existing.tx_hash):
+                existing.user_address = str(ticket.get("user") or ticket.get("user_address") or "").lower()
+                existing.outcome_id = int(ticket.get("outcomeId") or ticket.get("outcome_id") or 0)
+                existing.amount_wei = int(ticket.get("amount") or ticket.get("amount_wei") or 0)
+                existing.payout_wei = int(ticket.get("payout") or ticket.get("payout_wei") or 0)
+                existing.salt = str(ticket.get("salt") or "0x0")
+                existing.leaf = str(ticket.get("leaf") or "")
+                existing.leaf_index = leaf_index
+                existing.tx_hash = normalized_tx_hash
+                session.add(existing)
+                ticket_siblings[ticket_hash] = ticket.get("merklePath") or ticket.get("merkle_path") or []
+                updated_commitments.append(existing)
+            continue
+        pending_hashes.add(ticket_hash)
         commitment_rows.append(
             {
                 "market_id": market_id,
@@ -343,12 +380,12 @@ async def record_commitments(
                 "ticket_hash": ticket_hash,
                 "leaf": str(ticket.get("leaf") or ""),
                 "leaf_index": leaf_index,
-                "tx_hash": str(ticket.get("txHash") or ticket.get("tx_hash") or tx_hash or "") or None,
+                "tx_hash": normalized_tx_hash,
             }
         )
         ticket_siblings[ticket_hash] = ticket.get("merklePath") or ticket.get("merkle_path") or []
 
-    if not commitment_rows:
+    if not commitment_rows and not updated_commitments:
         return 0
 
     # Phase 2: Batch INSERT commitments (single round-trip on PostgreSQL).
@@ -385,9 +422,6 @@ async def record_commitments(
             if row:
                 inserted.append(row)  # type: ignore[arg-type]
 
-    if not inserted:
-        return 0
-
     # Phase 3: Batch INSERT all merkle path rows (single round-trip).
     merkle_rows: list[dict[str, Any]] = []
     for commitment_id, t_hash in inserted:
@@ -402,7 +436,12 @@ async def record_commitments(
     if merkle_rows:
         await session.execute(insert(models.CommitmentMerklePath), merkle_rows)
 
-    return len(inserted)
+    for commitment in updated_commitments:
+        await replace_merkle_path(
+            session, commitment.id, [str(sibling) for sibling in ticket_siblings[commitment.ticket_hash]]
+        )
+
+    return len(inserted) + len(updated_commitments)
 
 
 async def replace_merkle_path(session: AsyncSession, commitment_id: int, siblings: list[str]) -> None:
@@ -420,7 +459,10 @@ async def count_commitments(session: AsyncSession, market_db_id: int) -> int:
     """Return the number of commitments persisted for a market."""
 
     result = await session.execute(
-        select(func.count()).select_from(models.Commitment).where(models.Commitment.market_id == market_db_id)
+        select(func.count())
+        .select_from(models.Commitment)
+        .where(models.Commitment.market_id == market_db_id)
+        .where(_countable_commitment_predicate())
     )
     return int(result.scalar_one() or 0)
 
@@ -501,6 +543,7 @@ async def list_commitments_by_market(
     stmt = (
         select(models.Commitment)
         .where(models.Commitment.market_id == market_id)
+        .where(_countable_commitment_predicate())
         .order_by(models.Commitment.leaf_index.asc().nulls_last(), models.Commitment.id.asc())
         .limit(limit)
     )

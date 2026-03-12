@@ -190,6 +190,8 @@ export function TradeSubmission({
   const normalizedTxHash = normalizeTxHash(txHash);
   const txHashIsHex = Boolean(normalizedTxHash);
   const txHashDisplay = normalizedTxHash ?? (typeof txHash === "string" ? txHash.trim() : "");
+  const relayerQueued = relayerJobId && !txHashIsHex && txStatus === "queued";
+  const relayerFailed = relayerJobId && !txHashIsHex && (txStatus === "failed" || txStatus === "deadletter");
 
   const stepStates = getStepStates(txLoading, relayerJobId, txHashIsHex, txConfirmed, txStatus);
 
@@ -242,9 +244,23 @@ export function TradeSubmission({
         </p>
       )}
       {stepStates && !txConfirmed && <ProgressSteps steps={stepStates} />}
-      {relayerJobId && !txHashIsHex && (
+      {relayerQueued && (
+        <p className="text-[11px] uppercase tracking-[0.2em] text-slate-300">
+          Commit queued with relayer. Waiting for transaction hash.
+        </p>
+      )}
+      {relayerJobId && !txHashIsHex && !relayerQueued && !relayerFailed && (
         <p className="text-[11px] uppercase tracking-[0.2em] text-slate-300">
           Waiting for the relayer to return the commit transaction hash.
+        </p>
+      )}
+      {(relayerJobId || txHashIsHex) && !txConfirmed && (
+        <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+          Track this commit in the{" "}
+          <Link className="underline decoration-dotted" href="/dashboard">
+            dashboard
+          </Link>{" "}
+          while it finalizes.
         </p>
       )}
       {txHashIsHex && txHash && (

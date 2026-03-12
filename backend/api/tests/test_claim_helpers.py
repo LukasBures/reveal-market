@@ -12,6 +12,7 @@ import pytest
 from app.routes.trade import (
     _claim_rate_and_lock,
     _enqueue_relayer_job,
+    _fetch_claim_deadlines,
     _fetch_claimed_tickets,
     _release_claim_lock,
     _sync_claimed_commitments,
@@ -191,8 +192,8 @@ async def test_sync_claimed_commitments_marks_claimed_at_for_onchain_claimed(mon
         assert c.claimed_at is not None
 
 
-async def test_sync_claimed_commitments_skips_already_claimed(monkeypatch):
-    """Commitment already has claimed_at → not re-processed."""
+async def test_sync_claimed_commitments_rechecks_already_claimed_rows(monkeypatch):
+    """claimed_at rows are re-checked so stale optimistic claims can be repaired."""
     from datetime import UTC, datetime
 
     monkeypatch.setattr(runtime.settings, "rpc_url", "http://rpc", raising=False)
@@ -223,7 +224,7 @@ async def test_sync_claimed_commitments_skips_already_claimed(monkeypatch):
 
     async def _mock_fetch(_market_address, _ticket_ids):
         fetch_calls.append(_ticket_ids)
-        return {}
+        return {0: True}
 
     monkeypatch.setattr("app.routes.trade._fetch_claimed_tickets", _mock_fetch)
 
@@ -235,8 +236,56 @@ async def test_sync_claimed_commitments_skips_already_claimed(monkeypatch):
         commitment = (await session.execute(select(Commitment))).scalar_one()
         await _sync_claimed_commitments(session, [(commitment, market, settlement)])
 
-    # Should be skipped because claimed_at is already set → no RPC call
-    assert fetch_calls == []
+    assert fetch_calls == [[0]]
+
+
+async def test_sync_claimed_commitments_clears_stale_claimed_at_when_onchain_unclaimed(monkeypatch):
+    """claimed_at rows are cleared when the chain says the winning ticket is still unclaimed."""
+    from datetime import UTC, datetime
+
+    monkeypatch.setattr(runtime.settings, "rpc_url", "http://rpc", raising=False)
+
+    _, sf = await _make_async_db()
+    stale_claimed_at = datetime.now(tz=UTC)
+
+    async with sf() as session:
+        market = Market(id=1, event_id="m1", title="T", oracle="0x" + "1" * 40, market_address="0x" + "A" * 40)
+        settlement = Settlement(id=1, market_id=1, merkle_root="0x" + "bb" * 32, winning_outcome_id=0)
+        commitment = Commitment(
+            id=1,
+            market_id=1,
+            user_address="0x" + "2" * 40,
+            outcome_id=0,
+            amount_wei=10,
+            payout_wei=10,
+            salt="0x0",
+            ticket_hash="0x" + "cc" * 32,
+            leaf="0x" + "cc" * 32,
+            leaf_index=0,
+            claimed_at=stale_claimed_at,
+        )
+        session.add_all([market, settlement, commitment])
+        await session.commit()
+
+    async def _mock_fetch(_market_address, _ticket_ids):
+        return {0: False}
+
+    monkeypatch.setattr("app.routes.trade._fetch_claimed_tickets", _mock_fetch)
+
+    async with sf() as session:
+        from sqlalchemy import select
+
+        market = (await session.execute(select(Market))).scalar_one()
+        settlement = (await session.execute(select(Settlement))).scalar_one()
+        commitment = (await session.execute(select(Commitment))).scalar_one()
+        await _sync_claimed_commitments(session, [(commitment, market, settlement)])
+        await session.commit()
+
+    async with sf() as session:
+        from sqlalchemy import select
+
+        refreshed = (await session.execute(select(Commitment).where(Commitment.id == 1))).scalar_one()
+        assert refreshed.claimed_at is None
 
 
 async def test_sync_claimed_commitments_skips_losing_outcomes(monkeypatch):
@@ -378,6 +427,38 @@ async def test_claim_rate_and_lock_returns_none_when_cache_is_none(monkeypatch):
 
     result = await _claim_rate_and_lock("mkt-4", "0x" + "D" * 40, 0)
     assert result is None
+
+
+async def test_fetch_claim_deadlines_includes_pause_extension(monkeypatch):
+    """Effective claim deadline includes paused duration and active pause time."""
+    monkeypatch.setattr(runtime.settings, "rpc_url", "http://rpc", raising=False)
+
+    now_ts = 2_000
+
+    class _Call:
+        def __init__(self, value: int | bool):
+            self._value = value
+
+        async def call(self):
+            return self._value
+
+    functions = MagicMock()
+    functions.claimDeadline.return_value = _Call(1_000)
+    functions.claimPauseTotalDuration.return_value = _Call(200)
+    functions.claimPauseStartedAt.return_value = _Call(now_ts - 50)
+    functions.claimsPaused.return_value = _Call(True)
+
+    mock_contract = MagicMock()
+    mock_contract.functions = functions
+
+    mock_web3 = MagicMock()
+    mock_web3.eth.contract.return_value = mock_contract
+
+    monkeypatch.setattr("app.routes.trade.get_async_web3", lambda _url: mock_web3)
+    monkeypatch.setattr("app.routes.trade.time.time", lambda: now_ts)
+
+    result = await _fetch_claim_deadlines(["0x" + "1" * 40])
+    assert result == {"0x" + "1" * 40: 1_250}
 
 
 # ---------------------------------------------------------------------------

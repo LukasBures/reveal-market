@@ -366,6 +366,27 @@ REVEAL_MARKET_ABI: list[dict] = [
         "type": "function",
     },
     {
+        "inputs": [],
+        "name": "claimsPaused",
+        "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "claimPauseTotalDuration",
+        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "claimPauseStartedAt",
+        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
         "inputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
         "name": "batchRoots",
         "outputs": [{"internalType": "bytes32", "name": "", "type": "bytes32"}],

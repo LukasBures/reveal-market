@@ -15,6 +15,7 @@ import { useChainId, useConnection, useSignMessage } from "wagmi";
 import { normalizeTxHash } from "@/lib/formatters";
 import { buildCommitSignatureMessage } from "@/lib/signature-messages";
 import { defaultChain } from "@/lib/wagmi";
+import { logger } from "@/lib/logging";
 import { StakeInput } from "./StakeInput";
 import { QuoteDisplay } from "./QuoteDisplay";
 import { TradeSubmission } from "./TradeSubmission";
@@ -131,6 +132,7 @@ export function StakeQuoteCard({
   const explorerBase = explorerBaseRaw ? explorerBaseRaw.replace(/\/+$/, "") : "";
   const txPending = false;
   const fxUnavailable = status === "error";
+  const statusPollFailuresRef = useRef(0);
 
   // ── Derived values ─────────────────────────────────────────────────────
   const outcomeOptions = useMemo(() => (outcomes.length ? outcomes : ["Yes", "No"]), [outcomes]);
@@ -208,7 +210,18 @@ export function StakeQuoteCard({
       normalizedError.includes("insufficient_escrow_balance") || normalizedError.includes("insufficient escrow balance");
     return insufficientBalance || errorIndicatesInsufficient;
   }, [escrowBalanceZen, stakeZen, txError]);
+  const commitInFlight =
+    txLoading ||
+    Boolean((relayerJobId || txHash) && !txConfirmed && txStatus !== "failed" && txStatus !== "deadletter");
+  const commitInFlightReason = !commitInFlight
+    ? null
+    : txStatus === "queued"
+      ? "Commit queued with relayer"
+      : txStatus === "pending" || Boolean(normalizeTxHash(txHash))
+        ? "Commit pending confirmation"
+        : "Submitting commit...";
   const submitBlockedReason =
+    commitInFlightReason ??
     (escrowInsufficient ? "Deposit to escrow" : null) ??
     tradingReason ??
     (!address ? "Connect wallet" : null) ??
@@ -223,6 +236,7 @@ export function StakeQuoteCard({
     null;
 
   const ctaDisabled =
+    commitInFlight ||
     fxStale ||
     fxUnavailable ||
     !marketId ||
@@ -544,10 +558,12 @@ export function StakeQuoteCard({
     setRelayerPendingSince(null);
     setTxConfirmed(false);
     setTxStatus(null);
+    statusPollFailuresRef.current = 0;
   }, [chainId, address, initialTxHash]);
 
   // ── Trade handler ──────────────────────────────────────────────────────
   const handleTrade = useCallback(async () => {
+    statusPollFailuresRef.current = 0;
     setTxError(null);
     setTxHash(null);
     setRelayerJobId(null);
@@ -616,18 +632,40 @@ export function StakeQuoteCard({
       const resp: TradeCommitResponse = await submitTrade(issuedQuote.quote_id, address, signature);
       const respJob = resp.relayer_job_id ? String(resp.relayer_job_id) : null;
       const respHash = resp.tx_hash || null;
+      const responseStatus = resp.relayer_status || resp.status || null;
       if (respHash || respJob) {
         const normalizedHash = normalizeTxHash(respHash) ?? respHash;
         setTxHash(normalizedHash || null);
         setRelayerJobId(respJob);
         setRelayerPendingSince(respJob && !normalizedHash ? Date.now() : null);
-        const initialStatus = resp.relayer_status || (respHash ? "pending" : null);
+        const initialStatus =
+          responseStatus || (respJob && !normalizeTxHash(normalizedHash) ? "queued" : respHash ? "pending" : null);
         setTxStatus(initialStatus);
         setTxConfirmed(initialStatus === "confirmed");
+        setTxError(null);
+      } else {
+        const fallbackStatus = responseStatus ?? "unknown";
+        const fallbackMessage =
+          fallbackStatus === "queued" || fallbackStatus === "pending"
+            ? "Commit accepted but no tracking id was returned. Check the dashboard for the final status."
+            : "Commit response missing tracking information. Check the dashboard and relayer logs.";
+        logger.clientError("trade.commit.missing_tracking", {
+          marketId,
+          wallet: address,
+          status: fallbackStatus,
+        });
+        setTxStatus(fallbackStatus);
+        setTxError(fallbackMessage);
       }
     } catch (err) {
       const message = sanitizeTradeErrorMessage(err);
       const normalized = message.toLowerCase();
+      logger.clientError("trade.commit.failed", {
+        marketId,
+        wallet: address,
+        outcomeId: selectedOutcome,
+        error: message,
+      });
       if (normalized.includes("expired")) {
         setTxError("Price expired — refreshing...");
         setRefreshNonce((prev) => prev + 1);
@@ -666,8 +704,8 @@ export function StakeQuoteCard({
     let cancelled = false;
     const pendingStart = relayerPendingSince;
     const poll = async () => {
+      const isHexHash = normalizeTxHash(txHash);
       try {
-        const isHexHash = normalizeTxHash(txHash);
         const statusResp = await fetchTradeStatus(
           isHexHash ?? undefined,
           relayerJobId || (!isHexHash && txHash ? txHash : undefined),
@@ -678,17 +716,70 @@ export function StakeQuoteCard({
           if (nextHash && nextHash !== txHash) {
             setTxHash(nextHash);
           }
-          if (statusResp.status === "confirmed" || statusResp.status === "failed") {
-            setTxConfirmed(statusResp.status === "confirmed");
+          if (statusResp.status === "confirmed") {
+            statusPollFailuresRef.current = 0;
+            setTxConfirmed(true);
             setRelayerPendingSince(null);
+            setTxError(null);
             return;
           }
+          if (statusResp.status === "failed" || statusResp.status === "deadletter") {
+            statusPollFailuresRef.current = 0;
+            setTxConfirmed(false);
+            setRelayerPendingSince(null);
+            setTxError("Commit failed before submission. Check relayer logs and try again.");
+            logger.clientError("trade.commit.status_failed", {
+              marketId,
+              wallet: address,
+              jobId: relayerJobId || (!isHexHash && txHash ? txHash : undefined),
+              txHash: isHexHash ?? undefined,
+              status: statusResp.status,
+              error: statusResp.error,
+            });
+            return;
+          }
+          if (statusResp.status === "queued" || statusResp.status === "pending") {
+            statusPollFailuresRef.current = 0;
+            if (txError && txError.toLowerCase().includes("taking longer than usual")) {
+              setTxError(null);
+            }
+          } else if (statusResp.status === "unknown") {
+            statusPollFailuresRef.current += 1;
+            logger.clientWarn("trade.commit.status_unknown", {
+              marketId,
+              wallet: address,
+              jobId: relayerJobId || (!isHexHash && txHash ? txHash : undefined),
+              txHash: isHexHash ?? undefined,
+              error: statusResp.error,
+              failures: statusPollFailuresRef.current,
+            });
+            if (statusPollFailuresRef.current >= 3) {
+              setTxError("We couldn't verify the commit status yet. Check the dashboard or explorer in a moment.");
+            }
+          }
         }
-      } catch {
-        // best effort
+      } catch (error) {
+        statusPollFailuresRef.current += 1;
+        logger.clientWarn("trade.commit.status_poll_error", {
+          marketId,
+          wallet: address,
+          jobId: relayerJobId || (!isHexHash && txHash ? txHash : undefined),
+          txHash: isHexHash ?? undefined,
+          error: error instanceof Error ? error.message : String(error),
+          failures: statusPollFailuresRef.current,
+        });
+        if (statusPollFailuresRef.current >= 3) {
+          setTxError("We couldn't verify the commit status yet. Check the dashboard or explorer in a moment.");
+        }
       }
-      if (!cancelled && relayerJobId && !txHash && pendingStart && Date.now() - pendingStart > 60_000) {
-        setTxError("Transaction is taking longer than usual. Please try again.");
+      if (
+        !cancelled &&
+        relayerJobId &&
+        !isHexHash &&
+        pendingStart &&
+        Date.now() - pendingStart > 60_000
+      ) {
+        setTxError("Commit is still queued with the relayer. Track it in the dashboard while it finalizes.");
       }
       if (!cancelled) {
         setTimeout(poll, 5000);
@@ -698,7 +789,7 @@ export function StakeQuoteCard({
     return () => {
       cancelled = true;
     };
-  }, [txHash, relayerJobId, relayerPendingSince]);
+  }, [address, marketId, relayerJobId, relayerPendingSince, txError, txHash]);
 
   // ── Render ─────────────────────────────────────────────────────────────
   return (

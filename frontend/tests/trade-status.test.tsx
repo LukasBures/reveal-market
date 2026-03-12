@@ -66,15 +66,18 @@ vi.mock("@/lib/pricing-client", () => ({
 
 const apiMocks = vi.hoisted(() => ({
   statusMock: vi.fn(),
+  fetchPositions: vi.fn(),
 }));
 vi.mock("@/lib/api", () => ({
   fetchTradeStatus: apiMocks.statusMock,
+  fetchPositions: apiMocks.fetchPositions,
 }));
 
 describe("Trade status polling", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     hooks.useSignMessage.mockReturnValue({ mutateAsync: vi.fn().mockResolvedValue("0xsig") });
+    apiMocks.fetchPositions.mockResolvedValue({ positions: [], escrowBalance: null });
   });
 
   it("calls fetchTradeStatus when tx hash is present", async () => {
@@ -141,5 +144,54 @@ describe("Trade status polling", () => {
     await waitFor(() => expect(pricingMocks.fetchPricingPreview).toHaveBeenCalled());
     const [, options] = pricingMocks.fetchPricingPreview.mock.calls[0];
     expect(options.marketAddress).toBeUndefined();
+  });
+
+  it("keeps the buy CTA disabled while a commit is queued with the relayer", async () => {
+    hooks.useConnection.mockReturnValue({ address: "0xabc", isConnected: true });
+    hooks.useChainId.mockReturnValue(mockDefaultChain.id);
+    hooks.useReadContract.mockReturnValue({ data: 0n });
+    hooks.useWriteContract.mockReturnValue({ mutateAsync: vi.fn() });
+    hooks.usePublicClient.mockReturnValue({ waitForTransactionReceipt: vi.fn() });
+    apiMocks.statusMock.mockResolvedValue({ status: "queued" });
+
+    render(
+      <StakeQuoteCard
+        initialTxHash="job-123"
+        marketAddress="0x1111111111111111111111111111111111111111"
+        marketId="m1"
+        outcomes={["Yes", "No"]}
+        outcomePrices={[0.5, 0.5]}
+      />,
+    );
+
+    await waitFor(() => expect(apiMocks.statusMock).toHaveBeenCalledWith(undefined, "job-123"));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /commit queued with relayer/i })).toBeDisabled(),
+    );
+  });
+
+  it("surfaces relayer failures without a transaction hash", async () => {
+    hooks.useConnection.mockReturnValue({ address: "0xabc", isConnected: true });
+    hooks.useChainId.mockReturnValue(mockDefaultChain.id);
+    hooks.useReadContract.mockReturnValue({ data: 0n });
+    hooks.useWriteContract.mockReturnValue({ mutateAsync: vi.fn() });
+    hooks.usePublicClient.mockReturnValue({ waitForTransactionReceipt: vi.fn() });
+    apiMocks.statusMock.mockResolvedValue({ status: "deadletter" });
+
+    render(
+      <StakeQuoteCard
+        initialTxHash="job-123"
+        marketAddress="0x1111111111111111111111111111111111111111"
+        marketId="m1"
+        outcomes={["Yes", "No"]}
+        outcomePrices={[0.5, 0.5]}
+      />,
+    );
+
+    await waitFor(() => expect(apiMocks.statusMock).toHaveBeenCalledWith(undefined, "job-123"));
+    await waitFor(() =>
+      expect(screen.getByText(/commit failed before submission/i)).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/waiting for the relayer/i)).not.toBeInTheDocument();
   });
 });
