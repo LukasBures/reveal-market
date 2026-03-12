@@ -174,7 +174,6 @@ class AsyncGoldskyClient:
         self,
         endpoint: str,
         *,
-        api_key: str | None = None,
         timeout_seconds: float = 5.0,
         transport: httpx.AsyncBaseTransport | None = None,
         max_attempts: int = 3,
@@ -183,7 +182,6 @@ class AsyncGoldskyClient:
         logger_name: str = "reveal_market.goldsky",
     ) -> None:
         self.endpoint = endpoint
-        self.api_key = api_key
         self.timeout_seconds = timeout_seconds
         self._transport = transport or httpx.AsyncHTTPTransport(retries=0)
         self._client = httpx.AsyncClient(timeout=self.timeout_seconds, transport=self._transport)
@@ -216,10 +214,7 @@ class AsyncGoldskyClient:
         )
 
     def _headers(self) -> dict[str, str]:
-        headers = {"content-type": "application/json"}
-        if self.api_key:
-            headers["x-api-key"] = self.api_key
-        return headers
+        return {"content-type": "application/json"}
 
     async def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
         response = await self._client.post(self.endpoint, json=payload, headers=self._headers())
