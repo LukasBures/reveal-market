@@ -180,7 +180,6 @@ class Settings(BaseSettings):
     polymarket_only_open_markets: bool | None = Field(default=False)
     clob_host: AnyHttpUrl | None = Field(default=None)
     goldsky_subgraph_url: AnyHttpUrl | None = Field(default=None)
-    goldsky_api_key: SecretStr | None = Field(default=None)
     goldsky_timeout_seconds: float = Field(default=5.0, gt=0)
 
     default_page_size: int = Field(default=50)
@@ -389,7 +388,6 @@ class Settings(BaseSettings):
 
     @field_validator(
         "goldsky_subgraph_url",
-        "goldsky_api_key",
         mode="before",
     )
     @classmethod

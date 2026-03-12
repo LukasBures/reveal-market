@@ -117,11 +117,10 @@ def _build_goldsky_client() -> AsyncGoldskyClient | None:
             message="goldsky subgraph client disabled (missing endpoint)",
         )
         return None
-    api_key = settings.goldsky_api_key.get_secret_value() if settings.goldsky_api_key else None
     try:
         client = AsyncGoldskyClient(
             str(endpoint),
-            api_key=api_key,
+            api_key=None,
             timeout_seconds=settings.goldsky_timeout_seconds,
         )
     except (ValueError, RuntimeError, httpx.HTTPError, httpx.RequestError) as exc:  # pragma: no cover - defensive

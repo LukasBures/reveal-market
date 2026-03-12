@@ -535,7 +535,6 @@ class Settings(BaseSettings):
     settlement_gas_price_gwei: float | None = Field(default=None, ge=0)
     settlement_max_priority_fee_gwei: float | None = Field(default=None, ge=0)
     goldsky_subgraph_url: AnyHttpUrl | None = Field(default=None)
-    goldsky_api_key: SecretStr | None = Field(default=None)
     goldsky_timeout_seconds: float = Field(default=6.0, gt=0)
     market_progress_log_intervals: int = Field(default=10, ge=1)
     streamer_base_url: AnyHttpUrl = Field(
@@ -559,7 +558,6 @@ class Settings(BaseSettings):
         "lock_batches_gas_price_gwei",
         "lock_batches_max_priority_fee_gwei",
         "goldsky_subgraph_url",
-        "goldsky_api_key",
         "prover_shared_secret",
         "relayer_internal_secret",
         mode="before",
