@@ -20,7 +20,7 @@ from shared import repository_async as shared_repository
 from shared.async_utils import resolve_awaitable as _resolve_awaitable
 from shared.logging import log_event
 from shared.onchain import get_async_web3, to_checksum
-from shared.onchain.abi import REVEAL_MARKET_ABI
+from shared.onchain.abi import MARKET_FACTORY_ABI, REVEAL_MARKET_ABI
 from shared.poseidon import BATCH_SIZE
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -816,6 +816,95 @@ async def _list_lock_candidates(
     return list(rows.scalars())
 
 
+async def _ensure_protocol_liability_cap(
+    web3: AsyncWeb3,
+    market_address: str,
+    commitments: list,
+) -> None:
+    """Before locking, ensure protocolLiabilityCap covers the worst-case liability.
+
+    If any outcome's total payout exceeds totalEscrow + protocolLiabilityCap the
+    verifyAndSettle tx will revert with LiabilityExceedsCoverage.  When the factory
+    address and owner wallet key are available we fix the cap automatically so that
+    lockBatches never produces an unsettleable market.
+    """
+    if not runtime.settings.factory_address or not runtime.settings.wallet_private_key:
+        return
+
+    try:
+        contract = _build_market_contract(web3, market_address)
+        current_cap = int(await contract.functions.protocolLiabilityCap().call())
+        total_escrow = int(await contract.functions.totalEscrow().call())
+    except Exception as exc:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.lock_batches.cap_check_failed",
+            message="could not fetch on-chain cap for pre-lock liability check",
+            market_address=market_address,
+            error=str(exc),
+        )
+        return
+
+    liability_yes = sum(int(getattr(c, "payout_wei", 0) or 0) for c in commitments if c.outcome_id == 0)
+    liability_no = sum(int(getattr(c, "payout_wei", 0) or 0) for c in commitments if c.outcome_id == 1)
+    max_liability = max(liability_yes, liability_no)
+    required_cap = max(0, max_liability - total_escrow)
+
+    if required_cap <= current_cap:
+        return
+
+    log_event(
+        logger,
+        logging.WARNING,
+        event="worker.lock_batches.liability_cap_insufficient",
+        message="protocolLiabilityCap too low; auto-updating before lock",
+        market_address=market_address,
+        current_cap=current_cap,
+        required_cap=required_cap,
+        total_escrow=total_escrow,
+        max_liability=max_liability,
+    )
+    try:
+        factory_address = cast(ChecksumAddress, to_checksum(str(runtime.settings.factory_address)))
+        market_checksum = cast(ChecksumAddress, to_checksum(market_address))
+        factory = web3.eth.contract(address=factory_address, abi=MARKET_FACTORY_ABI)
+        owner_account = Account.from_key(runtime.settings.wallet_private_key.get_secret_value())
+        nonce = await web3.eth.get_transaction_count(owner_account.address)
+        gas_price = await web3.eth.gas_price
+        bumped_gas_price = Wei((int(gas_price) * 12) // 10)
+        tx_params: TxParams = {
+            "from": owner_account.address,
+            "nonce": nonce,
+            "gasPrice": bumped_gas_price,
+        }
+        tx = await factory.functions.updateProtocolLiabilityCap(market_checksum, required_cap).build_transaction(
+            tx_params
+        )
+        signed = owner_account.sign_transaction(tx)
+        tx_hash = await web3.eth.send_raw_transaction(signed.raw_transaction)
+        await web3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
+        log_event(
+            logger,
+            logging.INFO,
+            event="worker.lock_batches.liability_cap_updated",
+            message="protocolLiabilityCap updated before lock",
+            market_address=market_address,
+            new_cap=required_cap,
+            tx_hash=tx_hash.hex(),
+        )
+    except Exception as exc:
+        log_event(
+            logger,
+            logging.ERROR,
+            event="worker.lock_batches.liability_cap_update_failed",
+            message="failed to update protocolLiabilityCap; lock may produce unsettleable market",
+            market_address=market_address,
+            required_cap=required_cap,
+            error=str(exc),
+        )
+
+
 async def run_lock_batches_jobs(summary, redis_client: Redis | None) -> int:
     """Submit lockBatches for markets that have passed their commit deadline."""
 
@@ -1068,6 +1157,8 @@ async def run_lock_batches_jobs(summary, redis_client: Redis | None) -> int:
                             )
                             continue
                         use_relayer_for_market = False
+
+                await _ensure_protocol_liability_cap(web3, market.market_address, commitments)
 
                 try:
                     tx_hash = None

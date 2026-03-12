@@ -4,6 +4,15 @@ import json
 import os
 import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import urlparse
+
+
+def _validated_webhook_url(value: str) -> str:
+    parsed = urlparse(value)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise ValueError("DISCORD_WEBHOOK must be an https URL")
+    return value
+
 
 DISCORD_WEBHOOK =<REDACTED>
 COLORS = {"critical": 0xE74C3C, "warning": 0xF39C12, "watchdog": 0x2ECC71}
@@ -24,8 +33,11 @@ class Handler(BaseHTTPRequestHandler):
             embeds.append({"title": f"{tag} {title}", "description": desc, "color": color})
         if embeds:
             data = json.dumps({"embeds": embeds}).encode()
-            req = urllib.request.Request(
-                DISCORD_WEBHOOK, data=data, headers={"Content-Type": "application/json"}, method="POST"
+            req = urllib.request.Request(  # noqa: S310 - validated above to require an https Discord webhook
+                DISCORD_WEBHOOK,
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST",
             )
             try:
                 urllib.request.urlopen(req, timeout=10)  # noqa: S310
@@ -41,4 +53,4 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     port = int(os.environ.get("LISTEN_PORT", "9094"))
     print(f"alertmanager-discord bridge listening on :{port}")
-    HTTPServer(("0.0.0.0", port), Handler).serve_forever()
+    HTTPServer(("0.0.0.0", port), Handler).serve_forever()  # noqa: S104 - container listener

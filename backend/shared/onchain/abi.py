@@ -198,6 +198,16 @@ MARKET_FACTORY_ABI: list[dict] = [
         "stateMutability": "view",
         "type": "function",
     },
+    {
+        "inputs": [
+            {"internalType": "address", "name": "market", "type": "address"},
+            {"internalType": "uint256", "name": "newCap", "type": "uint256"},
+        ],
+        "name": "updateProtocolLiabilityCap",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
 ]
 
 
@@ -399,6 +409,13 @@ REVEAL_MARKET_ABI: list[dict] = [
     {
         "inputs": [],
         "name": "totalEscrow",
+        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "protocolLiabilityCap",
         "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
         "stateMutability": "view",
         "type": "function",

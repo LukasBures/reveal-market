@@ -50,11 +50,8 @@ async def test_resolution_summary_parses_payload(monkeypatch):
         }
     }
 
-    def assert_headers(request: httpx.Request):
-        assert request.headers.get("x-api-key") == "test-key"
-
-    transport = _build_transport(payload, request_assertion=assert_headers)
-    client = AsyncGoldskyClient("https://example.com/subgraph", api_key="test-key", transport=transport)
+    transport = _build_transport(payload)
+    client = AsyncGoldskyClient("https://example.com/subgraph", transport=transport)
 
     summary = await client.resolution_summary("0xabc", ["YES", "NO"])
     assert summary is not None

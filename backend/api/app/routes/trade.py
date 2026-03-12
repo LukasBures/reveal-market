@@ -429,9 +429,8 @@ async def _assert_protocol_pool_headroom(market_onchain_id: int | None, market_a
         )
         return
 
-    remaining_cap = None
-    if liability_cap_wei > 0:
-        remaining_cap = max(0, liability_cap_wei - consumed_wei)
+    # remaining_cap=0 when liability_cap_wei=0 — zero means no coverage, not uncapped.
+    remaining_cap = max(0, liability_cap_wei - consumed_wei)
     if not allowed:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -442,7 +441,7 @@ async def _assert_protocol_pool_headroom(market_onchain_id: int | None, market_a
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"error": "protocol_pool_capacity", "message": "Protocol pool global capacity exceeded"},
         )
-    if remaining_cap is not None and required_wei > remaining_cap:
+    if required_wei > remaining_cap:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"error": "protocol_pool_cap", "message": "Protocol pool liability cap exceeded for this market"},

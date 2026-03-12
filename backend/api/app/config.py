@@ -321,7 +321,12 @@ class Settings(BaseSettings):
     )
     market_max_commitments: int = Field(default=10_000, ge=1, description="Max commitments per market")
     market_protocol_liability_cap_wei: int = Field(
-        default=0, ge=0, description="Protocol liability cap per market (wei); 0 = unlimited"
+        default=0,
+        ge=0,
+        description=(
+            "Protocol liability cap per market (wei); 0 = no protocol coverage "
+            "(settlement fails if totalLiability > totalEscrow)"
+        ),
     )
     market_reveal_lead_seconds: int = Field(
         default=172800,

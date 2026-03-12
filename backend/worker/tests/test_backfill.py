@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 from app import backfill
 from app.backfill import backfill_market_params
-from shared.onchain.abi import MARKET_FACTORY_ABI, REVEAL_MARKET_ABI
+from shared.onchain.abi import MARKET_FACTORY_ABI, RELAYER_ESCROW_ABI, REVEAL_MARKET_ABI
 
 
 class DummySession:
@@ -83,6 +83,14 @@ class DummyEth:
 class DummyWeb3:
     def __init__(self, factory: DummyContract, market: DummyContract) -> None:
         self.eth = DummyEth(factory, market)
+
+
+def test_reveal_market_abi_exposes_protocol_liability_cap_getter() -> None:
+    reveal_market_names = {entry["name"] for entry in REVEAL_MARKET_ABI if entry.get("type") == "function"}
+    relayer_escrow_names = {entry["name"] for entry in RELAYER_ESCROW_ABI if entry.get("type") == "function"}
+
+    assert "protocolLiabilityCap" in reveal_market_names
+    assert "protocolLiabilityCap" not in relayer_escrow_names
 
 
 @pytest.mark.asyncio
