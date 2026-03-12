@@ -630,6 +630,7 @@ export function DashboardClient() {
       if (!signature) return;
       const res = await fetchClaimBundles(address, signature);
       if (res.status === "pending") {
+        setClaimMessage("Your proof is being generated. Please check back in a few minutes.");
         return;
       }
       if (res.error) {

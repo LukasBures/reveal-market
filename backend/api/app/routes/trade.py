@@ -164,7 +164,11 @@ async def _enqueue_claim_proof_jobs(
             continue
         job = {
             "job_id": job_id,
-            "market_snapshot": {"event_id": market.event_id, "market_address": market.market_address},
+            "market_snapshot": {
+                "id": market.id,
+                "event_id": market.event_id,
+                "market_address": market.market_address,
+            },
             "market_payload": {"event_id": market.event_id, "market_address": market.market_address},
             "condition_id": getattr(market, "condition_id", None),
         }
