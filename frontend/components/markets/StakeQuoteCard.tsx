@@ -674,6 +674,12 @@ export function StakeQuoteCard({
         setRefreshNonce((prev) => prev + 1);
       } else if (normalized.includes("insufficient_escrow_balance")) {
         setTxError("Not enough escrow balance — add funds in the dashboard.");
+      } else if (normalized.includes("protocol_pool_cap") || normalized.includes("protocol_pool_capacity")) {
+        setTxError("Market coverage limit temporarily reached. Please try again shortly.");
+      } else if (normalized.includes("protocol_pool_balance")) {
+        setTxError("Market pool temporarily underfunded. Please try again shortly.");
+      } else if (normalized.includes("protocol_pool_unregistered")) {
+        setTxError("Market registration pending. Please try again in a moment.");
       } else {
         setTxError(message);
       }

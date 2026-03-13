@@ -606,27 +606,80 @@ async def _assert_protocol_pool_headroom(market_onchain_id: int | None, market_a
         )
         return
 
-    # remaining_cap=0 when liability_cap_wei=0 — zero means no coverage, not uncapped.
     remaining_cap = max(0, liability_cap_wei - consumed_wei)
+    _pool_ctx = dict(
+        market_address=market_address,
+        market_onchain_id=market_onchain_id,
+        required_wei=required_wei,
+        liability_cap_wei=liability_cap_wei,
+        consumed_wei=consumed_wei,
+        remaining_cap=remaining_cap,
+        capacity_wei=capacity_wei,
+        balance_wei=balance_wei,
+        allowed=allowed,
+    )
+
+    # Cap=0 means "unconfigured", not "zero budget". The worker auto-fixes caps
+    # before lockBatches, so blocking trades here is unnecessarily strict.
+    if liability_cap_wei == 0:
+        log_event(
+            logger,
+            logging.WARNING,
+            event="protocol_pool.zero_cap_passthrough",
+            message="liability cap is zero (unconfigured); allowing trade",
+            **_pool_ctx,
+        )
+        if required_wei > balance_wei:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"error": "protocol_pool_balance", "message": "Protocol pool lacks collateral for this trade"},
+            )
+        return
+
     if not allowed:
+        log_event(logger, logging.WARNING, event="protocol_pool.unregistered", **_pool_ctx)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "protocol_pool_unregistered", "message": "Market not registered with protocol pool"},
+            detail={
+                "error": "protocol_pool_unregistered",
+                "message": "Market not registered with protocol pool",
+                "required_wei": str(required_wei),
+            },
         )
     if capacity_wei > 0 and required_wei > capacity_wei:
+        log_event(logger, logging.WARNING, event="protocol_pool.capacity_exceeded", **_pool_ctx)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "protocol_pool_capacity", "message": "Protocol pool global capacity exceeded"},
+            detail={
+                "error": "protocol_pool_capacity",
+                "message": "Protocol pool global capacity exceeded",
+                "required_wei": str(required_wei),
+                "capacity_wei": str(capacity_wei),
+            },
         )
     if required_wei > remaining_cap:
+        log_event(logger, logging.WARNING, event="protocol_pool.cap_exceeded", **_pool_ctx)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "protocol_pool_cap", "message": "Protocol pool liability cap exceeded for this market"},
+            detail={
+                "error": "protocol_pool_cap",
+                "message": "Protocol pool liability cap exceeded for this market",
+                "required_wei": str(required_wei),
+                "remaining_cap_wei": str(remaining_cap),
+                "liability_cap_wei": str(liability_cap_wei),
+                "consumed_wei": str(consumed_wei),
+            },
         )
     if required_wei > balance_wei:
+        log_event(logger, logging.WARNING, event="protocol_pool.balance_insufficient", **_pool_ctx)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "protocol_pool_balance", "message": "Protocol pool lacks collateral for this trade"},
+            detail={
+                "error": "protocol_pool_balance",
+                "message": "Protocol pool lacks collateral for this trade",
+                "required_wei": str(required_wei),
+                "balance_wei": str(balance_wei),
+            },
         )
 
 
