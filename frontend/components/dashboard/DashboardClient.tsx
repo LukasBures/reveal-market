@@ -914,6 +914,7 @@ export function DashboardClient() {
       ) {
         return;
       }
+      setSwitchingBundleKey(null);
       await handlePrepareBundle(marketId, ticketId);
     } finally {
       setSwitchingBundleKey(null);
@@ -1003,6 +1004,7 @@ export function DashboardClient() {
       ) {
         return;
       }
+      setSwitchingBundleKey(null);
       let gasLimit = MIN_CLAIM_GAS;
       if (publicClient) {
         try {
