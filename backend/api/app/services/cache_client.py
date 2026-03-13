@@ -18,14 +18,24 @@ from shared.logging import log_event
 
 from app import runtime
 
+_BLOCKING_CACHE_MAX_CONNECTIONS = 4
 
-async def _connect_cache_with_retry() -> Redis | None:
+
+async def _connect_cache_with_retry(
+    *,
+    max_connections: int = 20,
+    socket_timeout: float = 5.0,
+) -> Redis | None:
     """Attempt to connect to Redis with bounded retries and optional delays."""
 
     attempts = max(1, runtime.settings.cache_connect_retries)
     delay = max(0.0, runtime.settings.cache_connect_retry_delay_seconds)
     for attempt in range(1, attempts + 1):
-        client = get_client(runtime.settings.redis_url)
+        client = get_client(
+            runtime.settings.redis_url,
+            max_connections=max_connections,
+            socket_timeout=socket_timeout,
+        )
         if client is None:
             if attempt < attempts and delay:
                 await asyncio.sleep(delay)
@@ -114,14 +124,33 @@ async def get_cache_client() -> Redis | None:
     return runtime.cache_client
 
 
+async def get_blocking_cache_client(*, read_timeout_seconds: float) -> Redis | None:
+    """Return a Redis client sized for blocking queue reads like BRPOP."""
+
+    if runtime.blocking_cache_client is not None:
+        return runtime.blocking_cache_client
+    async with runtime.blocking_cache_lock:
+        if runtime.blocking_cache_client is None:
+            runtime.blocking_cache_client = await _connect_cache_with_retry(
+                max_connections=_BLOCKING_CACHE_MAX_CONNECTIONS,
+                socket_timeout=max(float(read_timeout_seconds) + 2.0, 10.0),
+            )
+    return runtime.blocking_cache_client
+
+
 async def close_cache_client() -> None:
     """Close the shared Redis client if present."""
 
     async with runtime.cache_lock:
         client = runtime.cache_client
         runtime.cache_client = None
+    async with runtime.blocking_cache_lock:
+        blocking_client = runtime.blocking_cache_client
+        runtime.blocking_cache_client = None
     if client is not None:
         await _close_cache_client_instance(client)
+    if blocking_client is not None and blocking_client is not client:
+        await _close_cache_client_instance(blocking_client)
 
 
 def _build_http_timeout(timeout_seconds: float | None) -> httpx.Timeout:

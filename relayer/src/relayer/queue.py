@@ -37,6 +37,7 @@ class TxQueue:
         max_attempts: int = 5,
         max_payload_bytes: int = 131072,
         running_ttl_seconds: int = 150,
+        deadletter_retention_seconds: int | None = None,
         fee_bump_percent: float = 0.15,
         start_worker: bool = True,
     ) -> None:
@@ -48,11 +49,13 @@ class TxQueue:
         self.max_attempts = max_attempts
         self.max_payload_bytes = max_payload_bytes
         self.running_ttl_seconds = running_ttl_seconds
+        self.deadletter_retention_seconds = deadletter_retention_seconds
         self.fee_bump_percent = fee_bump_percent
         self._lock = threading.Lock()
         self._stop = asyncio.Event()
         self._worker: asyncio.Task | None = None
         self._init_db()
+        self._prune_stale_deadletter_sync()
         self._start_worker_flag = start_worker
 
     async def start(self) -> None:
@@ -99,6 +102,37 @@ class TxQueue:
                 return None
             val = row["max_nonce"] if isinstance(row, dict) else row[0]
             return int(val) if val is not None else None
+
+    def _prune_stale_deadletter_sync(self) -> int:
+        """Delete aged deadletter jobs so queue health reflects current actionable failures."""
+
+        retention = self.deadletter_retention_seconds
+        if retention is None or retention <= 0:
+            return 0
+        cutoff = int(time.time()) - int(retention)
+        with self._lock, self._connect() as conn:
+            if self.use_postgres:
+                deleted = int(
+                    conn.execute(
+                        "DELETE FROM jobs WHERE status = 'deadletter' AND updated_at < %s",
+                        (cutoff,),
+                    ).rowcount
+                    or 0
+                )
+            else:
+                cur = conn.execute(
+                    "DELETE FROM jobs WHERE status = 'deadletter' AND updated_at < ?",
+                    (cutoff,),
+                )
+                deleted = int(cur.rowcount or 0)
+        if deleted:
+            logger.info(
+                "relayer.queue.deadletter_pruned",
+                count=deleted,
+                retention_seconds=int(retention),
+            )
+            self._update_depth()
+        return deleted
 
     async def stop(self) -> None:
         self._stop.set()
@@ -635,6 +669,7 @@ class TxQueue:
         }
 
     async def get_stats(self) -> dict[str, Any]:
+        await asyncio.to_thread(self._prune_stale_deadletter_sync)
         return await asyncio.to_thread(self._get_queue_stats_sync)
 
     def _update_depth(self) -> None:
@@ -666,6 +701,7 @@ class TxQueue:
             ]
 
     async def list_deadletter(self) -> list[dict[str, Any]]:
+        await asyncio.to_thread(self._prune_stale_deadletter_sync)
         return await asyncio.to_thread(self._list_deadletter_sync)
 
     def _get_job_sync(self, job_id: int) -> dict[str, Any]:

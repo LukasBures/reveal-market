@@ -97,6 +97,7 @@ class RelayerSettings(BaseSettings):
     relayer_queue_max_attempts: int = Field(default=5, ge=1)
     relayer_queue_max_payload_bytes: int = Field(default=131072, gt=0)
     relayer_queue_running_ttl_seconds: int | None = Field(default=None)
+    relayer_queue_deadletter_retention_seconds: int | None = Field(default=259200, ge=0)
 
     # --- Fee / balance ---
     relayer_fee_bump_percent: float = Field(default=0.15, ge=0)

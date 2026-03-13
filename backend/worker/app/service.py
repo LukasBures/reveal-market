@@ -351,6 +351,14 @@ async def _recover_settlement_state(redis_client: Redis | None) -> int:
 
     if redis_client is None:
         return 0
+    if not runtime.settings.rpc_url:
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.settlement.recovery.disabled",
+            message="skipping settlement recovery without rpc url",
+        )
+        return 0
     recovery_gate_key = "reveal_market_worker:settlement_recovery:cooldown"
     try:
         gate = await redis_client.get(recovery_gate_key)
@@ -394,6 +402,7 @@ async def _recover_settlement_state(redis_client: Redis | None) -> int:
                 select(shared_models.Market, shared_models.Settlement)
                 .join(shared_models.Settlement, shared_models.Settlement.market_id == shared_models.Market.id)
                 .where(shared_models.Market.resolution_status == shared_models.ResolutionStatusEnum.FINAL.value)
+                .where(shared_models.Market.market_address.is_not(None))
                 .where(
                     or_(
                         shared_models.Settlement.winning_outcome_id.is_(None),
@@ -421,8 +430,6 @@ async def _recover_settlement_state(redis_client: Redis | None) -> int:
                 if not await should_attempt(redis_client, retry_key):
                     continue
                 try:
-                    if not market.market_address or not runtime.settings.rpc_url:
-                        raise RuntimeError("missing_market_address_or_rpc")
                     refreshed = await asyncio.wait_for(
                         _upsert_settlement_from_chain(session, market, force=True),
                         timeout=runtime.settings.chain_refresh_timeout_seconds,

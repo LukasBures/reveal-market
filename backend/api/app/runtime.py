@@ -70,6 +70,8 @@ request_metrics = RequestMetrics(settings.slow_request_threshold_ms)
 
 cache_client: Redis | None = None
 cache_lock = asyncio.Lock()
+blocking_cache_client: Redis | None = None
+blocking_cache_lock = asyncio.Lock()
 shared_http_clients: dict[float, httpx.AsyncClient] = {}
 shared_http_lock = asyncio.Lock()
 heartbeat_stop_event: Event | None = None

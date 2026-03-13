@@ -1612,6 +1612,50 @@ async def test_settlement_queue_skips_without_rpc(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_recover_settlement_state_skips_markets_without_address(monkeypatch):
+    redis_client = DummyRedis()
+    engine, session_factory = await create_async_in_memory_db()
+
+    @contextlib.asynccontextmanager
+    async def _session_scope():
+        async with session_factory() as session:
+            yield session
+            await session.commit()
+
+    monkeypatch.setattr(worker_service, "session_scope", _session_scope, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "rpc_url", "https://rpc.example", raising=False)
+    monkeypatch.setattr(runtime_module.settings, "settlement_recovery_min_interval_seconds", 0, raising=False)
+
+    async with session_factory() as session:
+        market = Market(
+            id=35,
+            event_id="evt-no-address",
+            title="No Address Market",
+            category="sports",
+            oracle="polymarket",
+            status="settled",
+            resolution_status="final",
+            market_address=None,
+            resolved_at=datetime.now(UTC),
+        )
+        session.add(market)
+        await session.flush()
+        session.add(
+            Settlement(
+                market_id=market.id,
+                proof_status="none",
+                submission_status="none",
+            )
+        )
+        await session.commit()
+
+    recovered = await worker_service._recover_settlement_state(redis_client)
+
+    assert recovered == 0
+    assert not any(key.startswith("reveal_market_worker:settlement_recover:fail:") for key in redis_client.store)
+
+
+@pytest.mark.asyncio
 async def test_proof_queue_worker_processes_jobs(monkeypatch):
     redis_client = DummyRedis()
     gauge = DummyGauge()

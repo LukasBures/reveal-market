@@ -31,11 +31,12 @@ from app.routes.trade import call_hedger, call_relayer
 from app.runtime import logger, request_metrics
 from app.runtime import settings as runtime_settings
 from app.services.alerting import alert_background_failure
-from app.services.cache_client import get_cache_client
+from app.services.cache_client import get_blocking_cache_client, get_cache_client
 from app.services.markets import hydrate_markets_cache
 
 _RNG = random.SystemRandom()
 T = TypeVar("T")
+_QUEUE_BRPOP_TIMEOUT_SECONDS = 5
 
 # Lua script for owner-safe lock release: only delete if value matches our token
 _LOCK_RELEASE_LUA = """
@@ -290,7 +291,7 @@ async def relayer_queue_loop() -> None:
 
     if not settings.relayer_queue_enabled:
         return
-    client = await get_cache_client()
+    client = await get_blocking_cache_client(read_timeout_seconds=_QUEUE_BRPOP_TIMEOUT_SECONDS)
     if client is None:
         log_event(
             logger,
@@ -317,7 +318,7 @@ async def relayer_queue_loop() -> None:
                 if await circuit.is_open("relayer_queue"):
                     await asyncio.sleep(settings.relayer_circuit_cooldown_seconds)
                     continue
-                item = await _maybe_await(client.brpop([queue_key], timeout=5))
+                item = await _maybe_await(client.brpop([queue_key], timeout=_QUEUE_BRPOP_TIMEOUT_SECONDS))
                 if item is None:
                     continue
                 _, raw = item
@@ -401,7 +402,7 @@ async def hedger_queue_loop() -> None:
 
     if not settings.hedger_queue_enabled:
         return
-    client = await get_cache_client()
+    client = await get_blocking_cache_client(read_timeout_seconds=_QUEUE_BRPOP_TIMEOUT_SECONDS)
     if client is None:
         log_event(
             logger,
@@ -428,7 +429,7 @@ async def hedger_queue_loop() -> None:
                 if await circuit.is_open("hedger_queue"):
                     await asyncio.sleep(settings.relayer_circuit_cooldown_seconds)
                     continue
-                item = await _maybe_await(client.brpop([queue_key], timeout=5))
+                item = await _maybe_await(client.brpop([queue_key], timeout=_QUEUE_BRPOP_TIMEOUT_SECONDS))
                 if item is None:
                     continue
                 _, raw = item

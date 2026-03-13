@@ -67,6 +67,7 @@ queue = TxQueue(
     max_attempts=cfg.relayer_queue_max_attempts,
     max_payload_bytes=cfg.relayer_queue_max_payload_bytes,
     running_ttl_seconds=cfg.relayer_queue_running_ttl_seconds,
+    deadletter_retention_seconds=cfg.relayer_queue_deadletter_retention_seconds,
     fee_bump_percent=cfg.relayer_fee_bump_percent,
 )
 

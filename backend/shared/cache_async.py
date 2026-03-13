@@ -126,18 +126,25 @@ def jittered_ttl(base_ttl: int, jitter_pct: float = 0.1) -> int:
     return max(1, base_ttl + random.randint(-jitter, jitter))  # noqa: S311 - not cryptographic
 
 
-def get_client(url: str) -> Redis | None:
+def get_client(
+    url: str,
+    *,
+    max_connections: int = 20,
+    socket_timeout: float = 5.0,
+    socket_connect_timeout: float = 3.0,
+    health_check_interval: int = 30,
+) -> Redis | None:
     """Return an async Redis client connected to the provided URL."""
 
     try:
         return Redis.from_url(
             url,
             decode_responses=True,
-            max_connections=20,
-            socket_timeout=5.0,
-            socket_connect_timeout=3.0,
+            max_connections=max_connections,
+            socket_timeout=socket_timeout,
+            socket_connect_timeout=socket_connect_timeout,
             retry_on_timeout=True,
-            health_check_interval=30,
+            health_check_interval=health_check_interval,
         )
     except RedisError as exc:  # pragma: no cover - defensive
         shared_logging.log_event(

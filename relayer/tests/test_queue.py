@@ -281,6 +281,32 @@ def test_queue_deadletters_stale_running_with_tx_hash(tmp_path):
     assert status_row["last_error"] == "stale_running_with_tx_hash"
 
 
+def test_queue_prunes_stale_deadletter_jobs(tmp_path):
+    db_path = tmp_path / "queue.db"
+    svc = DummyService()
+    queue = TxQueue(str(db_path), svc, start_worker=False, deadletter_retention_seconds=60)
+    old_job_id = queue._enqueue_sync("claim", {"foo": "old"})  # noqa: SLF001
+    fresh_job_id = queue._enqueue_sync("claim", {"foo": "fresh"})  # noqa: SLF001
+    stale_time = int(time.time()) - 120
+    recent_time = int(time.time()) - 10
+    with queue._connect() as conn:  # noqa: SLF001
+        conn.execute(
+            "UPDATE jobs SET status = 'deadletter', updated_at = ? WHERE id = ?",
+            (stale_time, old_job_id),
+        )
+        conn.execute(
+            "UPDATE jobs SET status = 'deadletter', updated_at = ? WHERE id = ?",
+            (recent_time, fresh_job_id),
+        )
+
+    restarted = TxQueue(str(db_path), svc, start_worker=False, deadletter_retention_seconds=60)
+
+    with restarted._connect() as conn:  # noqa: SLF001
+        rows = conn.execute("SELECT id, status FROM jobs ORDER BY id").fetchall()
+
+    assert [(row["id"], row["status"]) for row in rows] == [(fresh_job_id, "deadletter")]
+
+
 @pytest.mark.asyncio
 async def test_worker_survives_unexpected_error(tmp_path):
     db_path = tmp_path / "queue.db"
