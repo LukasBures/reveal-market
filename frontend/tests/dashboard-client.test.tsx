@@ -212,7 +212,7 @@ describe("DashboardClient", () => {
     );
   });
 
-  it("switches to the target chain before claiming when wallet chain state is stale", async () => {
+  it("switches to the target chain before preparing and claiming when wallet chain state is stale", async () => {
     const switchChain = vi.fn().mockResolvedValue(undefined);
     hoisted.useConnection.mockReturnValue({
       address: "0x9999999999999999999999999999999999999999",
@@ -258,10 +258,13 @@ describe("DashboardClient", () => {
 
     const prepareButton = screen
       .getAllByRole("button")
-      .find((btn) => btn.textContent?.trim().toLowerCase() === "prepare to claim");
+      .find((btn) => /switch to horizen/i.test(btn.textContent ?? ""));
     expect(prepareButton).toBeTruthy();
     fireEvent.click(prepareButton!);
 
+    await waitFor(() =>
+      expect(switchChain).toHaveBeenCalledWith({ chainId: mockDefaultChain.id }),
+    );
     await waitFor(() => expect(hoisted.fetchClaimBundles).toHaveBeenCalledTimes(1));
 
     const claimButton = screen
@@ -271,7 +274,7 @@ describe("DashboardClient", () => {
     fireEvent.click(claimButton!);
 
     await waitFor(() =>
-      expect(switchChain).toHaveBeenCalledWith({ chainId: mockDefaultChain.id }),
+      expect(switchChain).toHaveBeenCalledTimes(2),
     );
     await waitFor(() => expect(writeContract).toHaveBeenCalledTimes(1));
     await waitFor(() =>

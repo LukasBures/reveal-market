@@ -763,6 +763,17 @@ export function DashboardClient() {
     }
   };
 
+  const handlePrepareClaim = async (marketId: string, ticketId?: number | null) => {
+    if (
+      !(await ensureTargetChain("prepare this claim", (message) =>
+        updateClaimMessage(message, "error")
+      ))
+    ) {
+      return;
+    }
+    await handlePrepareBundle(marketId, ticketId);
+  };
+
   const handleClaim = async (marketId: string, ticketId?: number | null) => {
     if (!address) return;
     const key = `${marketId}:${ticketId ?? "na"}`;
@@ -1661,19 +1672,31 @@ export function DashboardClient() {
                                 type="button"
                                 className="flex items-center gap-1.5 rounded-full bg-emerald-500 px-3 py-2 font-semibold text-white hover:bg-emerald-400 disabled:cursor-not-allowed sm:py-1"
                                 disabled={
-                                  preparingBundles.has(bundleKey)
+                                  preparingBundles.has(bundleKey) ||
+                                  isSwitchingChain ||
+                                  (chainMismatch && !canRequestChainSwitch)
                                 }
                                 onClick={() =>
-                                  handlePrepareBundle(p.market_id, p.ticket_id)
+                                  handlePrepareClaim(p.market_id, p.ticket_id)
+                                }
+                                title={
+                                  chainMismatch
+                                    ? `Switch to ${defaultChain.name} to prepare this claim`
+                                    : undefined
                                 }
                               >
-                                {preparingBundles.has(bundleKey) && (
+                                {(preparingBundles.has(bundleKey) ||
+                                  isSwitchingChain) && (
                                   <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
                                   </svg>
                                 )}
-                                {preparingBundles.has(bundleKey)
+                                {isSwitchingChain
+                                  ? "Switching..."
+                                  : chainMismatch
+                                  ? `Switch to ${defaultChain.name}`
+                                  : preparingBundles.has(bundleKey)
                                   ? "Preparing..."
                                   : "Prepare to claim"}
                               </button>
