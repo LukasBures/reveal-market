@@ -213,12 +213,22 @@ describe("DashboardClient", () => {
   });
 
   it("switches to the target chain before preparing and claiming when wallet chain state is stale", async () => {
-    const switchChain = vi.fn().mockResolvedValue(undefined);
+    let connectorChainId = 8453;
+    const switchChain = vi.fn().mockImplementation(
+      async () =>
+        await new Promise<void>((resolve) => {
+          setTimeout(() => {
+            connectorChainId = mockDefaultChain.id;
+            resolve();
+          }, 150);
+        }),
+    );
+    const getChainId = vi.fn().mockImplementation(async () => connectorChainId);
     hoisted.useConnection.mockReturnValue({
       address: "0x9999999999999999999999999999999999999999",
       isConnected: true,
       chain: { id: 8453, name: "Base" },
-      connector: { switchChain: vi.fn() },
+      connector: { switchChain: vi.fn(), getChainId },
     });
     hoisted.useChainId.mockReturnValue(26514);
     hoisted.useSwitchChain.mockReturnValue({
@@ -262,10 +272,13 @@ describe("DashboardClient", () => {
     expect(prepareButton).toBeTruthy();
     fireEvent.click(prepareButton!);
 
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(hoisted.fetchClaimBundles).not.toHaveBeenCalled();
     await waitFor(() =>
       expect(switchChain).toHaveBeenCalledWith({ chainId: mockDefaultChain.id }),
     );
     await waitFor(() => expect(hoisted.fetchClaimBundles).toHaveBeenCalledTimes(1));
+    expect(getChainId).toHaveBeenCalled();
 
     const claimButton = screen
       .getAllByRole("button")

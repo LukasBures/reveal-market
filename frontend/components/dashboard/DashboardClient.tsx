@@ -97,8 +97,25 @@ const shortenHash = (hash: string) => {
 };
 const MIN_CLAIM_GAS = 5_000_000n;
 const PAGE_SIZE = 10;
+const CHAIN_SWITCH_SETTLE_TIMEOUT_MS = 5000;
+const CHAIN_SWITCH_SETTLE_POLL_MS = 100;
 const formatZenDown = (value: number, decimals = 4): string =>
   roundDown(value, decimals).toFixed(decimals);
+
+const parseRuntimeChainId = (raw: unknown): number | null => {
+  if (typeof raw === "number") {
+    return Number.isFinite(raw) && raw > 0 ? raw : null;
+  }
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    const parsed = trimmed.startsWith("0x") || trimmed.startsWith("0X")
+      ? Number.parseInt(trimmed, 16)
+      : Number(trimmed);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+  return null;
+};
 
 type PositionStatusFlowProps = {
   status: string;
@@ -450,6 +467,59 @@ export function DashboardClient() {
     const cleaned = message.replace(/^Details:\s*/i, "").trim();
     return cleaned || "Action cancelled";
   }, []);
+  const readWalletChainId = useCallback(async (): Promise<number | null> => {
+    if (typeof activeConnector?.getChainId === "function") {
+      try {
+        const connectorChainId = await activeConnector.getChainId();
+        const parsed = parseRuntimeChainId(connectorChainId);
+        if (parsed !== null) {
+          return parsed;
+        }
+      } catch {
+        // Fall through to provider and local state checks.
+      }
+    }
+    if (typeof window !== "undefined") {
+      const provider = (
+        window as Window & {
+          ethereum?: {
+            chainId?: string | number;
+            request?: (args: { method: string }) => Promise<unknown>;
+          };
+        }
+      ).ethereum;
+      if (typeof provider?.request === "function") {
+        try {
+          const requestedChainId = await provider.request({ method: "eth_chainId" });
+          const parsed = parseRuntimeChainId(requestedChainId);
+          if (parsed !== null) {
+            return parsed;
+          }
+        } catch {
+          // Fall back to cached provider state.
+        }
+      }
+      const providerChainId = parseRuntimeChainId(provider?.chainId);
+      if (providerChainId !== null) {
+        return providerChainId;
+      }
+    }
+    return parseRuntimeChainId(walletChainId);
+  }, [activeConnector, walletChainId]);
+  const waitForWalletChain = useCallback(
+    async (targetChainId: number) => {
+      const deadline = Date.now() + CHAIN_SWITCH_SETTLE_TIMEOUT_MS;
+      let currentChainId = await readWalletChainId();
+      while (currentChainId !== targetChainId && Date.now() < deadline) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, CHAIN_SWITCH_SETTLE_POLL_MS)
+        );
+        currentChainId = await readWalletChainId();
+      }
+      return currentChainId === targetChainId;
+    },
+    [readWalletChainId]
+  );
   const ensureTargetChain = useCallback(
     async (actionLabel: string, onError: (message: string) => void) => {
       if (!chainMismatch) {
@@ -463,6 +533,11 @@ export function DashboardClient() {
       }
       try {
         await Promise.resolve(switchFn({ chainId: defaultChain.id }));
+        const settled = await waitForWalletChain(defaultChain.id);
+        if (!settled) {
+          onError(`Switch to ${defaultChain.name} to ${actionLabel}.`);
+          return false;
+        }
         return true;
       } catch (err) {
         onError(
@@ -479,6 +554,7 @@ export function DashboardClient() {
       switchChain,
       switchChainAsync,
       switchError,
+      waitForWalletChain,
     ]
   );
   const updateClaimMessage = useCallback(
