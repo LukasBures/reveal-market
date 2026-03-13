@@ -277,14 +277,14 @@ async def test_sync_market_reuses_prefetched_resolution(monkeypatch):
                     event_id=existing_market.event_id,
                     source="goldsky_subgraph",
                     resolved=True,
-                        payouts=[0, 1],
-                        winners=[{"index": 1, "label": "No", "payout": 1}],
-                        winning_outcome_id=1,
-                        transaction_hash="0x" + "2" * 64,
-                        block_number=555,
-                        checked_at=checked_at,
-                    )
+                    payouts=[0, 1],
+                    winners=[{"index": 1, "label": "No", "payout": 1}],
+                    winning_outcome_id=1,
+                    transaction_hash="0x" + "2" * 64,
+                    block_number=555,
+                    checked_at=checked_at,
                 )
+            )
             await session.commit()
 
         async with session_factory() as session:
