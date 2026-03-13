@@ -539,6 +539,8 @@ def test_claim_bundles_return_winning_ticket(client, db_session):
     assert bundle["merkleProof"] == expected_proof
     assert bundle["commitmentsRoot"].lower() == merkle_root.lower()
     assert bundle["user"].lower() == user.address.lower()
+    cache_key = f"claim:bundles:{user.address.lower()}:all"
+    assert cache_key not in client.app.cache_client.store
 
 
 def test_claim_bundles_skip_claimed_commitment(client, db_session):
@@ -585,6 +587,74 @@ def test_claim_bundles_skip_claimed_commitment(client, db_session):
     body = resp.json()
     assert body["bundles"] == []
     assert body.get("status") is None
+
+
+def test_claim_bundles_do_not_serve_stale_positive_cache_after_claim(client, db_session, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    user = Account.create()
+    market = _seed_market(
+        db_session, event_id="bundle-after-claim", address="0x7777777777777777777777777777777777777790"
+    )
+    commitment_hex = "0x" + "52" * 32
+    leaf_bytes = bytes.fromhex(commitment_hex[2:])
+    root_bytes, paths = build_merkle_root_and_paths([leaf_bytes])
+    merkle_root = "0x" + root_bytes.hex()
+
+    commitment = models.Commitment(
+        market_id=market.id,
+        user_address=user.address.lower(),
+        outcome_id=1,
+        amount_wei=200,
+        payout_wei=250,
+        salt="0xbeef",
+        ticket_hash=commitment_hex.lower(),
+        leaf=commitment_hex.lower(),
+        leaf_index=0,
+    )
+    db_session.add(commitment)
+    db_session.add(
+        models.Settlement(
+            id=32,
+            market_id=market.id,
+            merkle_root=merkle_root,
+            commitments_count=1,
+            winning_outcome_id=1,
+            proof_status=models.SettlementProofStatus.GENERATED.value,
+            created_at=datetime.now(tz=UTC),
+        )
+    )
+    db_session.commit()
+
+    signature = Account.sign_message(
+        encode_defunct(text=f"claim-bundles:{user.address.lower()}"),
+        private_key=user._private_key,
+    ).signature.hex()
+    first_resp = client.get(f"/claim/bundles?wallet={user.address}", headers={"X-Wallet-Signature": signature})
+    assert first_resp.status_code == 200
+    assert len(first_resp.json()["bundles"]) == 1
+
+    monkeypatch.setattr("app.routes.trade._fetch_claimed_tickets", AsyncMock(return_value={0: False}))
+    monkeypatch.setattr(runtime.settings, "relayer_base_url", "http://relayer", raising=False)
+
+    async def _http_client_stub(*_args, **_kwargs):
+        return _AsyncClientStub({"txHash": "0x" + "ab" * 32})
+
+    monkeypatch.setattr("app.routes.trade.get_http_client", _http_client_stub)
+
+    claim_resp = client.post(
+        "/trade/claim",
+        json={"market_id": market.event_id, "wallet_address": user.address},
+    )
+    assert claim_resp.status_code == 200
+    assert claim_resp.json()["status"] == "claimed"
+
+    monkeypatch.setattr(runtime.settings, "rpc_url", "http://rpc", raising=False)
+    monkeypatch.setattr("app.routes.trade._fetch_claimed_tickets", AsyncMock(return_value={0: True}))
+
+    second_resp = client.get(f"/claim/bundles?wallet={user.address}", headers={"X-Wallet-Signature": signature})
+    assert second_resp.status_code == 200
+    assert second_resp.json()["bundles"] == []
 
 
 def test_claim_bundles_clear_stale_claimed_at_when_chain_unclaimed(client, db_session, monkeypatch):
@@ -888,6 +958,27 @@ def test_trade_status_reads_queue_result(client, monkeypatch):
     cache.store["queue-key:result:job1"] = json.dumps({"status": "pending"})
 
     resp = client.get("/trade/status", params={"job_id": "job1"})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "pending"
+
+
+def test_trade_status_falls_back_to_relayer_when_cache_get_raises(client, monkeypatch):
+    class BrokenCache:
+        async def get(self, _key):
+            raise RuntimeError("redis overloaded")
+
+    async def _get_cache():
+        return BrokenCache()
+
+    async def _call_relayer(_endpoint: str, _payload: dict):
+        return {"status": "pending"}
+
+    monkeypatch.setattr("app.routes.trade.get_cache_client", _get_cache)
+    monkeypatch.setattr("app.routes.trade.call_relayer", _call_relayer)
+    monkeypatch.setattr("app.runtime.settings.relayer_queue_key", "queue-key", raising=False)
+    monkeypatch.setattr("app.runtime.settings.relayer_base_url", "http://relayer", raising=False)
+
+    resp = client.get("/trade/status", params={"job_id": "job-cache-error"})
     assert resp.status_code == 200
     assert resp.json()["status"] == "pending"
 
@@ -1750,6 +1841,118 @@ def test_claim_clears_claimed_at_if_rpc_says_unclaimed(client, db_session, monke
     assert refreshed is not None
     assert refreshed.claimed_at is not None
     assert refreshed.claimed_at != stale_claimed_at, "stale claimed_at must be replaced by current timestamp"
+
+
+def test_claim_keeps_pending_job_state_when_chain_still_unclaimed(client, db_session, monkeypatch):
+    """A queued/pending prior claim must block retries instead of being cleared as stale."""
+    from unittest.mock import AsyncMock
+
+    user = Account.create()
+    market = _seed_market(db_session, event_id="claim-pending-job", address="0x" + "6" * 38 + "66")
+    commitment_hex = "0x" + "dd" * 32
+    leaf_bytes = bytes.fromhex(commitment_hex[2:])
+    root_bytes, _ = build_merkle_root_and_paths([leaf_bytes])
+    merkle_root = "0x" + root_bytes.hex()
+    commitment = models.Commitment(
+        market_id=market.id,
+        user_address=user.address.lower(),
+        outcome_id=0,
+        amount_wei=100,
+        payout_wei=200,
+        salt="0x0",
+        ticket_hash=commitment_hex.lower(),
+        leaf=commitment_hex.lower(),
+        leaf_index=0,
+        claim_tx_hash="claim-job-pending",
+    )
+    db_session.add(commitment)
+    db_session.add(
+        models.Settlement(
+            market_id=market.id,
+            merkle_root=merkle_root,
+            commitments_count=1,
+            winning_outcome_id=0,
+            proof_status=models.SettlementProofStatus.GENERATED.value,
+            created_at=datetime.now(tz=UTC),
+        )
+    )
+    db_session.commit()
+    commitment_id = commitment.id
+
+    monkeypatch.setattr("app.routes.trade._fetch_claimed_tickets", AsyncMock(return_value={0: False}))
+    monkeypatch.setattr(runtime.settings, "relayer_queue_key", "queue-key", raising=False)
+    client.app.cache_client.store["queue-key:result:claim-job-pending"] = json.dumps({"status": "pending"})
+
+    resp = client.post(
+        "/trade/claim",
+        json={"market_id": market.event_id, "wallet_address": user.address},
+    )
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "claim_already_pending"
+
+    db_session.expire_all()
+    refreshed = db_session.get(models.Commitment, commitment_id)
+    assert refreshed is not None
+    assert refreshed.claim_tx_hash == "claim-job-pending"
+    assert refreshed.claimed_at is None
+
+
+def test_claim_does_not_clear_existing_claim_state_when_rpc_status_is_unknown(client, db_session, monkeypatch):
+    """When RPC check fails, existing claim state must be preserved instead of cleared and retried."""
+    from unittest.mock import AsyncMock
+
+    user = Account.create()
+    market = _seed_market(db_session, event_id="claim-unknown-state", address="0x" + "7" * 38 + "77")
+    commitment_hex = "0x" + "ee" * 32
+    leaf_bytes = bytes.fromhex(commitment_hex[2:])
+    root_bytes, _ = build_merkle_root_and_paths([leaf_bytes])
+    merkle_root = "0x" + root_bytes.hex()
+    stale_claimed_at = datetime(2021, 1, 1, tzinfo=UTC)
+    commitment = models.Commitment(
+        market_id=market.id,
+        user_address=user.address.lower(),
+        outcome_id=0,
+        amount_wei=100,
+        payout_wei=200,
+        salt="0x0",
+        ticket_hash=commitment_hex.lower(),
+        leaf=commitment_hex.lower(),
+        leaf_index=0,
+        claimed_at=stale_claimed_at,
+        claim_tx_hash="claim-job-unknown",
+    )
+    db_session.add(commitment)
+    db_session.add(
+        models.Settlement(
+            market_id=market.id,
+            merkle_root=merkle_root,
+            commitments_count=1,
+            winning_outcome_id=0,
+            proof_status=models.SettlementProofStatus.GENERATED.value,
+            created_at=datetime.now(tz=UTC),
+        )
+    )
+    db_session.commit()
+    commitment_id = commitment.id
+
+    monkeypatch.setattr("app.routes.trade._fetch_claimed_tickets", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        "app.routes.trade.call_relayer", AsyncMock(side_effect=HTTPException(status_code=502, detail="boom"))
+    )
+
+    resp = client.post(
+        "/trade/claim",
+        json={"market_id": market.event_id, "wallet_address": user.address},
+    )
+    assert resp.status_code == 503
+    assert resp.json()["detail"] == "claim_status_unavailable"
+
+    db_session.expire_all()
+    refreshed = db_session.get(models.Commitment, commitment_id)
+    assert refreshed is not None
+    assert refreshed.claim_tx_hash == "claim-job-unknown"
+    assert refreshed.claimed_at is not None
+    assert refreshed.claimed_at.replace(tzinfo=UTC) == stale_claimed_at
 
 
 def test_claim_internal_secret_bypasses_wallet_signature(client, db_session, monkeypatch):

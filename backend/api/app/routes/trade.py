@@ -69,6 +69,22 @@ def _ensure_0x(value: str) -> str:
     return value if value.startswith("0x") else f"0x{value}"
 
 
+def _ticket_counter_key(market_address: str) -> str:
+    return f"ticket_counter:{market_address.lower()}"
+
+
+def _pending_commit_reservation_key(market_address: str) -> str:
+    return f"ticket_pending:{market_address.lower()}"
+
+
+def _claim_bundles_cache_prefix(wallet: str) -> str:
+    return f"claim:bundles:{wallet.lower()}:"
+
+
+def _relayer_queue_result_key(job_id: str) -> str:
+    return f"{settings.relayer_queue_key}:result:{job_id}"
+
+
 def _normalize_bytes32(value: Any) -> str | None:
     """Return a 0x-prefixed hex string for bytes/HexBytes values."""
 
@@ -113,10 +129,114 @@ def _parse_json_list(value: Any) -> list[Any]:
     return []
 
 
+def _parse_json_value(value: Any) -> Any:
+    if isinstance(value, (bytes, bytearray)):
+        try:
+            value = value.decode()
+        except Exception:
+            return None
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return None
+    return value
+
+
+def _parse_json_object(value: Any) -> dict[str, Any] | None:
+    parsed = _parse_json_value(value)
+    return dict(parsed) if isinstance(parsed, Mapping) else None
+
+
+def _parse_pending_commit_reservations(value: Any) -> list[dict[str, Any]]:
+    parsed = _parse_json_value(value)
+    if isinstance(parsed, Mapping):
+        parsed = [parsed]
+    if not isinstance(parsed, list):
+        return []
+    reservations: list[dict[str, Any]] = []
+    for item in parsed:
+        if not isinstance(item, Mapping):
+            continue
+        job_id = item.get("jobId") or item.get("job_id")
+        ticket_id = item.get("ticketId", item.get("ticket_id"))
+        if not job_id:
+            continue
+        try:
+            reservations.append({"jobId": str(job_id), "ticketId": int(ticket_id)})
+        except (TypeError, ValueError):
+            continue
+    reservations.sort(key=lambda item: int(item["ticketId"]))
+    return reservations
+
+
 async def _resolve_awaitable(value: Awaitable[Any] | Any) -> Any:
     if inspect.isawaitable(value):
         return await value
     return value
+
+
+def _relayer_result_ttl_seconds() -> int:
+    return max(int(getattr(settings, "relayer_queue_result_ttl_seconds", 0) or 0), 60)
+
+
+def _pending_commit_reservation_ttl_seconds() -> int:
+    return max(
+        _relayer_result_ttl_seconds(),
+        int(getattr(settings, "commit_nonce_ttl_seconds", 0) or 0),
+        3600,
+    )
+
+
+async def _safe_cache_get(cache: Any, key: str, *, event: str) -> Any:
+    if cache is None:
+        return None
+    try:
+        return await _resolve_awaitable(cache.get(key))
+    except Exception as exc:
+        log_event(
+            logger,
+            logging.WARNING,
+            event=event,
+            message="cache get failed",
+            key=key,
+            error=str(exc),
+        )
+        return None
+
+
+async def _safe_cache_set(cache: Any, key: str, value: Any, *, event: str, ex: int | None = None) -> bool:
+    if cache is None:
+        return False
+    try:
+        await _resolve_awaitable(cache.set(key, value, ex=ex))
+        return True
+    except Exception as exc:
+        log_event(
+            logger,
+            logging.WARNING,
+            event=event,
+            message="cache set failed",
+            key=key,
+            error=str(exc),
+        )
+        return False
+
+
+async def _safe_cache_delete(cache: Any, key: str, *, event: str) -> None:
+    if cache is None:
+        return
+    try:
+        await _resolve_awaitable(cache.delete(key))
+    except Exception as exc:
+        log_event(
+            logger,
+            logging.WARNING,
+            event=event,
+            message="cache delete failed",
+            key=key,
+            error=str(exc),
+        )
 
 
 async def _enqueue_claim_proof_jobs(
@@ -834,6 +954,73 @@ def _extract_job_id(data: Mapping[str, Any] | None) -> str | None:
     return None
 
 
+def _extract_result_status(data: Mapping[str, Any] | None) -> str | None:
+    if not data:
+        return None
+    for key in ("status", "state"):
+        value = data.get(key)
+        if value is not None:
+            text = str(value).strip().lower()
+            if text:
+                return text
+    return None
+
+
+async def _get_relayer_job_result(job_id: str) -> dict[str, Any] | None:
+    """Fetch the latest relayer/local-queue status for a job id."""
+
+    if not job_id:
+        return None
+    cache = await get_cache_client()
+    cached_result = _parse_json_object(
+        await _safe_cache_get(cache, _relayer_queue_result_key(job_id), event="trade.relayer_job.cache_get_failed")
+    )
+    if cached_result is not None:
+        return cached_result
+    if not settings.relayer_base_url:
+        return None
+    try:
+        status_url = _relayer_url("status")
+        result = await call_relayer(status_url, {"jobId": job_id})
+    except Exception:
+        return None
+    return result if isinstance(result, dict) else None
+
+
+async def _resolve_submission_state(reference: str | None) -> str | None:
+    """Return the best-known state for a tx hash or relayer job id."""
+
+    if not reference:
+        return None
+    normalized_tx = _normalize_tx_hash(reference)
+    if normalized_tx and _is_hex_tx(normalized_tx):
+        if not settings.rpc_url:
+            return "unknown"
+        try:
+            web3 = get_async_web3(str(settings.rpc_url))
+            receipt = await web3.eth.get_transaction_receipt(normalized_tx)
+            return "confirmed" if int(receipt.get("status", 0)) == 1 else "failed"
+        except Exception as exc:
+            detail = str(exc).lower()
+            if "not found" in detail:
+                return "pending"
+            return "unknown"
+    result = await _get_relayer_job_result(str(reference))
+    if result is None:
+        return "unknown"
+    resolved_tx = _extract_tx_hash(result)
+    if resolved_tx and _is_hex_tx(resolved_tx):
+        return await _resolve_submission_state(resolved_tx)
+    result_status = _extract_result_status(result)
+    if result_status in {"queued", "pending", "running"}:
+        return "pending"
+    if result_status in {"failed", "deadletter", "purged"}:
+        return "failed"
+    if result_status in {"succeeded", "confirmed"}:
+        return "confirmed"
+    return "unknown"
+
+
 async def _maybe_replace_job_tx_hash(session: AsyncSession, job_id: str, resolved_tx: str) -> None:
     """Replace a stored job id with the finalized tx hash (best-effort)."""
 
@@ -858,25 +1045,7 @@ async def _resolve_job_tx_hash(session: AsyncSession, job_id: str) -> str | None
 
     if not job_id:
         return None
-    cache = await get_cache_client()
-    if cache is not None:
-        cached = await cache.get(f"{settings.relayer_queue_key}:result:{job_id}")
-        if cached:
-            try:
-                cached_result = json.loads(cached)
-            except Exception:
-                cached_result = {}
-            resolved = _extract_tx_hash(cached_result)
-            if resolved and _is_hex_tx(resolved):
-                await _maybe_replace_job_tx_hash(session, job_id, resolved)
-                return resolved
-    if not settings.relayer_base_url:
-        return None
-    try:
-        status_url = _relayer_url("status")
-        result = await call_relayer(status_url, {"jobId": job_id})
-    except Exception:
-        return None
+    result = await _get_relayer_job_result(job_id)
     resolved_tx = _extract_tx_hash(result)
     if resolved_tx and _is_hex_tx(resolved_tx):
         await _maybe_replace_job_tx_hash(session, job_id, resolved_tx)
@@ -975,13 +1144,118 @@ async def _next_ticket_id_onchain(market_address: str, market_db_id: int, sessio
         return onchain_count
 
 
+async def _store_pending_commit_reservation(market_address: str, job_id: str, ticket_id: int) -> None:
+    if not job_id:
+        return
+    cache = await get_cache_client()
+    if cache is None:
+        return
+    key = _pending_commit_reservation_key(market_address)
+    pending = _parse_pending_commit_reservations(
+        await _safe_cache_get(cache, key, event="trade.pending_commit.cache_get_failed")
+    )
+    pending = [item for item in pending if str(item.get("jobId")) != str(job_id)]
+    pending.append({"jobId": str(job_id), "ticketId": int(ticket_id)})
+    pending.sort(key=lambda item: int(item["ticketId"]))
+    await _safe_cache_set(
+        cache,
+        key,
+        json.dumps(pending),
+        event="trade.pending_commit.cache_set_failed",
+        ex=_pending_commit_reservation_ttl_seconds(),
+    )
+
+
+async def _set_relayer_job_result_override(job_id: str, payload: dict[str, Any]) -> None:
+    if not job_id:
+        return
+    cache = await get_cache_client()
+    if cache is None:
+        return
+    await _safe_cache_set(
+        cache,
+        _relayer_queue_result_key(job_id),
+        json.dumps(payload),
+        event="trade.relayer_job.cache_set_failed",
+        ex=_relayer_result_ttl_seconds(),
+    )
+
+
+async def _write_pending_commit_reservations(
+    cache: Any, market_address: str, reservations: list[dict[str, Any]]
+) -> None:
+    key = _pending_commit_reservation_key(market_address)
+    if not reservations:
+        await _safe_cache_delete(cache, key, event="trade.pending_commit.cache_delete_failed")
+        return
+    await _safe_cache_set(
+        cache,
+        key,
+        json.dumps(reservations),
+        event="trade.pending_commit.cache_set_failed",
+        ex=_pending_commit_reservation_ttl_seconds(),
+    )
+
+
+async def _reconcile_pending_commit_reservations(cache: Any, market_address: str, tentative_next: int) -> int:
+    reservations = _parse_pending_commit_reservations(
+        await _safe_cache_get(
+            cache, _pending_commit_reservation_key(market_address), event="trade.pending_commit.cache_get_failed"
+        )
+    )
+    if not reservations:
+        return tentative_next
+
+    current_expected = int(tentative_next)
+    active_reservations: list[dict[str, Any]] = []
+    stale_reservations: list[dict[str, Any]] = []
+
+    for index, reservation in enumerate(reservations):
+        ticket_id = int(reservation["ticketId"])
+        job_id = str(reservation["jobId"])
+        if ticket_id < current_expected:
+            continue
+        if ticket_id > current_expected:
+            stale_reservations.extend(reservations[index:])
+            break
+        submission_state = await _resolve_submission_state(job_id)
+        if submission_state == "failed":
+            stale_reservations.extend(reservations[index + 1 :])
+            break
+        if submission_state == "confirmed":
+            current_expected += 1
+            continue
+        if submission_state == "pending":
+            active_reservations.append(reservation)
+            current_expected += 1
+            continue
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="commit_status_unavailable")
+
+    if stale_reservations:
+        for reservation in stale_reservations:
+            await _set_relayer_job_result_override(
+                str(reservation["jobId"]),
+                {"status": "failed", "error": "stale_after_prior_commit_failure"},
+            )
+
+    await _write_pending_commit_reservations(cache, market_address, active_reservations)
+    await _safe_cache_set(
+        cache,
+        _ticket_counter_key(market_address),
+        str(current_expected - 1),
+        event="ticket_counter.cache_set_failed",
+    )
+    return current_expected
+
+
 async def _reserve_ticket_id(market_address: str, tentative_next: int) -> int:
     """Reserve a ticket id using Redis to avoid duplicate leaf indices under concurrency."""
 
     cache = await get_cache_client()
     if cache is None:
         return tentative_next
-    key = f"ticket_counter:{market_address.lower()}"
+    tentative_next = await _reconcile_pending_commit_reservations(cache, market_address, tentative_next)
+    key = _ticket_counter_key(market_address)
     try:
         base = int(tentative_next) - 1
         reserved_raw = await cast(Awaitable[Any], cache.eval(_RESERVE_TICKET_LUA, 1, key, base))  # type: ignore[arg-type]
@@ -996,7 +1270,12 @@ async def _reserve_ticket_id(market_address: str, tentative_next: int) -> int:
                 tentative=tentative_next,
                 market_address=market_address,
             )
-            await cache.set(key, str(tentative_next))
+            await _safe_cache_set(
+                cache,
+                key,
+                str(tentative_next),
+                event="ticket_counter.cache_set_failed",
+            )
             return tentative_next
         return reserved
     except Exception as exc:  # pragma: no cover - best-effort guard
@@ -1113,6 +1392,13 @@ async def _release_claim_lock(lock_key: str | None) -> None:
             lock_key=lock_key,
             error=str(exc),
         )
+
+
+async def _invalidate_claim_bundles_cache(wallet: str) -> None:
+    cache = await get_cache_client()
+    if cache is None:
+        return
+    await shared_cache.delete_prefix(cache, _claim_bundles_cache_prefix(wallet))
 
 
 async def _maybe_create_market_onchain(session: AsyncSession, market_obj) -> tuple[str, int]:
@@ -2022,6 +2308,8 @@ async def trade_commit(
     queued_commit = (relayer_job is not None and not _is_hex_tx(response_tx_hash)) or (
         relayer_status is not None and relayer_status.lower() == "queued" and not _is_hex_tx(response_tx_hash)
     )
+    if queued_commit and relayer_job is not None:
+        await _store_pending_commit_reservation(market_address, relayer_job, ticket_id)
 
     if tx_hash and _is_hex_tx(str(tx_hash)):
         await repository_async.record_commitments(
@@ -2217,9 +2505,9 @@ async def list_claim_bundles(
     _verify_wallet_signature(wallet, wallet_signature)
 
     cache_client = await get_cache_client()
-    cache_key = f"claim:bundles:{wallet.lower()}:{market_id or 'all'}"
+    cache_key = f"{_claim_bundles_cache_prefix(wallet)}{market_id or 'all'}"
     cached = await shared_cache.get_json(cache_client, cache_key)
-    if isinstance(cached, dict) and "bundles" in cached:
+    if isinstance(cached, dict) and "bundles" in cached and not cached.get("bundles"):
         try:
             return schemas.ClaimBundlesResponse.model_validate(cached)
         except Exception as exc:
@@ -2322,14 +2610,7 @@ async def list_claim_bundles(
             )
         )
     if bundles:
-        response = schemas.ClaimBundlesResponse(bundles=bundles)
-        await shared_cache.set_json(
-            cache_client,
-            cache_key,
-            response.model_dump(by_alias=True),
-            ttl_seconds=settings.claim_bundles_cache_ttl_seconds,
-        )
-        return response
+        return schemas.ClaimBundlesResponse(bundles=bundles)
     if pending_markets:
         response = schemas.ClaimBundlesResponse(
             bundles=[],
@@ -2456,18 +2737,26 @@ async def trade_claim(
             market_address=market.market_address,
             ticket_id=ticket_id,
         )
-    if claimed_map is not None and claimed_map.get(int(ticket_id)):
+    chain_claimed = claimed_map.get(int(ticket_id)) if claimed_map is not None else None
+    if chain_claimed:
         if commitment.claimed_at is None:
             commitment.claimed_at = datetime.now(tz=UTC)
             session.add(commitment)
             await session.flush()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="ticket_already_claimed")
     if commitment.claimed_at is not None or commitment.claim_tx_hash is not None:
-        # On-chain says not claimed — clear stale claimed_at from a failed relayer job
-        commitment.claimed_at = None
-        commitment.claim_tx_hash = None
-        session.add(commitment)
-        await session.flush()
+        submission_state = await _resolve_submission_state(commitment.claim_tx_hash)
+        if submission_state in {"pending", "confirmed"}:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="claim_already_pending")
+        if submission_state == "unknown" and commitment.claim_tx_hash is not None:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="claim_status_unavailable")
+        if submission_state == "failed" or chain_claimed is False:
+            commitment.claimed_at = None
+            commitment.claim_tx_hash = None
+            session.add(commitment)
+            await session.flush()
+        elif chain_claimed is None:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="claim_status_unavailable")
     merkle_proof = [row.sibling_hash for row in path_rows] if path_rows else []
     if not merkle_proof:
         merkle_proof = await _build_merkle_proof_for_commitment(session, market, settlement, commitment)
@@ -2533,6 +2822,7 @@ async def trade_claim(
             commitment.claimed_at = datetime.now(tz=UTC)
         session.add(commitment)
         await session.flush()
+        await _invalidate_claim_bundles_cache(payload.wallet_address)
         payout_zen = int(commitment.payout_wei) / 10**18
         if response_tx_hash and _is_hex_tx(response_tx_hash) and not queued_claim:
             lifecycle.notify(
@@ -2828,34 +3118,17 @@ async def trade_status(
     if resolved_tx and job_id_value:
         await _maybe_replace_job_tx_hash(session, job_id_value, resolved_tx)
     if not resolved_tx and job_id_value:
-        cache = await get_cache_client()
-        if cache is not None:
-            cached = await cache.get(f"{settings.relayer_queue_key}:result:{job_id_value}")
-            if cached:
-                try:
-                    cached_result = json.loads(cached)
-                except Exception:
-                    cached_result = {}
-                cached_tx = _extract_tx_hash(cached_result)
-                if cached_tx and _is_hex_tx(cached_tx):
-                    resolved_tx = cached_tx
-                    await _maybe_replace_job_tx_hash(session, job_id_value, resolved_tx)
-                else:
-                    status_str = cached_result.get("status") or "pending"
-                    return schemas.TradeStatusResponse(tx_hash="", status=status_str)
-        if not settings.relayer_base_url:
-            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="relayer_unconfigured")
-        status_url = _relayer_url("status")
-        try:
-            result = await call_relayer(status_url, {"jobId": job_id_value})
-        except HTTPException as exc:
+        result = await _get_relayer_job_result(job_id_value)
+        if result is None:
+            if not settings.relayer_base_url:
+                raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="relayer_unconfigured")
             log_event(
                 logger,
                 logging.DEBUG,
                 event="trade.status.relayer_error",
                 message="relayer status lookup failed",
                 job_id=job_id_value,
-                error=str(exc.detail) if hasattr(exc, "detail") else str(exc),
+                error="unavailable",
             )
             return schemas.TradeStatusResponse(tx_hash="", status="unknown")
         resolved_tx = _extract_tx_hash(result)

@@ -205,6 +205,10 @@ class LockBatchDataError(RuntimeError):
     """Raised when commitments are incomplete or malformed for batch locking."""
 
 
+class LockBatchSafetyError(RuntimeError):
+    """Raised when lockBatches would create an unsafe or unsettleable market."""
+
+
 def _normalize_leaf_hex(value: str | None) -> bytes:
     if not value:
         raise LockBatchDataError("missing_commitment_leaf")
@@ -828,9 +832,6 @@ async def _ensure_protocol_liability_cap(
     address and owner wallet key are available we fix the cap automatically so that
     lockBatches never produces an unsettleable market.
     """
-    if not runtime.settings.factory_address or not runtime.settings.wallet_private_key:
-        return
-
     try:
         contract = _build_market_contract(web3, market_address)
         current_cap = int(await contract.functions.protocolLiabilityCap().call())
@@ -844,7 +845,7 @@ async def _ensure_protocol_liability_cap(
             market_address=market_address,
             error=str(exc),
         )
-        return
+        raise LockBatchSafetyError("liability_cap_check_failed") from exc
 
     liability_yes = sum(int(getattr(c, "payout_wei", 0) or 0) for c in commitments if c.outcome_id == 0)
     liability_no = sum(int(getattr(c, "payout_wei", 0) or 0) for c in commitments if c.outcome_id == 1)
@@ -853,6 +854,20 @@ async def _ensure_protocol_liability_cap(
 
     if required_cap <= current_cap:
         return
+
+    if not runtime.settings.factory_address or not runtime.settings.wallet_private_key:
+        log_event(
+            logger,
+            logging.ERROR,
+            event="worker.lock_batches.liability_cap_update_unavailable",
+            message="protocolLiabilityCap too low and auto-update credentials are unavailable",
+            market_address=market_address,
+            current_cap=current_cap,
+            required_cap=required_cap,
+            total_escrow=total_escrow,
+            max_liability=max_liability,
+        )
+        raise LockBatchSafetyError("liability_cap_update_unavailable")
 
     log_event(
         logger,
@@ -903,6 +918,7 @@ async def _ensure_protocol_liability_cap(
             required_cap=required_cap,
             error=str(exc),
         )
+        raise LockBatchSafetyError("liability_cap_update_failed") from exc
 
 
 async def run_lock_batches_jobs(summary, redis_client: Redis | None) -> int:
@@ -1158,9 +1174,8 @@ async def run_lock_batches_jobs(summary, redis_client: Redis | None) -> int:
                             continue
                         use_relayer_for_market = False
 
-                await _ensure_protocol_liability_cap(web3, market.market_address, commitments)
-
                 try:
+                    await _ensure_protocol_liability_cap(web3, market.market_address, commitments)
                     tx_hash = None
                     block_number = None
                     if use_relayer_for_market and runtime.settings.relayer_base_url:

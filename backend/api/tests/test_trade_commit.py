@@ -7,7 +7,9 @@ from datetime import UTC, datetime, timedelta
 from decimal import ROUND_DOWN, Decimal
 
 import app.runtime as runtime
+import pytest
 from app import models
+from app.routes import trade as trade_routes
 from eth_account import Account
 from eth_account.messages import encode_defunct
 from pydantic import SecretStr
@@ -193,6 +195,35 @@ class _AsyncClientStub:
 
     def json(self):
         return self.payload
+
+
+class _ReservationCache:
+    """In-memory cache with enough Redis-like behavior for ticket reservation tests."""
+
+    def __init__(self):
+        self.store: dict[str, str] = {}
+
+    async def get(self, key: str):
+        return self.store.get(key)
+
+    async def set(self, key: str, value, ex: int | None = None, nx: bool | None = None):
+        if nx and key in self.store:
+            return False
+        self.store[key] = str(value)
+        return True
+
+    async def delete(self, *keys: str) -> None:
+        for key in keys:
+            self.store.pop(key, None)
+
+    async def eval(self, _script: str, _numkeys: int, key: str, base: int):
+        current_raw = self.store.get(key)
+        current = int(current_raw) if current_raw is not None else int(base)
+        if current < int(base):
+            current = int(base)
+        next_value = current + 1
+        self.store[key] = str(next_value)
+        return next_value
 
 
 # ---------------------------------------------------------------------------
@@ -513,6 +544,140 @@ def test_commit_enqueues_when_relayer_fails_and_queue_enabled(client, db_session
     assert len(enqueued_jobs) == 1
     assert enqueued_jobs[0]["kind"] == "commit"
     assert db_session.query(models.Commitment).count() == 0
+
+
+def test_commit_reuses_ticket_after_deadlettered_queued_job(client, db_session, monkeypatch):
+    """A deadlettered queued commit must not poison the next reserved ticket id."""
+    first_user = Account.create()
+    second_user = Account.create()
+    market = _seed_commit_market(db_session, event_id="mkt-deadlettered")
+    settings = runtime.settings
+    cache = _ReservationCache()
+
+    monkeypatch.setattr(settings, "pricing_chain_id", 26514, raising=False)
+    monkeypatch.setattr(settings, "ticket_size_wei", 1_000_000_000_000_000_000, raising=False)
+    monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
+    monkeypatch.setattr(settings, "relayer_queue_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "relayer_queue_key", "relayer:queue", raising=False)
+    monkeypatch.setattr(settings, "relayer_escrow_address", None, raising=False)
+
+    async def _get_cache():
+        return cache
+
+    monkeypatch.setattr("app.routes.trade.get_cache_client", _get_cache)
+    _setup_commit_mocks(monkeypatch, settings, market.id, market.market_address)
+    monkeypatch.setattr("app.routes.trade._reserve_ticket_id", trade_routes._reserve_ticket_id)
+
+    queued_responses = [
+        {"jobId": "job-deadletter-1", "status": "queued"},
+        {"jobId": "job-deadletter-2", "status": "queued"},
+    ]
+
+    async def _http(*_a, **_kw):
+        return _AsyncClientStub(queued_responses.pop(0), status_code=202)
+
+    monkeypatch.setattr("app.routes.trade.get_http_client", _http)
+
+    first_quote = _seed_quote(
+        db_session,
+        quote_id="q-deadletter-1",
+        user_address=first_user.address,
+        market_id="mkt-deadlettered",
+        market_address=market.market_address,
+    )
+    first_sig = Account.sign_message(
+        encode_defunct(text=_build_commit_message(first_quote.payload, first_user.address)),
+        first_user._private_key,
+    ).signature.hex()
+
+    first_resp = client.post(
+        "/trade/commit",
+        json={"quote_id": "q-deadletter-1"},
+        headers={"X-Wallet-Signature": first_sig},
+    )
+    assert first_resp.status_code == 200
+    assert first_resp.json()["status"] == "queued"
+    assert first_resp.json()["ticket_id"] == 0
+
+    cache.store["relayer:queue:result:job-deadletter-1"] = '{"status":"deadletter","error":"commit_failed"}'
+
+    second_quote = _seed_quote(
+        db_session,
+        quote_id="q-deadletter-2",
+        user_address=second_user.address,
+        market_id="mkt-deadlettered",
+        market_address=market.market_address,
+    )
+    second_sig = Account.sign_message(
+        encode_defunct(text=_build_commit_message(second_quote.payload, second_user.address)),
+        second_user._private_key,
+    ).signature.hex()
+
+    second_resp = client.post(
+        "/trade/commit",
+        json={"quote_id": "q-deadletter-2"},
+        headers={"X-Wallet-Signature": second_sig},
+    )
+    assert second_resp.status_code == 200
+    assert second_resp.json()["status"] == "queued"
+    assert second_resp.json()["ticket_id"] == 0
+
+
+@pytest.mark.asyncio
+async def test_reserve_ticket_id_advances_past_pending_reservations(monkeypatch):
+    """Pending queued reservations should reserve the next ticket instead of blocking the market."""
+    settings = runtime.settings
+    cache = _ReservationCache()
+
+    monkeypatch.setattr(settings, "relayer_queue_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "relayer_queue_key", "relayer:queue", raising=False)
+    monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
+
+    async def _get_cache():
+        return cache
+
+    monkeypatch.setattr("app.routes.trade.get_cache_client", _get_cache)
+    first_ticket = await trade_routes._reserve_ticket_id("0x" + "1" * 40, 0)
+    assert first_ticket == 0
+    await trade_routes._store_pending_commit_reservation("0x" + "1" * 40, "job-pending-1", first_ticket)
+    cache.store["relayer:queue:result:job-pending-1"] = '{"status":"pending"}'
+
+    second_ticket = await trade_routes._reserve_ticket_id("0x" + "1" * 40, 0)
+    assert second_ticket == 1
+
+
+@pytest.mark.asyncio
+async def test_reserve_ticket_id_marks_later_pending_tickets_failed_after_prior_job_failure(monkeypatch):
+    """When an earlier reservation fails, later tickets for that market are invalidated and the counter resets."""
+    settings = runtime.settings
+    cache = _ReservationCache()
+
+    monkeypatch.setattr(settings, "relayer_queue_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "relayer_queue_key", "relayer:queue", raising=False)
+    monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
+
+    async def _get_cache():
+        return cache
+
+    monkeypatch.setattr("app.routes.trade.get_cache_client", _get_cache)
+
+    market_address = "0x" + "2" * 40
+    first_ticket = await trade_routes._reserve_ticket_id(market_address, 0)
+    assert first_ticket == 0
+    await trade_routes._store_pending_commit_reservation(market_address, "job-stale-1", first_ticket)
+    cache.store["relayer:queue:result:job-stale-1"] = '{"status":"pending"}'
+    second_ticket = await trade_routes._reserve_ticket_id(market_address, 0)
+    assert second_ticket == 1
+    await trade_routes._store_pending_commit_reservation(market_address, "job-stale-2", second_ticket)
+
+    cache.store["relayer:queue:result:job-stale-1"] = '{"status":"failed","error":"boom"}'
+    cache.store["relayer:queue:result:job-stale-2"] = '{"status":"pending"}'
+
+    third_ticket = await trade_routes._reserve_ticket_id(market_address, 0)
+    assert third_ticket == 0
+    stale_result = cache.store.get("relayer:queue:result:job-stale-2")
+    assert stale_result is not None
+    assert "stale_after_prior_commit_failure" in str(stale_result)
 
 
 def test_commit_raises_502_when_relayer_fails_and_queue_disabled(client, db_session, monkeypatch):
