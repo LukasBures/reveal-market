@@ -323,7 +323,8 @@ def test_queue_deadletters_stale_running_with_tx_hash(tmp_path):
     assert status_row["last_error"] == "stale_running_with_tx_hash"
 
 
-def test_queue_prunes_stale_deadletter_jobs(tmp_path):
+@pytest.mark.asyncio
+async def test_queue_prunes_stale_deadletter_jobs(tmp_path):
     db_path = tmp_path / "queue.db"
     svc = DummyService()
     queue = TxQueue(str(db_path), svc, start_worker=False, deadletter_retention_seconds=60)
@@ -342,6 +343,8 @@ def test_queue_prunes_stale_deadletter_jobs(tmp_path):
         )
 
     restarted = TxQueue(str(db_path), svc, start_worker=False, deadletter_retention_seconds=60)
+    # Pruning now happens in start(), not __init__
+    await restarted.start()
 
     with restarted._connect() as conn:  # noqa: SLF001
         rows = conn.execute("SELECT id, status FROM jobs ORDER BY id").fetchall()

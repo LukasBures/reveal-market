@@ -1263,7 +1263,20 @@ async def _reconcile_pending_commit_reservations(cache: Any, market_address: str
             active_reservations.append(reservation)
             current_expected += 1
             continue
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="commit_status_unavailable")
+        # "unknown" means the relayer/Redis is unreachable — treat as pending to avoid
+        # blocking all new commits; the next reconciliation will correct once reachable.
+        log_event(
+            logger,
+            logging.WARNING,
+            event="trade.pending_commit.status_unknown",
+            message="treating unknown submission state as pending to avoid blocking commits",
+            market_address=market_address,
+            job_id=job_id,
+            ticket_id=ticket_id,
+        )
+        active_reservations.append(reservation)
+        current_expected += 1
+        continue
 
     if stale_reservations:
         for reservation in stale_reservations:
@@ -1278,6 +1291,7 @@ async def _reconcile_pending_commit_reservations(cache: Any, market_address: str
         _ticket_counter_key(market_address),
         str(current_expected - 1),
         event="ticket_counter.cache_set_failed",
+        ex=_pending_commit_reservation_ttl_seconds(),
     )
     return current_expected
 
@@ -2566,7 +2580,7 @@ async def list_claim_bundles(
     cache_client = await get_cache_client()
     cache_key = f"{_claim_bundles_cache_prefix(wallet)}{market_id or 'all'}"
     cached = await shared_cache.get_json(cache_client, cache_key)
-    if isinstance(cached, dict) and "bundles" in cached and not cached.get("bundles"):
+    if isinstance(cached, dict) and "bundles" in cached:
         try:
             return schemas.ClaimBundlesResponse.model_validate(cached)
         except Exception as exc:
@@ -2600,9 +2614,7 @@ async def list_claim_bundles(
         )
 
     phase_candidates = [
-        market.market_address
-        for _commitment, market, _settlement in base_rows
-        if market.market_address
+        market.market_address for _commitment, market, _settlement in base_rows if market.market_address
     ]
     market_phases = await _fetch_market_phases(phase_candidates)
     pending_markets: set[str] = set()
@@ -2689,7 +2701,14 @@ async def list_claim_bundles(
             )
         )
     if bundles:
-        return schemas.ClaimBundlesResponse(bundles=bundles)
+        response = schemas.ClaimBundlesResponse(bundles=bundles)
+        await shared_cache.set_json(
+            cache_client,
+            cache_key,
+            response.model_dump(by_alias=True),
+            ttl_seconds=min(15, settings.claim_bundles_cache_ttl_seconds),
+        )
+        return response
     if pending_markets:
         response = schemas.ClaimBundlesResponse(
             bundles=[],

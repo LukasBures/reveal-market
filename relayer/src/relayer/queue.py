@@ -55,10 +55,10 @@ class TxQueue:
         self._stop = asyncio.Event()
         self._worker: asyncio.Task | None = None
         self._init_db()
-        self._prune_stale_deadletter_sync()
         self._start_worker_flag = start_worker
 
     async def start(self) -> None:
+        await asyncio.to_thread(self._prune_stale_deadletter_sync)
         if not self._start_worker_flag:
             return
         if self._worker and not self._worker.done():

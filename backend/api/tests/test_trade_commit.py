@@ -680,6 +680,34 @@ async def test_reserve_ticket_id_marks_later_pending_tickets_failed_after_prior_
     assert "stale_after_prior_commit_failure" in str(stale_result)
 
 
+@pytest.mark.asyncio
+async def test_reserve_ticket_id_treats_unknown_submission_as_pending(monkeypatch):
+    """When relayer status is unknown, treat as pending — keep the slot reserved, don't raise 503."""
+    settings = runtime.settings
+    cache = _ReservationCache()
+
+    monkeypatch.setattr(settings, "relayer_queue_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "relayer_queue_key", "relayer:queue", raising=False)
+    monkeypatch.setattr(settings, "relayer_base_url", "http://relayer", raising=False)
+
+    async def _get_cache():
+        return cache
+
+    monkeypatch.setattr("app.routes.trade.get_cache_client", _get_cache)
+
+    market_address = "0x" + "3" * 40
+    first_ticket = await trade_routes._reserve_ticket_id(market_address, 0)
+    assert first_ticket == 0
+    await trade_routes._store_pending_commit_reservation(market_address, "job-unknown-1", first_ticket)
+
+    # Simulate unknown status — relayer unreachable, no cached result
+    # (absence of relayer:queue:result:job-unknown-1 means _get_relayer_job_result returns None → "unknown")
+
+    second_ticket = await trade_routes._reserve_ticket_id(market_address, 0)
+    # Should succeed at slot 1 (slot 0 held as pending), NOT raise 503
+    assert second_ticket == 1
+
+
 def test_commit_raises_502_when_relayer_fails_and_queue_disabled(client, db_session, monkeypatch):
     """Relayer failure + queue_disabled → 502 propagated."""
     user = Account.create()

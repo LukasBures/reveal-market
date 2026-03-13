@@ -378,13 +378,12 @@ export function DashboardClient() {
   const {
     error: switchError,
     isPending: isSwitchingChain,
-    mutate: switchChainMutate,
     mutateAsync: switchChainMutateAsync,
   } = useSwitchChain();
   const switchChainSupported = typeof activeConnector?.switchChain === "function";
-  const switchChain = switchChainSupported ? switchChainMutate : undefined;
   const switchChainAsync = switchChainSupported ? switchChainMutateAsync : undefined;
-  const canRequestChainSwitch = Boolean(switchChain || switchChainAsync);
+  const canRequestChainSwitch = Boolean(switchChainAsync);
+  const [switchingBundleKey, setSwitchingBundleKey] = useState<string | null>(null);
   const publicClient = usePublicClient({ chainId: defaultChain.id });
   const { mutateAsync: signMessage } = useSignMessage();
   const explorerBaseEnv = (
@@ -590,7 +589,7 @@ export function DashboardClient() {
         setRuntimeWalletChainId(defaultChain.id);
         return true;
       }
-      const switchFn = switchChainAsync ?? switchChain;
+      const switchFn = switchChainAsync;
       const fallbackMessage = `Switch to ${defaultChain.name} to ${actionLabel}.`;
       if (!switchFn) {
         onError(fallbackMessage);
@@ -617,7 +616,6 @@ export function DashboardClient() {
     [
       sanitizeUserActionError,
       readWalletChainId,
-      switchChain,
       switchChainAsync,
       switchError,
       waitForWalletChain,
@@ -906,14 +904,20 @@ export function DashboardClient() {
   };
 
   const handlePrepareClaim = async (marketId: string, ticketId?: number | null) => {
-    if (
-      !(await ensureTargetChain("prepare this claim", (message) =>
-        updateClaimMessage(message, "error")
-      ))
-    ) {
-      return;
+    const key = `${marketId}:${ticketId ?? "na"}`;
+    setSwitchingBundleKey(key);
+    try {
+      if (
+        !(await ensureTargetChain("prepare this claim", (message) =>
+          updateClaimMessage(message, "error")
+        ))
+      ) {
+        return;
+      }
+      await handlePrepareBundle(marketId, ticketId);
+    } finally {
+      setSwitchingBundleKey(null);
     }
-    await handlePrepareBundle(marketId, ticketId);
   };
 
   const handleClaim = async (marketId: string, ticketId?: number | null) => {
@@ -989,6 +993,7 @@ export function DashboardClient() {
       next.add(key);
       return next;
     });
+    setSwitchingBundleKey(key);
     updateClaimMessage(null);
     try {
       if (
@@ -1062,6 +1067,7 @@ export function DashboardClient() {
       });
       updateClaimMessage(message, "error");
     } finally {
+      setSwitchingBundleKey(null);
       setClaimingTickets((prev) => {
         const next = new Set(prev);
         next.delete(key);
@@ -1795,13 +1801,13 @@ export function DashboardClient() {
                                 }
                               >
                                 {(claimingTickets.has(bundleKey) ||
-                                  isSwitchingChain) && (
+                                  switchingBundleKey === bundleKey) && (
                                   <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
                                   </svg>
                                 )}
-                                {isSwitchingChain
+                                {switchingBundleKey === bundleKey
                                   ? "Switching..."
                                   : chainMismatch
                                   ? `Switch to ${defaultChain.name}`
@@ -1828,13 +1834,13 @@ export function DashboardClient() {
                                 }
                               >
                                 {(preparingBundles.has(bundleKey) ||
-                                  isSwitchingChain) && (
+                                  switchingBundleKey === bundleKey) && (
                                   <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
                                   </svg>
                                 )}
-                                {isSwitchingChain
+                                {switchingBundleKey === bundleKey
                                   ? "Switching..."
                                   : chainMismatch
                                   ? `Switch to ${defaultChain.name}`

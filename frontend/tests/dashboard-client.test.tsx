@@ -118,7 +118,6 @@ describe("DashboardClient", () => {
     hoisted.useSignMessage.mockReset();
     hoisted.useSignMessage.mockReturnValue({ mutateAsync: vi.fn().mockResolvedValue("0xsig") });
     hoisted.useSwitchChain.mockReturnValue({
-      mutate: vi.fn(),
       mutateAsync: vi.fn().mockResolvedValue(undefined),
       error: null,
       isPending: false,
@@ -232,7 +231,6 @@ describe("DashboardClient", () => {
     });
     hoisted.useChainId.mockReturnValue(26514);
     hoisted.useSwitchChain.mockReturnValue({
-      mutate: switchChain,
       mutateAsync: switchChain,
       error: null,
       isPending: false,
@@ -318,7 +316,6 @@ describe("DashboardClient", () => {
     });
     hoisted.useChainId.mockReturnValue(26514);
     hoisted.useSwitchChain.mockReturnValue({
-      mutate: switchChain,
       mutateAsync: switchChain,
       error: null,
       isPending: false,

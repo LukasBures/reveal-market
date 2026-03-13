@@ -548,7 +548,7 @@ def test_claim_bundles_return_winning_ticket(client, db_session):
     assert bundle["commitmentsRoot"].lower() == merkle_root.lower()
     assert bundle["user"].lower() == user.address.lower()
     cache_key = f"claim:bundles:{user.address.lower()}:all"
-    assert cache_key not in client.app.cache_client.store
+    assert cache_key in client.app.cache_client.store
 
 
 def test_claim_bundles_skip_claimed_commitment(client, db_session):
