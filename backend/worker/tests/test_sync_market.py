@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import app.market_sync as market_sync
 import app.resolution as resolution_module
@@ -230,6 +230,99 @@ async def test_sync_market_persists_resolution(monkeypatch):
             ).scalar_one()
             assert record.resolved is True
             assert record.transaction_hash == "0x" + "2" * 64
+    finally:
+        await engine.dispose()
+        monkeypatch.setattr(resolution_module, "goldsky_client", None, raising=False)
+
+
+async def test_sync_market_reuses_prefetched_resolution(monkeypatch):
+    engine, session_factory = await create_async_in_memory_db()
+    condition_id = "0x" + "4" * 64
+    checked_at = datetime.now(UTC) - timedelta(minutes=5)
+    closes_at = datetime.now(UTC) - timedelta(hours=1)
+
+    class DummyClient:
+        def resolution_summary(self, *_args, **_kwargs):
+            raise AssertionError("should not fetch resolution when a prefetched snapshot is available")
+
+    try:
+        initial = MarketPayload(
+            event_id="evt-prefetched-resolution",
+            title="Prefetched Resolution Market",
+            slug="prefetched-resolution-market",
+            category="news",
+            metadata_uri=None,
+            oracle="polymarket",
+            status="locked",
+            outcomes=["Yes", "No"],
+            outcome_prices=[0.4, 0.6],
+            condition_id=condition_id,
+            closes_at=closes_at,
+            closed=True,
+        )
+
+        monkeypatch.setattr(resolution_module, "goldsky_client", None, raising=False)
+        async with session_factory() as session:
+            await market_sync.sync_market(session, initial)
+            await session.commit()
+
+        async with session_factory() as session:
+            existing_market = (
+                await session.execute(select(Market).where(Market.event_id == initial.event_id))
+            ).scalar_one()
+            session.add(
+                Resolution(
+                    condition_id=condition_id.lower(),
+                    market_id=existing_market.id,
+                    event_id=existing_market.event_id,
+                    source="goldsky_subgraph",
+                    resolved=True,
+                        payouts=[0, 1],
+                        winners=[{"index": 1, "label": "No", "payout": 1}],
+                        winning_outcome_id=1,
+                        transaction_hash="0x" + "2" * 64,
+                        block_number=555,
+                        checked_at=checked_at,
+                    )
+                )
+            await session.commit()
+
+        async with session_factory() as session:
+            existing_market = (
+                await session.execute(select(Market).where(Market.event_id == initial.event_id))
+            ).scalar_one()
+            existing_resolution = (
+                await session.execute(select(Resolution).where(Resolution.condition_id == condition_id.lower()))
+            ).scalar_one()
+            updated = initial.model_copy(
+                update={
+                    "title": "Prefetched Resolution Market Updated",
+                    "source_updated_at": datetime.now(UTC),
+                }
+            )
+
+            async def _unexpected(*_args, **_kwargs):
+                raise AssertionError("should not hit per-market resolution lookup when prefetched state is provided")
+
+            monkeypatch.setattr(
+                resolution_module.shared_repository,
+                "get_resolution_by_condition_id",
+                _unexpected,
+                raising=True,
+            )
+            monkeypatch.setattr(resolution_module, "goldsky_client", DummyClient(), raising=False)
+
+            _, outcome = await market_sync.sync_market(
+                session,
+                updated,
+                existing_market=existing_market,
+                prefetched_state=market_sync.PrefetchedMarketState(
+                    resolutions={condition_id.lower(): existing_resolution}
+                ),
+            )
+            assert outcome.market_changed is True
+            assert outcome.resolution_changed is False
+            await session.commit()
     finally:
         await engine.dispose()
         monkeypatch.setattr(resolution_module, "goldsky_client", None, raising=False)

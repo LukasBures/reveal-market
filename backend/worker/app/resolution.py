@@ -233,6 +233,8 @@ async def apply_resolution(
     *,
     summary_overrides: dict[str, dict[str, Any] | None] | None = None,
     allow_resolution_fetch: bool = True,
+    existing_resolution: shared_models.Resolution | None = None,
+    resolution_prefetched: bool = False,
 ) -> ResolutionOutcome:
     condition_id = market.condition_id
     active_goldsky = goldsky_client or runtime.goldsky_client
@@ -263,7 +265,10 @@ async def apply_resolution(
 
     normalized_condition_id = condition_id.lower()
     outcome_count_hint = len(market.outcome_prices) if market.outcome_prices else None
-    existing = await shared_repository.get_resolution_by_condition_id(session, normalized_condition_id)
+    if resolution_prefetched:
+        existing = existing_resolution
+    else:
+        existing = await shared_repository.get_resolution_by_condition_id(session, normalized_condition_id)
     existing_resolved = bool(existing and existing.resolved)
     now = datetime.now(UTC)
     incoming_resolution_status = getattr(market, "resolution_status", None) or getattr(
@@ -425,7 +430,7 @@ async def apply_resolution(
             )
             return ResolutionOutcome()
 
-    await shared_repository.upsert_resolution(session, record_payload)
+    await shared_repository.upsert_resolution(session, record_payload, existing=existing)
     cache_payload = dict(record_payload)
     checked_at_iso = checked_at_dt.isoformat()
     cache_payload["checked_at"] = checked_at_iso

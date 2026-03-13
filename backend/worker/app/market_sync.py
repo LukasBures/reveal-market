@@ -63,6 +63,7 @@ class PrefetchedMarketState:
     tags: dict[int, set[str]] = field(default_factory=dict)
     clob_tokens: dict[int, list[shared_models.MarketClobToken]] = field(default_factory=dict)
     gamma_metadata: dict[int, shared_models.MarketGammaMetadata | None] = field(default_factory=dict)
+    resolutions: dict[str, shared_models.Resolution | None] = field(default_factory=dict)
 
 
 @dataclass
@@ -336,10 +337,18 @@ async def _load_existing_markets(
     return existing
 
 
-async def _prefetch_normalized_state(session: AsyncSession, market_ids: list[int]) -> PrefetchedMarketState:
+async def _prefetch_normalized_state(
+    session: AsyncSession,
+    market_ids: list[int],
+    *,
+    condition_ids: list[str] | None = None,
+) -> PrefetchedMarketState:
     """Batch-load normalized rows for the provided market ids."""
 
-    if not market_ids:
+    normalized_condition_ids = [
+        condition_id.lower() for condition_id in (condition_ids or []) if isinstance(condition_id, str)
+    ]
+    if not market_ids and not normalized_condition_ids:
         return PrefetchedMarketState()
 
     # Pre-seed every requested market_id so "id not in dict" means "not prefetched"
@@ -348,8 +357,11 @@ async def _prefetch_normalized_state(session: AsyncSession, market_ids: list[int
     tags: dict[int, set[str]] = {mid: set() for mid in market_ids}
     clob_tokens: dict[int, list[shared_models.MarketClobToken]] = {mid: [] for mid in market_ids}
     gamma_metadata: dict[int, shared_models.MarketGammaMetadata | None] = {mid: None for mid in market_ids}
+    resolutions: dict[str, shared_models.Resolution | None] = {
+        condition_id: None for condition_id in normalized_condition_ids
+    }
 
-    def _chunk(seq: list[int], size: int = 500):
+    def _chunk(seq: list[Any], size: int = 500):
         for start in range(0, len(seq), size):
             yield seq[start : start + size]
 
@@ -369,11 +381,17 @@ async def _prefetch_normalized_state(session: AsyncSession, market_ids: list[int
         for gamma_meta_row in (await session.execute(gamma_meta_stmt)).scalars():
             gamma_metadata[gamma_meta_row.market_id] = gamma_meta_row
 
+    for chunk in _chunk(normalized_condition_ids):
+        resolution_stmt = select(shared_models.Resolution).where(shared_models.Resolution.condition_id.in_(chunk))
+        for resolution_row in (await session.execute(resolution_stmt)).scalars():
+            resolutions[resolution_row.condition_id.lower()] = resolution_row
+
     return PrefetchedMarketState(
         outcomes=outcomes,
         tags=tags,
         clob_tokens=clob_tokens,
         gamma_metadata=gamma_metadata,
+        resolutions=resolutions,
     )
 
 
@@ -427,7 +445,18 @@ async def collect_market_changes_with_summary(
         existing_hash = getattr(existing, "content_hash", None)
         if incoming_hash is None or existing_hash is None or incoming_hash != existing_hash:
             prefetch_ids.append(market_id)
-    prefetched_state = await _prefetch_normalized_state(session, sorted(set(prefetch_ids)))
+    condition_ids = sorted(
+        {
+            market.condition_id.lower()
+            for market in markets
+            if isinstance(market.condition_id, str) and market.condition_id.startswith("0x")
+        }
+    )
+    prefetched_state = await _prefetch_normalized_state(
+        session,
+        sorted(set(prefetch_ids)),
+        condition_ids=condition_ids,
+    )
     total_markets = len(markets)
     allow_resolution_fetch: dict[str, bool] = {}
     resolution_summaries: dict[str, dict[str, Any] | None] | None = None
@@ -1211,12 +1240,24 @@ async def _sync_market(
                         relationship=rel_key,
                     )
     resolution_start = time.perf_counter()
+    prefetched_resolution = None
+    resolution_prefetched = False
+    normalized_condition_id = payload.get("condition_id")
+    if (
+        prefetched_state is not None
+        and isinstance(normalized_condition_id, str)
+        and normalized_condition_id in prefetched_state.resolutions
+    ):
+        prefetched_resolution = prefetched_state.resolutions.get(normalized_condition_id)
+        resolution_prefetched = True
     resolution_outcome = await apply_resolution(
         session,
         db_market,
         market,
         summary_overrides=resolution_summaries,
         allow_resolution_fetch=allow_resolution_fetch,
+        existing_resolution=prefetched_resolution,
+        resolution_prefetched=resolution_prefetched,
     )
     timing_resolution_ms = (time.perf_counter() - resolution_start) * 1000
     await session.flush()

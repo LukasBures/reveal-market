@@ -239,6 +239,48 @@ def test_get_last_stored_nonce_reads_succeeded_jobs(tmp_path):
     assert queue._get_last_stored_nonce() == 7  # noqa: SLF001
 
 
+@pytest.mark.asyncio
+async def test_validate_nonce_on_startup_uses_next_expected_nonce(tmp_path, monkeypatch):
+    db_path = tmp_path / "queue.db"
+    svc = DummyService()
+    svc.web3, svc.account = _stub_web3_account()
+    svc.web3.eth.get_transaction_count = lambda _addr, _block="latest": 8
+    queue = TxQueue(str(db_path), svc, start_worker=False)
+
+    job_id = queue._enqueue_sync("commit", {"foo": "bar"})  # noqa: SLF001
+    with queue._connect() as conn:  # noqa: SLF001
+        conn.execute(
+            "UPDATE jobs SET status = 'succeeded', nonce = 7 WHERE id = ?",
+            (job_id,),
+        )
+
+    info_calls: list[tuple[str, dict]] = []
+    warning_calls: list[tuple[str, dict]] = []
+
+    class StubLogger:
+        def info(self, event, **kwargs):
+            info_calls.append((event, kwargs))
+
+        def warning(self, event, **kwargs):
+            warning_calls.append((event, kwargs))
+
+    monkeypatch.setattr("relayer.queue.logger", StubLogger(), raising=False)
+
+    await queue._validate_nonce_on_startup()  # noqa: SLF001
+
+    assert warning_calls == []
+    assert info_calls == [
+        (
+            "relayer.queue.nonce_validated",
+            {
+                "on_chain_nonce": 8,
+                "stored_nonce": 7,
+                "expected_next_nonce": 8,
+            },
+        )
+    ]
+
+
 def test_queue_reclaims_stale_running_jobs(tmp_path):
     db_path = tmp_path / "queue.db"
     svc = DummyService()

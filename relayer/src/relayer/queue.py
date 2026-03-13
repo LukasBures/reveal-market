@@ -68,24 +68,27 @@ class TxQueue:
         self._worker = asyncio.create_task(self._run_async())
 
     async def _validate_nonce_on_startup(self) -> None:
-        """Compare the last stored nonce with on-chain state and warn if desynchronized."""
+        """Compare the next expected stored nonce with on-chain state and warn if desynchronized."""
         try:
             on_chain_nonce = await asyncio.to_thread(
                 self.service.web3.eth.get_transaction_count, self.service.account.address, "latest"
             )
             stored_nonce = self._get_last_stored_nonce()
-            if stored_nonce is not None and stored_nonce != on_chain_nonce:
+            expected_next_nonce = stored_nonce + 1 if stored_nonce is not None else None
+            if expected_next_nonce is not None and expected_next_nonce != on_chain_nonce:
                 logger.warning(
                     "relayer.queue.nonce_desync",
                     stored_nonce=stored_nonce,
+                    expected_next_nonce=expected_next_nonce,
                     on_chain_nonce=on_chain_nonce,
-                    message="stored nonce differs from on-chain; new jobs will use on-chain nonce",
+                    message="expected next nonce differs from on-chain; new jobs will use on-chain nonce",
                 )
             else:
                 logger.info(
                     "relayer.queue.nonce_validated",
                     on_chain_nonce=on_chain_nonce,
                     stored_nonce=stored_nonce,
+                    expected_next_nonce=expected_next_nonce,
                 )
         except (Web3Exception, ValueError, TimeoutError) as exc:
             logger.warning("relayer.queue.nonce_validation_failed", error=str(exc))

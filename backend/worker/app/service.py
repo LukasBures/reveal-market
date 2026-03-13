@@ -6,6 +6,7 @@ import asyncio
 import gc
 import json
 import logging
+import math
 import os
 import random
 import secrets
@@ -145,13 +146,23 @@ async def _persist_market_stats(redis_client: Redis | None, markets: list[Market
     return await shared_cache.set_json_many(redis_client, payloads, ttl_seconds=ttl_seconds)
 
 
-def _log_db_metrics(context: str) -> None:
+def _log_db_metrics(context: str, *, work_units: int | None = None) -> None:
     from shared.db_metrics import snapshot as snapshot_db_metrics
     from shared.db_metrics import snapshot_hotspots as snapshot_db_hotspots
 
     metrics = snapshot_db_metrics()
     threshold = runtime.settings.db_query_warn_threshold
     max_ms = runtime.settings.db_query_time_warn_ms
+    effective_work_units = max(int(work_units or 0), 0)
+    if effective_work_units > 0:
+        threshold = max(
+            threshold,
+            int(math.ceil(effective_work_units * runtime.settings.db_query_warn_per_market)),
+        )
+        max_ms = max(
+            max_ms,
+            effective_work_units * runtime.settings.db_query_time_warn_ms_per_market,
+        )
     if metrics.query_count >= threshold or metrics.total_time_ms >= max_ms:
         hotspot_limit = max(runtime.settings.db_query_hotspot_limit, 0)
         hotspots = (
@@ -172,6 +183,9 @@ def _log_db_metrics(context: str) -> None:
             db_time_ms=round(metrics.total_time_ms, 2),
             max_query_ms=round(metrics.max_time_ms, 2),
             hotspot_count=len(hotspots),
+            query_threshold=threshold,
+            db_time_threshold_ms=round(max_ms, 2),
+            work_units=effective_work_units,
         )
         if hotspots:
             log_event(
@@ -1834,7 +1848,7 @@ async def process_once(
     stats["redis_available"] = redis_client is not None
     await _enrich_market_count_stats(stats)
     await publish_heartbeat(redis_client, stats)
-    _log_db_metrics("process_once")
+    _log_db_metrics("process_once", work_units=total_fetched)
     if runtime.settings.db_latency_pace_enabled:
         from shared.db_metrics import snapshot as snapshot_db_metrics
 

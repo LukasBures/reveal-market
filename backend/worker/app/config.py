@@ -139,7 +139,17 @@ class Settings(BaseSettings):
         description="If >0, stop the sync tick when RSS exceeds this threshold (MB).",
     )
     db_query_warn_threshold: int = Field(default=200, ge=1)
+    db_query_warn_per_market: float = Field(
+        default=1.5,
+        ge=0,
+        description="Additional query budget per processed market before warning about worker DB query volume.",
+    )
     db_query_time_warn_ms: float = Field(default=500.0, ge=0)
+    db_query_time_warn_ms_per_market: float = Field(
+        default=1.5,
+        ge=0,
+        description="Additional DB time budget per processed market before warning about worker DB latency.",
+    )
     db_query_hotspot_limit: int = Field(
         default=5,
         ge=0,

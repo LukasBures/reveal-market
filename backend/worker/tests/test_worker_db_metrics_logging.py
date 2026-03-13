@@ -42,3 +42,27 @@ def test_log_db_metrics_emits_hotspots(monkeypatch):
     assert hotspot_event["context"] == "process_once"
     assert hotspot_event["hotspots"][0]["query_count"] == 5
     assert hotspot_event["hotspots"][0]["query"] == "SELECT * FROM markets WHERE id = ?"
+
+
+def test_log_db_metrics_scales_budget_with_work_units(monkeypatch):
+    monkeypatch.setattr(worker_service.runtime.settings, "db_query_warn_threshold", 1, raising=False)
+    monkeypatch.setattr(worker_service.runtime.settings, "db_query_warn_per_market", 2.0, raising=False)
+    monkeypatch.setattr(worker_service.runtime.settings, "db_query_time_warn_ms", 1.0, raising=False)
+    monkeypatch.setattr(worker_service.runtime.settings, "db_query_time_warn_ms_per_market", 2.0, raising=False)
+    monkeypatch.setattr(worker_service.runtime.settings, "db_query_hotspot_limit", 0, raising=False)
+
+    monkeypatch.setattr(
+        "shared.db_metrics.snapshot",
+        lambda: DbMetricsSnapshot(query_count=12, total_time_ms=12.0, max_time_ms=4.0),
+    )
+    monkeypatch.setattr("shared.db_metrics.snapshot_hotspots", lambda limit, min_total_time_ms: [])
+
+    emitted: list[dict] = []
+
+    def _capture_log_event(_logger, _level, **kwargs):
+        emitted.append(kwargs)
+
+    monkeypatch.setattr(worker_service, "log_event", _capture_log_event)
+    worker_service._log_db_metrics("process_once", work_units=10)
+
+    assert emitted == []
