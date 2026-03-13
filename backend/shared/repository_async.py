@@ -20,7 +20,6 @@ logger = logging.getLogger("reveal_market.shared.repository_async")
 DEFAULT_SCHEMA_VERSION_KEY = "core"
 
 T = TypeVar("T")
-_UNSET = object()
 
 
 def _is_transient_db_error(exc: BaseException) -> bool:
@@ -162,17 +161,19 @@ async def upsert_resolution(
     session: AsyncSession,
     data: Mapping[str, Any],
     *,
-    existing: models.Resolution | None | object = _UNSET,
+    existing: models.Resolution | None = None,
+    skip_lookup: bool = False,
 ) -> models.Resolution:
     """Insert or update a resolution record."""
 
     payload = dict(data)
     payload.pop("outcomes", None)
     condition_id = payload["condition_id"]
-    if existing is _UNSET:
-        record = await get_resolution_by_condition_id(session, condition_id)
-    else:
-        record = existing
+    record = (
+        existing
+        if (skip_lookup or existing is not None)
+        else await get_resolution_by_condition_id(session, condition_id)
+    )
     if record is None:
         record = models.Resolution(**payload)
         session.add(record)

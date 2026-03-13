@@ -430,7 +430,12 @@ async def apply_resolution(
             )
             return ResolutionOutcome()
 
-    await shared_repository.upsert_resolution(session, record_payload, existing=existing)
+    await shared_repository.upsert_resolution(
+        session,
+        record_payload,
+        existing=existing,
+        skip_lookup=resolution_prefetched,
+    )
     cache_payload = dict(record_payload)
     checked_at_iso = checked_at_dt.isoformat()
     cache_payload["checked_at"] = checked_at_iso
