@@ -21,6 +21,7 @@ const mockDefaultChain = vi.hoisted(
 const hoisted = vi.hoisted(() => ({
   useConnection: vi.fn(),
   useChainId: vi.fn(),
+  useSwitchChain: vi.fn(),
   fetchPositions: vi.fn(),
   fetchClaimBundles: vi.fn(),
   useWriteContract: vi.fn(),
@@ -32,6 +33,7 @@ const hoisted = vi.hoisted(() => ({
 vi.mock("wagmi", () => ({
   useConnection: hoisted.useConnection,
   useChainId: hoisted.useChainId,
+  useSwitchChain: hoisted.useSwitchChain,
   useWriteContract: hoisted.useWriteContract,
   useReadContract: hoisted.useReadContract,
   usePublicClient: hoisted.usePublicClient,
@@ -107,6 +109,7 @@ describe("DashboardClient", () => {
   beforeEach(() => {
     hoisted.useConnection.mockReset();
     hoisted.useChainId.mockReset();
+    hoisted.useSwitchChain.mockReset();
     hoisted.fetchPositions.mockReset();
     hoisted.fetchClaimBundles.mockReset();
     hoisted.useWriteContract.mockReset();
@@ -114,6 +117,12 @@ describe("DashboardClient", () => {
     hoisted.usePublicClient.mockReset();
     hoisted.useSignMessage.mockReset();
     hoisted.useSignMessage.mockReturnValue({ mutateAsync: vi.fn().mockResolvedValue("0xsig") });
+    hoisted.useSwitchChain.mockReturnValue({
+      mutate: vi.fn(),
+      mutateAsync: vi.fn().mockResolvedValue(undefined),
+      error: null,
+      isPending: false,
+    });
     hoisted.useReadContract.mockReturnValue({ data: 0n });
     hoisted.useWriteContract.mockReturnValue({
       mutateAsync: vi.fn(),
@@ -200,6 +209,73 @@ describe("DashboardClient", () => {
     await waitFor(() => expect(hoisted.fetchPositions).toHaveBeenCalledTimes(2));
     await waitFor(() =>
       expect(screen.getByText(/claim confirmed on-chain/i)).toBeInTheDocument(),
+    );
+  });
+
+  it("switches to the target chain before claiming when wallet chain state is stale", async () => {
+    const switchChain = vi.fn().mockResolvedValue(undefined);
+    hoisted.useConnection.mockReturnValue({
+      address: "0x9999999999999999999999999999999999999999",
+      isConnected: true,
+      chain: { id: 8453, name: "Base" },
+      connector: { switchChain: vi.fn() },
+    });
+    hoisted.useChainId.mockReturnValue(26514);
+    hoisted.useSwitchChain.mockReturnValue({
+      mutate: switchChain,
+      mutateAsync: switchChain,
+      error: null,
+      isPending: false,
+    });
+    const writeContract = vi.fn().mockResolvedValue("0xclaim");
+    const waitForTransactionReceipt = vi.fn().mockResolvedValue({ status: "success" });
+    hoisted.useWriteContract.mockReturnValue({
+      mutateAsync: writeContract,
+      isPending: false,
+      error: undefined,
+    });
+    hoisted.usePublicClient.mockReturnValue({
+      waitForTransactionReceipt,
+      estimateContractGas: vi.fn().mockResolvedValue(5_000_000n),
+    });
+    hoisted.fetchPositions
+      .mockResolvedValueOnce({
+        positions: [basePosition],
+        escrowBalance: "100000000000000000",
+      })
+      .mockResolvedValueOnce({
+        positions: [{ ...basePosition, status: "claimed", claimable: false, tx_hash: "0xclaim" }],
+        escrowBalance: "100000000000000000",
+      });
+    hoisted.fetchClaimBundles.mockResolvedValue({
+      bundles: [claimBundle],
+      status: "ready",
+    });
+
+    render(<DashboardClient />);
+
+    await waitFor(() => expect(screen.getByText(/yes\/no/i)).toBeInTheDocument());
+
+    const prepareButton = screen
+      .getAllByRole("button")
+      .find((btn) => btn.textContent?.trim().toLowerCase() === "prepare to claim");
+    expect(prepareButton).toBeTruthy();
+    fireEvent.click(prepareButton!);
+
+    await waitFor(() => expect(hoisted.fetchClaimBundles).toHaveBeenCalledTimes(1));
+
+    const claimButton = screen
+      .getAllByRole("button")
+      .find((btn) => /switch to horizen/i.test(btn.textContent ?? ""));
+    expect(claimButton).toBeTruthy();
+    fireEvent.click(claimButton!);
+
+    await waitFor(() =>
+      expect(switchChain).toHaveBeenCalledWith({ chainId: mockDefaultChain.id }),
+    );
+    await waitFor(() => expect(writeContract).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(waitForTransactionReceipt).toHaveBeenCalledWith({ hash: "0xclaim" }),
     );
   });
 

@@ -14,6 +14,7 @@ import {
   usePublicClient,
   useReadContract,
   useSignMessage,
+  useSwitchChain,
   useWriteContract,
 } from "wagmi";
 import type { Address, Hex } from "viem";
@@ -316,9 +317,10 @@ function PositionStatusFlow({
 }
 
 export function DashboardClient() {
-  const { address, isConnected } = useConnection();
+  const { address, isConnected, chain, connector: activeConnector } = useConnection();
   const chainId = useChainId();
-  const chainMismatch = Boolean(chainId && chainId !== defaultChain.id);
+  const walletChainId = chain?.id ?? chainId;
+  const chainMismatch = Boolean(walletChainId && walletChainId !== defaultChain.id);
   const [positions, setPositions] = useState<PositionRecord[]>([]);
   const [loading, startTransition] = useTransition();
   const [positionsLoading, setPositionsLoading] = useState(false);
@@ -347,7 +349,17 @@ export function DashboardClient() {
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const { claimTicket, error: claimError } = useClaimTicket();
   const { mutateAsync: writeContract } = useWriteContract();
-  const publicClient = usePublicClient({ chainId });
+  const {
+    error: switchError,
+    isPending: isSwitchingChain,
+    mutate: switchChainMutate,
+    mutateAsync: switchChainMutateAsync,
+  } = useSwitchChain();
+  const switchChainSupported = typeof activeConnector?.switchChain === "function";
+  const switchChain = switchChainSupported ? switchChainMutate : undefined;
+  const switchChainAsync = switchChainSupported ? switchChainMutateAsync : undefined;
+  const canRequestChainSwitch = Boolean(switchChain || switchChainAsync);
+  const publicClient = usePublicClient({ chainId: defaultChain.id });
   const { mutateAsync: signMessage } = useSignMessage();
   const explorerBaseEnv = (
     process.env.NEXT_PUBLIC_EXPLORER_BASE_URL ?? ""
@@ -406,7 +418,7 @@ export function DashboardClient() {
   const fundingBlockedReason =
     !escrowAddress || !tokenAddress
       ? "Escrow or token address missing"
-      : chainMismatch
+      : chainMismatch && !canRequestChainSwitch
       ? `Switch to ${defaultChain.name}`
       : null;
   const hasEscrowAllowance =
@@ -438,6 +450,37 @@ export function DashboardClient() {
     const cleaned = message.replace(/^Details:\s*/i, "").trim();
     return cleaned || "Action cancelled";
   }, []);
+  const ensureTargetChain = useCallback(
+    async (actionLabel: string, onError: (message: string) => void) => {
+      if (!chainMismatch) {
+        return true;
+      }
+      const switchFn = switchChainAsync ?? switchChain;
+      const fallbackMessage = `Switch to ${defaultChain.name} to ${actionLabel}.`;
+      if (!switchFn) {
+        onError(fallbackMessage);
+        return false;
+      }
+      try {
+        await Promise.resolve(switchFn({ chainId: defaultChain.id }));
+        return true;
+      } catch (err) {
+        onError(
+          sanitizeUserActionError(err) ||
+            sanitizeUserActionError(switchError) ||
+            fallbackMessage
+        );
+        return false;
+      }
+    },
+    [
+      chainMismatch,
+      sanitizeUserActionError,
+      switchChain,
+      switchChainAsync,
+      switchError,
+    ]
+  );
   const updateClaimMessage = useCallback(
     (message: string | null, tone: ClaimMessageTone = "info") => {
       setClaimMessage(message);
@@ -502,8 +545,7 @@ export function DashboardClient() {
       setEscrowError("Missing wallet, escrow, or token configuration.");
       return;
     }
-    if (chainMismatch) {
-      setEscrowError(`Switch to ${defaultChain.name} before funding escrow.`);
+    if (!(await ensureTargetChain("fund escrow", setEscrowError))) {
       return;
     }
     const amountZen = Number(depositInput.replace(",", "."));
@@ -520,7 +562,7 @@ export function DashboardClient() {
           abi: erc20Abi,
           functionName: "approve",
           args: [escrowAddress as Address, maxUint256],
-          chainId,
+          chainId: defaultChain.id,
         });
         setEscrowStatus({ label: "Approve tx", txHash: approveHash as string });
         await waitForReceipt(approveHash as Hex, "Approval");
@@ -538,7 +580,7 @@ export function DashboardClient() {
         ],
         functionName: "deposit",
         args: [amountWei],
-        chainId,
+        chainId: defaultChain.id,
       });
       setEscrowStatus({ label: "Deposit tx", txHash: depositHash as string });
       await waitForReceipt(depositHash as Hex, "Deposit");
@@ -560,8 +602,7 @@ export function DashboardClient() {
       setEscrowError("Missing wallet or escrow configuration.");
       return;
     }
-    if (chainMismatch) {
-      setEscrowError(`Switch to ${defaultChain.name} before withdrawing.`);
+    if (!(await ensureTargetChain("withdraw from escrow", setEscrowError))) {
       return;
     }
     const amountZen = Number(withdrawInput.replace(",", "."));
@@ -589,7 +630,7 @@ export function DashboardClient() {
         ],
         functionName: "withdraw",
         args: [amountWei],
-        chainId,
+        chainId: defaultChain.id,
       });
       setEscrowStatus({ label: "Withdraw tx", txHash: withdrawHash as string });
       await waitForReceipt(withdrawHash as Hex, "Withdraw");
@@ -797,6 +838,13 @@ export function DashboardClient() {
     });
     updateClaimMessage(null);
     try {
+      if (
+        !(await ensureTargetChain("claim this payout", (message) =>
+          updateClaimMessage(message, "error")
+        ))
+      ) {
+        return;
+      }
       let gasLimit = MIN_CLAIM_GAS;
       if (publicClient) {
         try {
@@ -1202,7 +1250,7 @@ export function DashboardClient() {
                 className="flex w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-full bg-white/15 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white shadow-lg shadow-black/50 transition hover:-translate-y-[1px] hover:bg-white/25 disabled:cursor-not-allowed disabled:bg-white/10 sm:w-auto"
                 disabled={
                   withdrawLoading ||
-                  chainMismatch ||
+                  (chainMismatch && !canRequestChainSwitch) ||
                   !RELAYER_ESCROW_ADDRESS ||
                   !ZEN_TOKEN_ADDRESS ||
                   !normalizedOnchainEscrow ||
@@ -1580,20 +1628,31 @@ export function DashboardClient() {
                                 type="button"
                                 className="flex items-center gap-1.5 rounded-full bg-emerald-500 px-3 py-2 font-semibold text-white hover:bg-emerald-400 disabled:cursor-not-allowed sm:py-1"
                                 disabled={
-                                  chainMismatch ||
-                                  claimingTickets.has(bundleKey)
+                                  claimingTickets.has(bundleKey) ||
+                                  isSwitchingChain ||
+                                  (chainMismatch && !canRequestChainSwitch)
                                 }
                                 onClick={() =>
                                   handleClaim(p.market_id, p.ticket_id)
                                 }
+                                title={
+                                  chainMismatch
+                                    ? `Switch to ${defaultChain.name} to claim`
+                                    : undefined
+                                }
                               >
-                                {claimingTickets.has(bundleKey) && (
+                                {(claimingTickets.has(bundleKey) ||
+                                  isSwitchingChain) && (
                                   <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
                                   </svg>
                                 )}
-                                {claimingTickets.has(bundleKey)
+                                {isSwitchingChain
+                                  ? "Switching..."
+                                  : chainMismatch
+                                  ? `Switch to ${defaultChain.name}`
+                                  : claimingTickets.has(bundleKey)
                                   ? "Claiming..."
                                   : "Claim"}
                               </button>
@@ -1602,7 +1661,6 @@ export function DashboardClient() {
                                 type="button"
                                 className="flex items-center gap-1.5 rounded-full bg-emerald-500 px-3 py-2 font-semibold text-white hover:bg-emerald-400 disabled:cursor-not-allowed sm:py-1"
                                 disabled={
-                                  chainMismatch ||
                                   preparingBundles.has(bundleKey)
                                 }
                                 onClick={() =>

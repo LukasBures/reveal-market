@@ -1,5 +1,5 @@
 import type { Address, Hex } from "viem";
-import { useWriteContract, useChainId } from "wagmi";
+import { useConnection, useWriteContract } from "wagmi";
 import { defaultChain } from "./wagmi";
 
 export const revealMarketClaimAbi = [
@@ -33,16 +33,12 @@ export type ClaimTicketParams = {
 };
 
 export function useClaimTicket() {
-  const chainId = useChainId();
+  const { address } = useConnection();
   const { mutateAsync: writeContract, isPending, error } = useWriteContract();
-  const chainMismatch = Boolean(chainId && chainId !== defaultChain.id);
 
   async function claimTicket(params: ClaimTicketParams) {
-    if (!chainId) {
+    if (!address) {
       throw new Error("Wallet not connected");
-    }
-    if (chainMismatch) {
-      throw new Error(`Wrong network. Switch to ${defaultChain.name}.`);
     }
     return writeContract({
       address: params.marketAddress,
