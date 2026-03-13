@@ -210,13 +210,11 @@ function PositionStatusFlow({
     <div
       className={clsx(
         "mt-3 rounded-xl border bg-gradient-to-r from-slate-900/60 via-black/60 to-slate-900/40 p-3 transition-shadow relative overflow-hidden",
-        outlineClass
+        outlineClass,
+        highlightMode === "ongoing" && "shadow-[0_0_14px_0_rgba(123,240,94,0.18)]",
       )}
       onMouseLeave={() => setActiveTooltip(null)}
     >
-      {highlightMode === "ongoing" ? (
-        <div className="pointer-events-none absolute inset-0 bg-[length:240%_160%] opacity-35 blur-[1px] mix-blend-screen bg-[linear-gradient(120deg,rgba(123,240,94,0)_0%,rgba(123,240,94,0.22)_40%,rgba(123,240,94,0)_75%)] animate-[statusFlow_5.5s_linear_infinite]" />
-      ) : null}
       <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.25em] text-slate-400">
         <span>Lifecycle</span>
         <span className={clsx("text-[10px]", headerAccentClass)}>
@@ -230,9 +228,6 @@ function PositionStatusFlow({
         </span>
       </div>
       <div className="relative mt-3 overflow-hidden rounded-lg border border-white/5 bg-black/40 p-3 shadow-inner shadow-black/30">
-        {highlightMode === "ongoing" ? (
-          <div className="pointer-events-none absolute inset-0 bg-[length:220%_140%] bg-[linear-gradient(120deg,rgba(123,240,94,0)_0%,rgba(123,240,94,0.18)_35%,rgba(123,240,94,0)_70%)] opacity-70 mix-blend-screen animate-[statusFlow_4.2s_linear_infinite]" />
-        ) : null}
         <div className="relative flex flex-col items-stretch gap-2 overflow-x-hidden overflow-y-visible md:flex-row md:items-stretch md:justify-between md:gap-3 md:overflow-x-auto md:pb-1">
           {stages.map((stage, idx) => {
             const stageState =

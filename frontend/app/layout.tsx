@@ -168,7 +168,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         />
       </head>
       <body
-        className="text-white antialiased px-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]"
+        className="text-white antialiased"
         suppressHydrationWarning
       >
         <a

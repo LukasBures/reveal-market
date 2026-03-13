@@ -495,7 +495,7 @@ export function ConnectWalletButton() {
     isMounted && isModalOpen
       ? createPortal(
           (
-            <div className="fixed inset-0 z-50 flex min-h-screen items-center justify-center overflow-y-auto p-4">
+            <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center sm:p-4">
               <div
                 className="absolute inset-0 bg-black/75 backdrop-blur-sm"
                 onClick={closeModal}
@@ -505,7 +505,7 @@ export function ConnectWalletButton() {
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby={modalTitleId}
-                className="relative z-10 w-full max-w-xl rounded-3xl border border-white/15 bg-gradient-to-b from-slate-950/95 via-slate-950/90 to-slate-900/90 p-6 text-white shadow-[0_40px_160px_rgba(8,15,40,0.85)]"
+                className="relative z-10 w-full max-w-xl overflow-y-auto rounded-t-3xl border border-white/15 bg-gradient-to-b from-slate-950/95 via-slate-950/90 to-slate-900/90 p-6 pb-8 text-white shadow-[0_-20px_60px_rgba(8,15,40,0.7)] sm:rounded-3xl sm:shadow-[0_40px_160px_rgba(8,15,40,0.85)] max-h-[85dvh]"
                 onClick={(event) => event.stopPropagation()}
               >
             <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-4">

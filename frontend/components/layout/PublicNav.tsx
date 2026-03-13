@@ -86,7 +86,7 @@ export function PublicNav() {
             href="https://x.com/RevealMarket"
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center justify-center rounded-full border border-white/20 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.35em] text-white/80 transition hover:border-white hover:text-white md:hidden"
+            className="inline-flex items-center justify-center rounded-full border border-white/20 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.35em] text-white/80 transition hover:border-white hover:text-white md:hidden"
           >
             Follow
           </a>

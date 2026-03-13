@@ -117,7 +117,7 @@ function ProgressSteps({ steps }: { steps: [StepState, StepState, StepState] }) 
           <div className="flex flex-col items-center gap-1">
             <StepDot state={state} />
             <span
-              className={`text-[10px] uppercase tracking-[0.15em] whitespace-nowrap ${
+              className={`text-center text-[10px] uppercase tracking-[0.15em] ${
                 state === "error"
                   ? "text-rose-200"
                   : state === "done"

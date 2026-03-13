@@ -157,7 +157,7 @@ export function MainNav() {
         <div className="flex min-w-[160px] items-center justify-end gap-3 text-sm sm:min-w-[200px] md:text-base">
           <button
             type="button"
-            className="inline-flex items-center gap-2 rounded-full border border-white/20 px-4 py-2 text-xs font-semibold uppercase tracking-[0.4em] text-white/80 transition hover:border-white hover:text-white md:hidden"
+            className="inline-flex items-center gap-2 rounded-full border border-white/20 px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.4em] text-white/80 transition hover:border-white hover:text-white md:hidden"
             aria-expanded={isMobileMenuOpen}
             aria-label={isMobileMenuOpen ? "Close navigation" : "Open navigation"}
             onClick={() => setIsMobileMenuOpen((prev) => !prev)}
@@ -182,14 +182,14 @@ export function MainNav() {
               <nav className="flex flex-col gap-3">
                 <Link
                   href="/search"
-                  className="rounded-full border border-white/10 px-4 py-2 text-center font-semibold uppercase tracking-[0.25em] transition hover:border-white hover:text-white"
+                  className="rounded-full border border-white/10 px-4 py-3 text-center font-semibold uppercase tracking-[0.25em] transition hover:border-white hover:text-white"
                   onClick={() => setIsMobileMenuOpen(false)}
                 >
                   Search
                 </Link>
                 <Link
                   href="/proofs"
-                  className={`rounded-full border px-4 py-2 text-center font-semibold uppercase tracking-[0.25em] transition ${
+                  className={`rounded-full border px-4 py-3 text-center font-semibold uppercase tracking-[0.25em] transition ${
                     pathname === "/proofs"
                       ? "border-white text-white"
                       : "border-white/10 hover:border-white hover:text-white"
@@ -200,7 +200,7 @@ export function MainNav() {
                 </Link>
                 <Link
                   href="/dashboard"
-                  className={`rounded-full border px-4 py-2 text-center font-semibold uppercase tracking-[0.25em] transition ${
+                  className={`rounded-full border px-4 py-3 text-center font-semibold uppercase tracking-[0.25em] transition ${
                     pathname === "/dashboard"
                       ? "border-white text-white"
                       : "border-white/10 hover:border-white hover:text-white"
@@ -243,9 +243,9 @@ function HomeFiltersBar() {
 
   return (
     <div className="border-t border-white/5 bg-black/80 text-xs text-white/80 backdrop-blur">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 py-2 sm:h-[48px] sm:flex-row sm:items-center sm:py-0">
-        <div className="flex w-full flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-          <div className="relative flex-1">
+      <div className="mx-auto flex h-[48px] w-full max-w-7xl items-center px-4">
+        <div className="flex w-full items-center gap-2">
+          <div className="relative min-w-0 flex-1">
             <div className="pointer-events-none absolute left-0 top-0 h-full w-10 bg-gradient-to-r from-black/80 to-transparent opacity-90" />
             <div className="pointer-events-none absolute right-0 top-0 h-full w-10 bg-gradient-to-l from-black/80 to-transparent opacity-90" />
             <div className="no-scrollbar flex snap-x snap-mandatory gap-2 overflow-x-auto pr-6">
@@ -271,7 +271,7 @@ function HomeFiltersBar() {
               })}
             </div>
           </div>
-          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+          <div className="flex flex-none items-center gap-2">
             {[
               { label: "Trending", value: "trending", active: sortBy === "popularity" },
               { label: "Volume", value: "volume", active: sortBy === "totalVolume" },
