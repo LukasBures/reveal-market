@@ -117,6 +117,13 @@ const parseRuntimeChainId = (raw: unknown): number | null => {
   return null;
 };
 
+type WalletProviderLike = {
+  chainId?: string | number;
+  request?: (args: { method: string }) => Promise<unknown>;
+  on?: (event: string, listener: (value: unknown) => void) => void;
+  removeListener?: (event: string, listener: (value: unknown) => void) => void;
+};
+
 type PositionStatusFlowProps = {
   status: string;
   claimable?: boolean | null;
@@ -336,7 +343,9 @@ function PositionStatusFlow({
 export function DashboardClient() {
   const { address, isConnected, chain, connector: activeConnector } = useConnection();
   const chainId = useChainId();
-  const walletChainId = chain?.id ?? chainId;
+  const [runtimeWalletChainId, setRuntimeWalletChainId] = useState<number | null>(null);
+  const localWalletChainId = parseRuntimeChainId(chain?.id ?? chainId);
+  const walletChainId = runtimeWalletChainId ?? localWalletChainId;
   const chainMismatch = Boolean(walletChainId && walletChainId !== defaultChain.id);
   const [positions, setPositions] = useState<PositionRecord[]>([]);
   const [loading, startTransition] = useTransition();
@@ -467,7 +476,41 @@ export function DashboardClient() {
     const cleaned = message.replace(/^Details:\s*/i, "").trim();
     return cleaned || "Action cancelled";
   }, []);
+  const getActiveWalletProvider = useCallback(async (): Promise<WalletProviderLike | null> => {
+    if (typeof activeConnector?.getProvider === "function") {
+      try {
+        const provider = await activeConnector.getProvider();
+        if (provider) {
+          return provider as WalletProviderLike;
+        }
+      } catch {
+        // Fall back to window.ethereum when the connector does not expose a provider.
+      }
+    }
+    if (typeof window === "undefined") {
+      return null;
+    }
+    return (
+      (window as Window & { ethereum?: WalletProviderLike }).ethereum ?? null
+    );
+  }, [activeConnector]);
   const readWalletChainId = useCallback(async (): Promise<number | null> => {
+    const provider = await getActiveWalletProvider();
+    if (typeof provider?.request === "function") {
+      try {
+        const requestedChainId = await provider.request({ method: "eth_chainId" });
+        const parsed = parseRuntimeChainId(requestedChainId);
+        if (parsed !== null) {
+          return parsed;
+        }
+      } catch {
+        // Fall through to other runtime checks.
+      }
+    }
+    const providerChainId = parseRuntimeChainId(provider?.chainId);
+    if (providerChainId !== null) {
+      return providerChainId;
+    }
     if (typeof activeConnector?.getChainId === "function") {
       try {
         const connectorChainId = await activeConnector.getChainId();
@@ -479,33 +522,53 @@ export function DashboardClient() {
         // Fall through to provider and local state checks.
       }
     }
-    if (typeof window !== "undefined") {
-      const provider = (
-        window as Window & {
-          ethereum?: {
-            chainId?: string | number;
-            request?: (args: { method: string }) => Promise<unknown>;
-          };
-        }
-      ).ethereum;
-      if (typeof provider?.request === "function") {
-        try {
-          const requestedChainId = await provider.request({ method: "eth_chainId" });
-          const parsed = parseRuntimeChainId(requestedChainId);
-          if (parsed !== null) {
-            return parsed;
-          }
-        } catch {
-          // Fall back to cached provider state.
-        }
-      }
-      const providerChainId = parseRuntimeChainId(provider?.chainId);
-      if (providerChainId !== null) {
-        return providerChainId;
-      }
+    return localWalletChainId;
+  }, [activeConnector, getActiveWalletProvider, localWalletChainId]);
+  const refreshWalletChainId = useCallback(async () => {
+    const nextChainId = await readWalletChainId();
+    setRuntimeWalletChainId(nextChainId);
+    return nextChainId;
+  }, [readWalletChainId]);
+  useEffect(() => {
+    if (!isConnected) {
+      setRuntimeWalletChainId(null);
+      return;
     }
-    return parseRuntimeChainId(walletChainId);
-  }, [activeConnector, walletChainId]);
+    let cancelled = false;
+    void readWalletChainId().then((nextChainId) => {
+      if (!cancelled) {
+        setRuntimeWalletChainId(nextChainId);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isConnected, readWalletChainId]);
+  useEffect(() => {
+    if (!isConnected) {
+      return;
+    }
+    let disposed = false;
+    let provider: WalletProviderLike | null = null;
+    const handleChainChanged = (nextChainId: unknown) => {
+      setRuntimeWalletChainId(parseRuntimeChainId(nextChainId));
+    };
+    void getActiveWalletProvider().then((resolvedProvider) => {
+      if (disposed || !resolvedProvider) {
+        return;
+      }
+      provider = resolvedProvider;
+      if (typeof provider.on === "function") {
+        provider.on("chainChanged", handleChainChanged);
+      }
+    });
+    return () => {
+      disposed = true;
+      if (provider && typeof provider.removeListener === "function") {
+        provider.removeListener("chainChanged", handleChainChanged);
+      }
+    };
+  }, [getActiveWalletProvider, isConnected]);
   const waitForWalletChain = useCallback(
     async (targetChainId: number) => {
       const deadline = Date.now() + CHAIN_SWITCH_SETTLE_TIMEOUT_MS;
@@ -522,7 +585,9 @@ export function DashboardClient() {
   );
   const ensureTargetChain = useCallback(
     async (actionLabel: string, onError: (message: string) => void) => {
-      if (!chainMismatch) {
+      const currentWalletChainId = await readWalletChainId();
+      if (currentWalletChainId === defaultChain.id) {
+        setRuntimeWalletChainId(defaultChain.id);
         return true;
       }
       const switchFn = switchChainAsync ?? switchChain;
@@ -538,6 +603,7 @@ export function DashboardClient() {
           onError(`Switch to ${defaultChain.name} to ${actionLabel}.`);
           return false;
         }
+        setRuntimeWalletChainId(defaultChain.id);
         return true;
       } catch (err) {
         onError(
@@ -549,8 +615,8 @@ export function DashboardClient() {
       }
     },
     [
-      chainMismatch,
       sanitizeUserActionError,
+      readWalletChainId,
       switchChain,
       switchChainAsync,
       switchError,

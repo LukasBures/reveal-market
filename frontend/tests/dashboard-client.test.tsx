@@ -282,17 +282,77 @@ describe("DashboardClient", () => {
 
     const claimButton = screen
       .getAllByRole("button")
-      .find((btn) => /switch to horizen/i.test(btn.textContent ?? ""));
+      .find((btn) => {
+        const label = btn.textContent?.trim().toLowerCase() ?? "";
+        return label === "claim" || label.includes("switch to horizen");
+      });
     expect(claimButton).toBeTruthy();
     fireEvent.click(claimButton!);
 
     await waitFor(() =>
-      expect(switchChain).toHaveBeenCalledTimes(2),
+      expect(switchChain).toHaveBeenCalledTimes(1),
     );
     await waitFor(() => expect(writeContract).toHaveBeenCalledTimes(1));
     await waitFor(() =>
       expect(waitForTransactionReceipt).toHaveBeenCalledWith({ hash: "0xclaim" }),
     );
+  });
+
+  it("switches to the target chain before preparing when wagmi chain id is stale but the connector is still on Base", async () => {
+    let connectorChainId = 8453;
+    const switchChain = vi.fn().mockImplementation(
+      async () =>
+        await new Promise<void>((resolve) => {
+          setTimeout(() => {
+            connectorChainId = mockDefaultChain.id;
+            resolve();
+          }, 150);
+        }),
+    );
+    const getChainId = vi.fn().mockImplementation(async () => connectorChainId);
+    hoisted.useConnection.mockReturnValue({
+      address: "0x9999999999999999999999999999999999999999",
+      isConnected: true,
+      chain: undefined,
+      connector: { switchChain: vi.fn(), getChainId },
+    });
+    hoisted.useChainId.mockReturnValue(26514);
+    hoisted.useSwitchChain.mockReturnValue({
+      mutate: switchChain,
+      mutateAsync: switchChain,
+      error: null,
+      isPending: false,
+    });
+    hoisted.usePublicClient.mockReturnValue({
+      waitForTransactionReceipt: vi.fn(),
+      estimateContractGas: vi.fn().mockResolvedValue(5_000_000n),
+    });
+    hoisted.fetchPositions.mockResolvedValue({
+      positions: [basePosition],
+      escrowBalance: "100000000000000000",
+    });
+    hoisted.fetchClaimBundles.mockResolvedValue({
+      bundles: [claimBundle],
+      status: "ready",
+    });
+
+    render(<DashboardClient />);
+
+    await waitFor(() => expect(screen.getByText(/yes\/no/i)).toBeInTheDocument());
+
+    const prepareButton = screen
+      .getAllByRole("button")
+      .find((btn) => /switch to horizen|prepare to claim/i.test(btn.textContent ?? ""));
+    expect(prepareButton).toBeTruthy();
+    fireEvent.click(prepareButton!);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(hoisted.fetchClaimBundles).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(switchChain).toHaveBeenCalledWith({ chainId: mockDefaultChain.id }),
+    );
+    await waitFor(() => expect(hoisted.fetchClaimBundles).toHaveBeenCalledTimes(1));
+    expect(getChainId).toHaveBeenCalled();
   });
 
   it("shows a scoped pending-proof message when claim bundles are queued", async () => {
