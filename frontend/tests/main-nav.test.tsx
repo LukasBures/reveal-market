@@ -59,10 +59,10 @@ describe("MainNav", () => {
     const { MainNav } = await import("@/components/layout/MainNav");
     renderWithProviders(<MainNav />);
     expect(screen.getByRole("button", { name: /connect wallet/i })).toBeInTheDocument();
-    expect(screen.getByRole("searchbox", { name: /search/i })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /proofs/i })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /dashboard/i })).toBeInTheDocument();
-    expect(screen.getByRole("navigation")).toBeInTheDocument();
+    expect(screen.getAllByRole("searchbox", { name: /search/i }).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByRole("link", { name: /proofs/i }).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByRole("link", { name: /dashboard/i }).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByRole("navigation").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole("button", { name: /open navigation/i })).toBeInTheDocument();
   });
 

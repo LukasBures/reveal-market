@@ -139,14 +139,30 @@ export function PublicNav() {
           </a>
           <button
             type="button"
-            className="inline-flex items-center gap-2 rounded-full border border-white/20 px-4 py-2 text-xs font-semibold uppercase tracking-[0.4em] text-white/80 transition hover:border-white hover:text-white md:hidden"
+            className="relative flex h-10 w-10 items-center justify-center rounded-full border border-white/20 transition hover:border-white md:hidden"
             aria-expanded={isMobileMenuOpen}
             aria-controls="public-mobile-nav"
+            aria-label={isMobileMenuOpen ? "Close navigation" : "Open navigation"}
             onClick={() => setIsMobileMenuOpen((prev) => !prev)}
             ref={triggerRef}
           >
-            Menu
-            <span className="relative h-1.5 w-1.5 rounded-full bg-accent-400 shadow-[0_0_10px_rgba(123,240,94,0.8)]" />
+            <div className="flex h-4 w-5 flex-col items-center justify-between">
+              <span
+                className={`block h-[2px] w-5 rounded-full bg-white transition-all duration-300 ${
+                  isMobileMenuOpen ? "translate-y-[7px] rotate-45" : ""
+                }`}
+              />
+              <span
+                className={`block h-[2px] w-5 rounded-full bg-white transition-all duration-300 ${
+                  isMobileMenuOpen ? "opacity-0" : ""
+                }`}
+              />
+              <span
+                className={`block h-[2px] w-5 rounded-full bg-white transition-all duration-300 ${
+                  isMobileMenuOpen ? "-translate-y-[7px] -rotate-45" : ""
+                }`}
+              />
+            </div>
           </button>
         </div>
       </div>

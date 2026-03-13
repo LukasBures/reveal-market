@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import dynamic from "next/dynamic";
@@ -51,6 +51,8 @@ const HERO_CATEGORY_FILTERS = ["All", "Crypto", "Finance", "Economy", "Sports", 
  */
 export function MainNav() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const firstLinkRef = useRef<HTMLAnchorElement | null>(null);
   const pathname = usePathname();
   const isLandingPage = pathname === "/";
   const isCategoryPage = /^\/[a-z][a-z0-9-]*$/.test(pathname) && parseCategorySlug(pathname.slice(1)) !== null;
@@ -59,16 +61,43 @@ export function MainNav() {
   const spacerClass = showFiltersBar ? "h-[120px]" : "h-[72px] bg-[#010314]";
 
   useEffect(() => {
-    if (!isMobileMenuOpen) {
-      return;
-    }
+    if (!isMobileMenuOpen) return;
     const handler = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        event.preventDefault();
         setIsMobileMenuOpen(false);
+        triggerRef.current?.focus();
+      }
+      if (event.key === "Tab") {
+        const focusable = Array.from(
+          document.querySelectorAll<HTMLElement>(
+            "#main-mobile-nav a, #main-mobile-nav button, #main-mobile-nav input",
+          ),
+        ).filter((el) => !el.hasAttribute("disabled"));
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
       }
     };
     window.addEventListener("keydown", handler);
+    // Focus the search input when menu opens
+    const searchInput = document.querySelector<HTMLElement>("#main-mobile-nav input");
+    if (searchInput) searchInput.focus();
     return () => window.removeEventListener("keydown", handler);
+  }, [isMobileMenuOpen]);
+
+  useEffect(() => {
+    document.body.style.overflow = isMobileMenuOpen ? "hidden" : "";
+    return () => {
+      document.body.style.overflow = "";
+    };
   }, [isMobileMenuOpen]);
 
   return (
@@ -157,13 +186,30 @@ export function MainNav() {
         <div className="flex min-w-[160px] items-center justify-end gap-3 text-sm sm:min-w-[200px] md:text-base">
           <button
             type="button"
-            className="inline-flex items-center gap-2 rounded-full border border-white/20 px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.4em] text-white/80 transition hover:border-white hover:text-white md:hidden"
+            className="relative flex h-10 w-10 items-center justify-center rounded-full border border-white/20 transition hover:border-white md:hidden"
             aria-expanded={isMobileMenuOpen}
+            aria-controls="main-mobile-nav"
             aria-label={isMobileMenuOpen ? "Close navigation" : "Open navigation"}
             onClick={() => setIsMobileMenuOpen((prev) => !prev)}
+            ref={triggerRef}
           >
-            Menu
-            <span className="relative h-1.5 w-1.5 rounded-full bg-accent-400 shadow-[0_0_10px_rgba(123,240,94,0.8)]" />
+            <div className="flex h-4 w-5 flex-col items-center justify-between">
+              <span
+                className={`block h-[2px] w-5 rounded-full bg-white transition-all duration-300 ${
+                  isMobileMenuOpen ? "translate-y-[7px] rotate-45" : ""
+                }`}
+              />
+              <span
+                className={`block h-[2px] w-5 rounded-full bg-white transition-all duration-300 ${
+                  isMobileMenuOpen ? "opacity-0" : ""
+                }`}
+              />
+              <span
+                className={`block h-[2px] w-5 rounded-full bg-white transition-all duration-300 ${
+                  isMobileMenuOpen ? "-translate-y-[7px] -rotate-45" : ""
+                }`}
+              />
+            </div>
           </button>
           <div className="drop-shadow-[0_0_25px_rgba(123,240,94,0.45)]">
             <ConnectWalletButton />
@@ -175,46 +221,57 @@ export function MainNav() {
           <HomeFiltersBar />
         </Suspense>
       ) : null}
-      {isMobileMenuOpen ? (
-        <>
-          <div className="relative z-50 md:hidden">
-            <div className="mx-4 mb-4 rounded-2xl border border-white/10 bg-slate-950/90 p-4 text-sm text-white/90 shadow-[0_18px_40px_rgba(2,6,40,0.45)]">
-              <nav className="flex flex-col gap-3">
-                <Link
-                  href="/search"
-                  className="rounded-full border border-white/10 px-4 py-3 text-center font-semibold uppercase tracking-[0.25em] transition hover:border-white hover:text-white"
-                  onClick={() => setIsMobileMenuOpen(false)}
-                >
-                  Search
-                </Link>
-                <Link
-                  href="/proofs"
-                  className={`rounded-full border px-4 py-3 text-center font-semibold uppercase tracking-[0.25em] transition ${
-                    pathname === "/proofs"
-                      ? "border-white text-white"
-                      : "border-white/10 hover:border-white hover:text-white"
-                  }`}
-                  onClick={() => setIsMobileMenuOpen(false)}
-                >
-                  Proofs
-                </Link>
-                <Link
-                  href="/dashboard"
-                  className={`rounded-full border px-4 py-3 text-center font-semibold uppercase tracking-[0.25em] transition ${
-                    pathname === "/dashboard"
-                      ? "border-white text-white"
-                      : "border-white/10 hover:border-white hover:text-white"
-                  }`}
-                  onClick={() => setIsMobileMenuOpen(false)}
-                >
-                  Dashboard
-                </Link>
-              </nav>
-            </div>
+      {/* Mobile menu backdrop */}
+      <div
+        className={`fixed inset-0 z-40 bg-black/60 backdrop-blur-sm transition-opacity duration-300 md:hidden ${
+          isMobileMenuOpen ? "opacity-100" : "pointer-events-none opacity-0"
+        }`}
+        onClick={() => setIsMobileMenuOpen(false)}
+        aria-hidden="true"
+      />
+      {/* Mobile menu panel */}
+      <div
+        id="main-mobile-nav"
+        className={`absolute inset-x-0 top-[72px] z-50 border-b border-white/10 bg-slate-950/95 backdrop-blur-2xl transition-all duration-300 md:hidden ${
+          isMobileMenuOpen
+            ? "translate-y-0 opacity-100"
+            : "pointer-events-none -translate-y-4 opacity-0"
+        }`}
+      >
+        <nav className="mx-auto max-w-7xl px-4 py-5">
+          <div className="mb-5">
+            <HeroSearch
+              showButton={false}
+              showIcon
+              placeholder="Search markets..."
+              containerClassName="px-3 py-2.5"
+              inputClassName="text-sm placeholder:text-white/40"
+            />
           </div>
-          <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm md:hidden" onClick={() => setIsMobileMenuOpen(false)} />
-        </>
-      ) : null}
+          <div className="mb-4 h-px bg-white/10" />
+          <div className="flex flex-col gap-2">
+            <Link
+              href={"/dashboard" as Route}
+              className={`rounded-xl px-4 py-3 text-base font-semibold text-white/80 transition hover:bg-white/10 hover:text-white ${
+                pathname === "/dashboard" ? "bg-white/10 text-white" : ""
+              }`}
+              onClick={() => setIsMobileMenuOpen(false)}
+              ref={firstLinkRef}
+            >
+              Dashboard
+            </Link>
+            <Link
+              href={"/proofs" as Route}
+              className={`rounded-xl px-4 py-3 text-base font-semibold text-white/80 transition hover:bg-white/10 hover:text-white ${
+                pathname === "/proofs" ? "bg-white/10 text-white" : ""
+              }`}
+              onClick={() => setIsMobileMenuOpen(false)}
+            >
+              Proofs
+            </Link>
+          </div>
+        </nav>
+      </div>
       </header>
       {/* Offset page content for the fixed header. */}
       <div className={spacerClass} aria-hidden="true" />

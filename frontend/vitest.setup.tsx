@@ -78,18 +78,22 @@ if (typeof window !== "undefined") {
 
 vi.mock("next/link", () => ({
   __esModule: true,
-  default: ({
-    children,
-    prefetch,
-    ...props
-  }: {
-    children: React.ReactNode;
-    href: string;
-    className?: string;
-    target?: string;
-    rel?: string;
-    prefetch?: boolean;
-  }) => <a {...props}>{children}</a>,
+  default: React.forwardRef<
+    HTMLAnchorElement,
+    {
+      children: React.ReactNode;
+      href: string;
+      className?: string;
+      target?: string;
+      rel?: string;
+      prefetch?: boolean;
+      onClick?: React.MouseEventHandler<HTMLAnchorElement>;
+    }
+  >(({ children, prefetch, ...props }, ref) => (
+    <a ref={ref} {...props}>
+      {children}
+    </a>
+  )),
 }));
 
 vi.mock("next/image", () => ({

@@ -5,7 +5,7 @@ import { PublicNav } from "../PublicNav";
 describe("PublicNav accessibility", () => {
   it("sets aria-expanded and controls mobile nav", async () => {
     render(<PublicNav />);
-    const button = screen.getByRole("button", { name: /menu/i });
+    const button = screen.getByRole("button", { name: /open navigation/i });
     expect(button).toHaveAttribute("aria-expanded", "false");
     await userEvent.click(button);
     expect(button).toHaveAttribute("aria-expanded", "true");
@@ -14,7 +14,7 @@ describe("PublicNav accessibility", () => {
 
   it("traps focus within the mobile menu and closes on Escape", async () => {
     render(<PublicNav />);
-    const button = screen.getByRole("button", { name: /menu/i });
+    const button = screen.getByRole("button", { name: /open navigation/i });
     await userEvent.click(button);
     const firstLink = screen.getByRole("link", { name: /Search/i });
     expect(firstLink).toHaveFocus();
