@@ -428,6 +428,40 @@ async def _fetch_claim_deadlines(market_addresses: list[str]) -> dict[str, int]:
     return deadlines
 
 
+async def _fetch_market_phases(market_addresses: list[str]) -> dict[str, int]:
+    if not settings.rpc_url or not market_addresses:
+        return {}
+    web3 = get_async_web3(str(settings.rpc_url))
+
+    async def _fetch_phase(address: str) -> tuple[str, int] | None:
+        try:
+            contract = web3.eth.contract(address=to_checksum(address), abi=REVEAL_MARKET_ABI)
+            phase_value = await contract.functions.phase().call()
+            return address, int(phase_value)
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="trade.market_phase.fetch_failed",
+                message="failed to fetch market phase from chain",
+                market_address=address,
+                error=str(exc),
+            )
+            return None
+
+    tasks = [_fetch_phase(address) for address in market_addresses]
+    if not tasks:
+        return {}
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    phases: dict[str, int] = {}
+    for result in results:
+        if isinstance(result, BaseException) or result is None:
+            continue
+        address, phase_value = result
+        phases[address] = phase_value
+    return phases
+
+
 def _raw_tx_bytes(signed_tx: Any) -> bytes:
     raw_tx = getattr(signed_tx, "raw_transaction", None)
     if raw_tx is None:
@@ -2378,11 +2412,13 @@ async def list_positions(
     rows = await repository_async.list_commitments_with_settlement(session, wallet)
     await _sync_claimed_commitments(session, rows)
     claim_deadline_candidates: set[str] = set()
+    phase_candidates: set[str] = set()
     for commitment, market, settlement in rows:
         if commitment.claimed_at is not None:
             continue
         if not market.market_address or commitment.leaf_index is None:
             continue
+        phase_candidates.add(market.market_address)
         if settlement is None or settlement.winning_outcome_id is None:
             continue
         if settlement.winning_outcome_id != commitment.outcome_id:
@@ -2393,6 +2429,7 @@ async def list_positions(
             continue
         claim_deadline_candidates.add(market.market_address)
     claim_deadlines = await _fetch_claim_deadlines(list(claim_deadline_candidates))
+    market_phases = await _fetch_market_phases(list(phase_candidates))
     now_ts = int(time.time())
     positions: list[schemas.PositionRecord] = []
     for commitment, market, settlement in rows:
@@ -2413,18 +2450,23 @@ async def list_positions(
         claimed = commitment.claimed_at is not None
         claimable = False
         position_status = "committed"
+        market_phase = market_phases.get(market.market_address) if market.market_address else None
+        onchain_settled = market_phase == 2 if market_phase is not None else not bool(settings.rpc_url)
         # Surface market status transitions for UI (committed/locked/settled/cancelled/pending).
         if getattr(market, "status", None) == models.MarketStatusEnum.LOCKED.value:
             position_status = "locked"
-        if getattr(market, "status", None) == models.MarketStatusEnum.CANCELLED.value:
+        if getattr(market, "status", None) == models.MarketStatusEnum.CANCELLED.value or market_phase == 3:
             position_status = "cancelled"
         if settlement and settlement.winning_outcome_id is not None:
-            position_status = "settled"
-            if settlement.winning_outcome_id == commitment.outcome_id:
-                claimable = True
+            if onchain_settled:
+                position_status = "settled"
+                if settlement.winning_outcome_id == commitment.outcome_id:
+                    claimable = True
+                else:
+                    payout_wei = 0
+                    payout_zen = 0
             else:
-                payout_wei = 0
-                payout_zen = 0
+                position_status = "pending_resolution"
         elif settlement is None and market.resolved_at:
             payout_wei = None
             payout_zen = None
@@ -2432,7 +2474,24 @@ async def list_positions(
             claim_deadline = claim_deadlines.get(market.market_address)
             if claim_deadline and now_ts > int(claim_deadline):
                 claimable = False
-        if market.resolved_at or getattr(market, "status", None) == models.MarketStatusEnum.SETTLED.value:
+        if (
+            market.resolved_at or getattr(market, "status", None) == models.MarketStatusEnum.SETTLED.value
+        ) and position_status not in {"claimed", "cancelled"}:
+            if onchain_settled:
+                position_status = "settled"
+            else:
+                position_status = "pending_resolution"
+        if market_phase == 1 and position_status == "committed":
+            position_status = "locked"
+        if (
+            market_phase == 2
+            and position_status not in {"claimed", "cancelled"}
+            and (
+                settlement is not None
+                or market.resolved_at is not None
+                or getattr(market, "status", None) == models.MarketStatusEnum.SETTLED.value
+            )
+        ):
             position_status = "settled"
         if (
             getattr(market, "resolution_status", None)
@@ -2540,8 +2599,20 @@ async def list_claim_bundles(
             session, wallet, market_filter=market_id, winning_only=False
         )
 
+    phase_candidates = [
+        market.market_address
+        for _commitment, market, _settlement in base_rows
+        if market.market_address
+    ]
+    market_phases = await _fetch_market_phases(phase_candidates)
     pending_markets: set[str] = set()
     for _commitment, market, settlement in base_rows:
+        market_phase = market_phases.get(market.market_address) if market.market_address else None
+        if market_phase == 3:
+            continue
+        if market.market_address and (market_phase is None or market_phase != 2):
+            pending_markets.add(str(market.event_id))
+            continue
         if (
             getattr(market, "resolution_status", None) is not None
             and market.resolution_status != models.ResolutionStatusEnum.FINAL.value
@@ -2559,6 +2630,9 @@ async def list_claim_bundles(
             continue
         if not market.market_address or commitment.leaf_index is None:
             continue
+        market_phase = market_phases.get(market.market_address)
+        if market_phase is None or market_phase != 2:
+            continue
         if settlement is None or settlement.winning_outcome_id is None:
             continue
         if settlement.winning_outcome_id != commitment.outcome_id:
@@ -2575,6 +2649,11 @@ async def list_claim_bundles(
         await _enqueue_claim_proof_jobs(session, pending_markets, wallet=wallet)
     for commitment, market, settlement in rows:
         if commitment.claimed_at is not None:
+            continue
+        market_phase = market_phases.get(market.market_address) if market.market_address else None
+        if market_phase == 3:
+            continue
+        if market.market_address and (market_phase is None or market_phase != 2):
             continue
         if market.market_address:
             claim_deadline = claim_deadlines.get(market.market_address)
@@ -2658,7 +2737,16 @@ async def claim_status(
     if not rows:
         return schemas.ClaimStatusResponse(status="ready", pendingMarkets=[])
     pending_markets: set[str] = set()
+    market_phases = await _fetch_market_phases(
+        [market.market_address for _commitment, market, _settlement in rows if market.market_address]
+    )
     for _commitment, market, settlement in rows:
+        market_phase = market_phases.get(market.market_address) if market.market_address else None
+        if market_phase == 3:
+            continue
+        if market.market_address and (market_phase is None or market_phase != 2):
+            pending_markets.add(str(market.event_id))
+            continue
         if (
             getattr(market, "resolution_status", None) is not None
             and market.resolution_status != models.ResolutionStatusEnum.FINAL.value
@@ -2712,6 +2800,12 @@ async def trade_claim(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="market_not_settled")
     if market.resolution_status and market.resolution_status != models.ResolutionStatusEnum.FINAL.value:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="market_not_final")
+    if settings.rpc_url:
+        market_phase = (await _fetch_market_phases([market.market_address])).get(market.market_address)
+        if market_phase is None:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="market_phase_unavailable")
+        if market_phase != 2:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="market_not_settled")
     winning_outcome = settlement.winning_outcome_id
     has_roots = _has_valid_roots(settlement)
     if not has_roots:

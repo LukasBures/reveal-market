@@ -92,6 +92,14 @@ def _build_commit_message(quote: dict, wallet: str) -> str:
     )
 
 
+@pytest.fixture(autouse=True)
+def _default_market_phases(monkeypatch):
+    async def _fetch_market_phases(addresses: list[str]):
+        return {address: 2 for address in addresses}
+
+    monkeypatch.setattr(trade_routes, "_fetch_market_phases", _fetch_market_phases)
+
+
 def test_claim_rejected_when_resolution_pending(client, db_session, monkeypatch):
     signer = Account.create()
     user = Account.create()
@@ -589,6 +597,57 @@ def test_claim_bundles_skip_claimed_commitment(client, db_session):
     assert body.get("status") is None
 
 
+def test_claim_bundles_stay_pending_until_market_settles_onchain(client, db_session, monkeypatch):
+    user = Account.create()
+    market = _seed_market(db_session, event_id="bundle-locked", address="0x7777777777777777777777777777777777777788")
+    commitment_hex = "0x" + "46" * 32
+    leaf_bytes = bytes.fromhex(commitment_hex[2:])
+    root_bytes, _paths = build_merkle_root_and_paths([leaf_bytes])
+    merkle_root = "0x" + root_bytes.hex()
+
+    db_session.add(
+        models.Commitment(
+            market_id=market.id,
+            user_address=user.address.lower(),
+            outcome_id=1,
+            amount_wei=200,
+            payout_wei=250,
+            salt="0xbeef",
+            ticket_hash=commitment_hex.lower(),
+            leaf=commitment_hex.lower(),
+            leaf_index=0,
+        )
+    )
+    db_session.add(
+        models.Settlement(
+            id=33,
+            market_id=market.id,
+            merkle_root=merkle_root,
+            commitments_count=1,
+            winning_outcome_id=1,
+            proof_status=models.SettlementProofStatus.GENERATED.value,
+            created_at=datetime.now(tz=UTC),
+        )
+    )
+    db_session.commit()
+
+    async def _locked_phase(addresses: list[str]):
+        return {address: 1 for address in addresses}
+
+    monkeypatch.setattr(trade_routes, "_fetch_market_phases", _locked_phase)
+
+    signature = Account.sign_message(
+        encode_defunct(text=f"claim-bundles:{user.address.lower()}"),
+        private_key=user._private_key,
+    ).signature.hex()
+    resp = client.get(f"/claim/bundles?wallet={user.address}", headers={"X-Wallet-Signature": signature})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["bundles"] == []
+    assert body["status"] == "pending"
+    assert market.event_id in body.get("pendingMarkets", [])
+
+
 def test_claim_bundles_do_not_serve_stale_positive_cache_after_claim(client, db_session, monkeypatch):
     from unittest.mock import AsyncMock
 
@@ -801,6 +860,53 @@ def test_positions_marks_claimed(client, db_session):
     assert len(body["positions"]) == 1
     pos = body["positions"][0]
     assert pos["status"] == "claimed"
+    assert pos["claimable"] is False
+
+
+def test_positions_do_not_mark_claimable_until_market_settles_onchain(client, db_session, monkeypatch):
+    user = Account.create()
+    market = _seed_market(db_session, event_id="pos-locked", address="0x8888888888888888888888888888888888888899")
+    commitment_hex = "0x" + "56" * 32
+    db_session.add(
+        models.Commitment(
+            market_id=market.id,
+            user_address=user.address.lower(),
+            outcome_id=1,
+            amount_wei=200,
+            payout_wei=250,
+            salt="0xbeef",
+            ticket_hash=commitment_hex.lower(),
+            leaf=commitment_hex.lower(),
+            leaf_index=0,
+            tx_hash="0x" + "aa" * 32,
+        )
+    )
+    db_session.add(
+        models.Settlement(
+            id=34,
+            market_id=market.id,
+            merkle_root="0x" + "12" * 32,
+            commitments_count=1,
+            winning_outcome_id=1,
+            proof_status=models.SettlementProofStatus.GENERATED.value,
+            created_at=datetime.now(tz=UTC),
+        )
+    )
+    db_session.commit()
+
+    async def _locked_phase(addresses: list[str]):
+        return {address: 1 for address in addresses}
+
+    monkeypatch.setattr(trade_routes, "_fetch_market_phases", _locked_phase)
+
+    signature = Account.sign_message(
+        encode_defunct(text=f"positions:{user.address.lower()}"),
+        user._private_key,
+    ).signature.hex()
+    resp = client.get(f"/positions?wallet={user.address}", headers={"X-Wallet-Signature": signature})
+    assert resp.status_code == 200
+    pos = resp.json()["positions"][0]
+    assert pos["status"] == "pending_resolution"
     assert pos["claimable"] is False
 
 
@@ -1472,6 +1578,52 @@ def test_claim_rejects_settlement_missing_winning_outcome(client, db_session, mo
     resp = client.post(
         "/trade/claim",
         json={"market_id": market.event_id, "wallet_address": "0x" + "1" * 40},
+    )
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "market_not_settled"
+
+
+def test_claim_rejects_market_not_settled_when_onchain_phase_locked(client, db_session, monkeypatch):
+    user = Account.create()
+    market = _seed_market(db_session, event_id="locked-onchain-claim", address="0x" + "C" * 40)
+    commitment_hex = "0x" + "ed" * 32
+    leaf_bytes = bytes.fromhex(commitment_hex[2:])
+    root_bytes, _ = build_merkle_root_and_paths([leaf_bytes])
+    merkle_root = "0x" + root_bytes.hex()
+    db_session.add(
+        models.Commitment(
+            market_id=market.id,
+            user_address=user.address.lower(),
+            outcome_id=0,
+            amount_wei=100,
+            payout_wei=150,
+            salt="0x0",
+            ticket_hash=commitment_hex.lower(),
+            leaf=commitment_hex.lower(),
+            leaf_index=0,
+        )
+    )
+    db_session.add(
+        models.Settlement(
+            market_id=market.id,
+            merkle_root=merkle_root,
+            commitments_count=1,
+            winning_outcome_id=0,
+            proof_status=models.SettlementProofStatus.GENERATED.value,
+            created_at=datetime.now(tz=UTC),
+        )
+    )
+    db_session.commit()
+    monkeypatch.setattr(runtime.settings, "rpc_url", "http://rpc", raising=False)
+
+    async def _locked_phase(addresses: list[str]):
+        return {address: 1 for address in addresses}
+
+    monkeypatch.setattr(trade_routes, "_fetch_market_phases", _locked_phase)
+
+    resp = client.post(
+        "/trade/claim",
+        json={"market_id": market.event_id, "wallet_address": user.address},
     )
     assert resp.status_code == 409
     assert resp.json()["detail"] == "market_not_settled"
