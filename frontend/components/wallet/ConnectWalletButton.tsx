@@ -505,7 +505,7 @@ export function ConnectWalletButton() {
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby={modalTitleId}
-                className="relative z-10 w-full max-w-xl overflow-y-auto rounded-t-3xl border border-white/15 bg-gradient-to-b from-slate-950/95 via-slate-950/90 to-slate-900/90 p-4 pb-8 text-white shadow-[0_-20px_60px_rgba(8,15,40,0.7)] sm:rounded-3xl sm:shadow-[0_40px_160px_rgba(8,15,40,0.85)] max-h-[85dvh]"
+                className="relative z-10 w-full max-w-xl overflow-y-auto rounded-t-3xl border border-white/15 bg-gradient-to-b from-slate-950/95 via-slate-950/90 to-slate-900/90 p-4 pb-8 text-white shadow-[0_-20px_60px_rgba(8,15,40,0.7)] sm:rounded-3xl sm:shadow-[0_40px_160px_rgba(8,15,40,0.85)] max-h-[85dvh] min-h-[70dvh] sm:min-h-0"
                 onClick={(event) => event.stopPropagation()}
               >
             {/* Close button — floating top-right */}

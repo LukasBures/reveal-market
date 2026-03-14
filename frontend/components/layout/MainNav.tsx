@@ -213,6 +213,7 @@ export function MainNav() {
                 placeholder="Search markets..."
                 containerClassName="px-3 py-2.5"
                 inputClassName="text-sm placeholder:text-white/40"
+                onNavigate={() => setIsMobileMenuOpen(false)}
               />
             </div>
             <div className="mb-4 h-px bg-white/10" />

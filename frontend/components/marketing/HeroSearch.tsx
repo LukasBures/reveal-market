@@ -23,6 +23,7 @@ type Props = {
   inputClassName?: string;
   containerClassName?: string;
   placeholder?: string;
+  onNavigate?: () => void;
 };
 
 export function HeroSearch({
@@ -33,6 +34,7 @@ export function HeroSearch({
   inputClassName,
   containerClassName,
   placeholder = "Search markets, oracles, or narratives",
+  onNavigate,
 }: Props) {
   const router = useRouter();
   const [search, setSearch] = useState(initialSearch);
@@ -146,6 +148,7 @@ export function HeroSearch({
         event.preventDefault();
         router.push(buildEventPath(suggestions[highlightedIndex].eventId));
         setSuggestionsVisible(false);
+        onNavigate?.();
       }
     },
     [suggestionsVisible, suggestions, highlightedIndex, router],
@@ -156,6 +159,7 @@ export function HeroSearch({
     const query = search.trim();
     if (highlightedIndex >= 0 && highlightedIndex < suggestions.length) {
       router.push(buildEventPath(suggestions[highlightedIndex].eventId));
+      onNavigate?.();
       return;
     }
     if (!query) return;
@@ -249,6 +253,7 @@ export function HeroSearch({
                   event.preventDefault();
                   router.push(buildEventPath(suggestion.eventId));
                   setSuggestionsVisible(false);
+                  onNavigate?.();
                 }}
                 className={`flex w-full min-w-0 items-center gap-3 px-4 py-3 text-left text-sm transition ${
                   index === highlightedIndex ? "bg-white/10" : "hover:bg-white/5"
