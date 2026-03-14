@@ -124,6 +124,15 @@ a {
   color: inherit;
 }
 
+/* Hide scrollbar while keeping scroll functionality */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* Smooth, minimal scrollbar to avoid layout shift between pages */
 @supports (scrollbar-color: auto) {
   html {

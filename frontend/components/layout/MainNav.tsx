@@ -26,7 +26,7 @@ const ConnectWalletButton = dynamic(
       } catch { /* SSR / private browsing */ }
       return (
         <div>
-          <span className="inline-flex min-w-[9.5rem] items-center justify-center rounded-full bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white select-none shadow-lg shadow-brand-500/40">
+          <span className="inline-flex items-center justify-center rounded-full bg-brand-500 px-3 py-2 text-xs font-semibold text-white select-none shadow-lg shadow-brand-500/40 md:min-w-[9.5rem] md:px-5 md:py-2.5 md:text-sm">
             {label}
           </span>
         </div>
@@ -100,12 +100,12 @@ export function MainNav() {
 
   // Shared logo element (used in both headers)
   const logoImg = (
-    <div className="relative aspect-[25/7] w-[160px]">
+    <div className="relative aspect-[25/7] w-[130px] md:w-[160px]">
       <Image
         src="/brand/reveal-logo-wordmark.svg"
         alt="Reveal Market"
         fill
-        sizes="160px"
+        sizes="(max-width: 767px) 130px, 160px"
         priority
         unoptimized
         className="select-none object-contain"
@@ -154,35 +154,33 @@ export function MainNav() {
       {/* ══════════════════════════════════════════════════════════════════
           MOBILE HEADER  (visible below md breakpoint — < 768px)
           Layout:
-            Row 1  [60px]  Logo ←————————————————→ Hamburger
-            Row 2  [44px]                         Connect Wallet →
-            Row 3  [48px]  ← Category chips ——— Sort pills →   (home/category pages only)
+            Row 1  [60px]  Logo ←——————— Connect Wallet  ☰
+            Row 2  [44px]  ← Category chips →   (home/category pages only)
       ══════════════════════════════════════════════════════════════════ */}
       <header
-        className={`fixed left-0 right-0 top-0 z-50 border-b border-white/10 bg-black/50 backdrop-blur-2xl px-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] md:hidden ${showFiltersBar ? "h-[148px]" : "h-[104px]"}`}
+        className={`fixed left-0 right-0 top-0 z-50 border-b border-white/10 bg-black/50 backdrop-blur-2xl px-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] md:hidden ${showFiltersBar ? "h-[104px]" : "h-[60px]"}`}
       >
         {/* Decorative top accent line */}
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-brand-500/40 to-transparent" />
-        {/* Radial glow behind nav rows */}
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-[104px] bg-[radial-gradient(circle_at_top,_rgba(124,132,255,0.18),_transparent_70%)]" />
+        {/* Radial glow behind nav row */}
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-[60px] bg-[radial-gradient(circle_at_top,_rgba(124,132,255,0.18),_transparent_70%)]" />
         {showFiltersBar ? (
-          <div className="pointer-events-none absolute inset-x-0 top-[104px] h-[44px] bg-[radial-gradient(circle_at_top,_rgba(124,132,255,0.18),_transparent_70%)]" />
+          <div className="pointer-events-none absolute inset-x-0 top-[60px] h-[44px] bg-[radial-gradient(circle_at_top,_rgba(124,132,255,0.18),_transparent_70%)]" />
         ) : null}
 
-        {/* Row 1: Logo (left) + Hamburger (right) */}
+        {/* Row 1: Logo (left) + Connect Wallet + Hamburger (right) */}
         <div className="mx-auto flex h-[60px] max-w-7xl items-center justify-between px-4" data-testid="main-nav">
           {logoLink}
-          {hamburgerButton}
-        </div>
-
-        {/* Row 2: Connect Wallet (right-aligned) */}
-        <div className="mx-auto flex h-[44px] max-w-7xl items-center justify-end px-4">
-          <div className="drop-shadow-[0_0_25px_rgba(123,240,94,0.45)]">
-            <ConnectWalletButton />
+          <div className="flex items-center gap-2">
+            {/* Compact ConnectWallet — override min-width and padding for the tight row */}
+            <div className="[&>div>button]:min-w-0 [&>div>button]:px-3 [&>div>button]:py-2 [&>div>button]:text-xs [&>div>span]:min-w-0 [&>div>span]:px-3 [&>div>span]:py-2 [&>div>span]:text-xs drop-shadow-[0_0_25px_rgba(123,240,94,0.45)]">
+              <ConnectWalletButton />
+            </div>
+            {hamburgerButton}
           </div>
         </div>
 
-        {/* Row 3: Category + sort filter bar (home / category pages only) */}
+        {/* Row 2: Category chips (home / category pages only) */}
         {showFiltersBar ? (
           <Suspense fallback={null}>
             <HomeFiltersBar mobile />
@@ -201,7 +199,7 @@ export function MainNav() {
         {/* Slide-down menu panel */}
         <div
           id="main-mobile-nav"
-          className={`absolute inset-x-0 top-[104px] z-50 border-b border-white/10 bg-slate-950/95 backdrop-blur-2xl transition-all duration-300 ${
+          className={`absolute inset-x-0 top-[60px] z-50 border-b border-white/10 bg-slate-950/95 backdrop-blur-2xl transition-all duration-300 ${
             isMobileMenuOpen
               ? "translate-y-0 opacity-100"
               : "pointer-events-none -translate-y-4 opacity-0"
@@ -306,7 +304,7 @@ export function MainNav() {
 
       {/* Content offset spacer — matches whichever header is active */}
       <div
-        className={showFiltersBar ? "h-[148px] bg-[#010314] md:h-[120px]" : "h-[104px] bg-[#010314] md:h-[72px]"}
+        className={showFiltersBar ? "h-[104px] bg-[#010314] md:h-[120px]" : "h-[60px] bg-[#010314] md:h-[72px]"}
         aria-hidden="true"
       />
     </>
