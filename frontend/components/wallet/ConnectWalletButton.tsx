@@ -505,33 +505,25 @@ export function ConnectWalletButton() {
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby={modalTitleId}
-                className="relative z-10 w-full max-w-xl overflow-y-auto rounded-t-3xl border border-white/15 bg-gradient-to-b from-slate-950/95 via-slate-950/90 to-slate-900/90 p-6 pb-8 text-white shadow-[0_-20px_60px_rgba(8,15,40,0.7)] sm:rounded-3xl sm:shadow-[0_40px_160px_rgba(8,15,40,0.85)] max-h-[85dvh]"
+                className="relative z-10 w-full max-w-xl overflow-y-auto rounded-t-3xl border border-white/15 bg-gradient-to-b from-slate-950/95 via-slate-950/90 to-slate-900/90 p-4 pb-8 text-white shadow-[0_-20px_60px_rgba(8,15,40,0.7)] sm:rounded-3xl sm:shadow-[0_40px_160px_rgba(8,15,40,0.85)] max-h-[85dvh]"
                 onClick={(event) => event.stopPropagation()}
               >
-            <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-4">
-              <div>
-                <p id={modalTitleId} className="text-lg font-semibold text-white">
-                  Connect wallet
-                </p>
-                <p className="text-xs text-white/60">
-                  {isConnected && address ? "Manage your session" : "Choose a wallet to continue"}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={closeModal}
-                className="rounded-md border border-white/30 bg-white/5 p-2 text-white/70 shadow-inner transition hover:border-white hover:text-white"
-                aria-label="Close wallet dialog"
-              >
-                <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className="h-3.5 w-3.5">
-                  <path d="M5 5l10 10m0-10L5 15" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                </svg>
-              </button>
-            </div>
+            {/* Close button — floating top-right */}
+            <button
+              type="button"
+              onClick={closeModal}
+              className="absolute right-3 top-3 rounded-md border border-white/20 bg-white/5 p-1.5 text-white/60 transition hover:border-white hover:text-white"
+              aria-label="Close wallet dialog"
+            >
+              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className="h-3.5 w-3.5">
+                <path d="M5 5l10 10m0-10L5 15" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </button>
 
-            <div className="mt-5 space-y-4">
+            <p id={modalTitleId} className="sr-only">Connect wallet</p>
+
+            <div className="space-y-4">
               <div className="space-y-3">
-                <p className="text-[11px] uppercase tracking-[0.35em] text-white/50">Wallet providers</p>
                 {!hasAnyAvailable ? (
                   <p className="rounded-xl border border-white/10 bg-white/5 px-3 py-4 text-center text-xs text-white/70">
                     No compatible wallets detected on this device. Try WalletConnect or switch devices.

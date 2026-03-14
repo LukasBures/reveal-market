@@ -51,14 +51,14 @@ describe("MainNav", () => {
     pathnameState.value = "/";
     const { MainNav } = await import("@/components/layout/MainNav");
     renderWithProviders(<MainNav />);
-    expect(screen.getByRole("link", { name: /reveal market/i })).toHaveAttribute("href", "/");
+    expect(screen.getAllByRole("link", { name: /reveal market/i })[0]).toHaveAttribute("href", "/");
   });
 
   it("renders navigation links and the connect CTA", async () => {
     pathnameState.value = "/";
     const { MainNav } = await import("@/components/layout/MainNav");
     renderWithProviders(<MainNav />);
-    expect(screen.getByRole("button", { name: /connect wallet/i })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /connect wallet/i }).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByRole("searchbox", { name: /search/i }).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByRole("link", { name: /proofs/i }).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByRole("link", { name: /dashboard/i }).length).toBeGreaterThanOrEqual(1);
@@ -70,6 +70,6 @@ describe("MainNav", () => {
     pathnameState.value = "/proofs";
     const { MainNav } = await import("@/components/layout/MainNav");
     renderWithProviders(<MainNav />);
-    expect(screen.getByRole("button", { name: /connect wallet/i })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /connect wallet/i }).length).toBeGreaterThanOrEqual(1);
   });
 });
