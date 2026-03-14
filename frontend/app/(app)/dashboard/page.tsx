@@ -29,7 +29,7 @@ export default function DashboardPage() {
   ]);
   return (
     <>
-      <div className="relative mx-auto max-w-7xl px-4 py-12 pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] sm:py-16">
+      <div className="relative mx-auto max-w-7xl px-4 pt-8 pb-12 pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] sm:pb-16">
         {/* ambient page glows — brand violet top-left, brand green top-right */}
         <div aria-hidden="true" className="pointer-events-none absolute -top-32 left-1/4 h-80 w-[600px] -translate-x-1/2 rounded-full bg-[rgba(124,132,255,0.08)] blur-3xl" />
         <div aria-hidden="true" className="pointer-events-none absolute -top-16 right-0 h-56 w-96 rounded-full bg-[rgba(123,240,94,0.05)] blur-3xl" />
