@@ -7,7 +7,6 @@ outcomes, tags, and Gamma metadata.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import math
 import re
@@ -669,6 +668,35 @@ async def _load_group_markets_from_cache(cache: Redis | None, group_slug: str) -
         return None
 
 
+async def _write_group_markets_cache(
+    cache: Redis | None,
+    group_slug: str | None,
+    markets: list[schemas.MarketResponse],
+) -> None:
+    if cache is None or not group_slug or not markets:
+        return
+    normalized = group_slug.strip().lower()
+    if not normalized:
+        return
+    cache_key = group_markets_cache_key(normalized)
+    try:
+        schema_tag = await get_schema_tag(cache, settings.schema_version_key)
+        await set_json(cache, cache_key, [market.model_dump(mode="json") for market in markets], settings.cache_ttl_seconds)
+        await add_tag(cache, schema_tag, cache_key)
+        await add_tag(cache, "markets:group", cache_key)
+        await add_tag(cache, f"group:{normalized}", cache_key)
+    except (RedisError, TypeError, ValueError) as exc:  # pragma: no cover - cache best-effort
+        if logger.isEnabledFor(logging.DEBUG):
+            log_event(
+                logger,
+                logging.DEBUG,
+                event="markets.group_markets.cache_write_failed",
+                message="failed to persist group markets cache payload",
+                group_slug=normalized,
+                error=str(exc),
+            )
+
+
 async def _load_group_markets_for_event(
     session: AsyncSession,
     event: schemas.EventResponse,
@@ -699,6 +727,7 @@ async def _load_group_markets_for_event(
     )
     lookup_key = _event_group_lookup_key(event)
     markets: list[models.Market] = []
+    cache_write_key: str | None = None
     cache = await cache_client_service.get_cache_client()
     if use_raw_group_slug and raw_group_slug_key is not None:
         cached = await _load_group_markets_from_cache(cache, raw_group_slug_key)
@@ -737,6 +766,7 @@ async def _load_group_markets_for_event(
             if filtered_cached:
                 return filtered_cached
     if use_raw_group_slug and raw_group_slug_key is not None:
+        cache_write_key = raw_group_slug_key
         markets = await crud.get_markets_by_group_slug(session, raw_group_slug_key)
         if markets and _is_temporal_series_slug(raw_group_slug_key):
             ref_date = normalize_datetime(getattr(primary, "closes_at", None))
@@ -753,14 +783,18 @@ async def _load_group_markets_for_event(
                 if candidates:
                     markets = candidates
     if not markets and use_raw_event_key and raw_event_key_value is not None:
+        cache_write_key = raw_event_key_value
         markets = await crud.get_markets_by_event_key(session, raw_event_key_value)
     if not markets and lookup_key and lookup_key not in {raw_group_slug_key, raw_event_key_value}:
+        cache_write_key = lookup_key
         markets = await crud.get_markets_by_event_key(session, lookup_key)
     if not markets and lookup_key:
         market = await crud.get_market_by_event_id(session, lookup_key)
         if market is not None:
+            cache_write_key = lookup_key
             markets = [market]
     models_list = [schemas.MarketResponse.model_validate(item) for item in markets]
+    await _write_group_markets_cache(cache, cache_write_key, models_list)
     filtered = [
         model
         for model in models_list
@@ -790,20 +824,20 @@ async def expand_event_groups_for_list(
 ) -> list[schemas.EventResponse]:
     if not events:
         return []
-    tasks = [
-        _load_group_markets_for_event(
-            session,
-            event,
-            status=status,
-            category=category,
-            oracle=oracle,
-            featured=featured,
-            closes_after=closes_after,
-            closes_before=closes_before,
+    results: list[list[schemas.MarketResponse]] = []
+    for event in events:
+        results.append(
+            await _load_group_markets_for_event(
+                session,
+                event,
+                status=status,
+                category=category,
+                oracle=oracle,
+                featured=featured,
+                closes_after=closes_after,
+                closes_before=closes_before,
+            )
         )
-        for event in events
-    ]
-    results = await asyncio.gather(*tasks)
     expanded_models: list[schemas.MarketResponse] = []
     for event, event_models in zip(events, results, strict=True):
         if event_models:

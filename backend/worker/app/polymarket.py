@@ -20,7 +20,7 @@ from typing import Any, Protocol, cast
 import httpx
 from py_clob_client.client import ClobClient
 from py_clob_client.constants import END_CURSOR
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from shared.categories import canonical_category_from_raw, refine_category
 from shared.logging import log_event
 from shared.models import ResolutionStatusEnum
@@ -28,6 +28,8 @@ from shared.polymarket import build_polymarket_events_url, build_polymarket_mark
 
 regex_digits = re.compile(r"\d")
 regex_number = re.compile(r"-?\d+(?:\.\d+)?")
+POSTGRES_INT32_MIN = -(2**31)
+POSTGRES_INT32_MAX = 2**31 - 1
 
 
 class _JsonLib(Protocol):
@@ -47,6 +49,18 @@ orjson = cast(_JsonLib | None, _orjson_module)
 logger = logging.getLogger("reveal_market.worker.polymarket")
 
 __all__ = ["AsyncPolymarketClient", "MarketPayload", "build_filters_from_settings"]
+
+
+def _coerce_postgres_int32(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if parsed < POSTGRES_INT32_MIN or parsed > POSTGRES_INT32_MAX:
+        return None
+    return parsed
 
 
 def build_filters_from_settings(settings_obj=None) -> dict[str, Any]:
@@ -132,6 +146,11 @@ class MarketPayload(BaseModel):
     trades_quantity: int | None = None
     grouping_window_key: str | None = None
     grouping_resolution_source: str | None = None
+
+    @field_validator("group_position", "trades_quantity", mode="before")
+    @classmethod
+    def _fit_postgres_int32(cls, value: Any) -> int | None:
+        return _coerce_postgres_int32(value)
 
     @classmethod
     def from_gamma(cls, raw: dict[str, Any]) -> MarketPayload:

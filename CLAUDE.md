@@ -117,7 +117,7 @@ Commitments use **Poseidon hashing** (BN254) with `BATCH_SIZE=256` and `MERKLE_D
 
 ### Key Constraints
 
-- **Default chain**: Horizen Testnet, chain ID `2651420`, RPC `https://horizen-testnet.rpc.caldera.xyz/http`
+- **Default chain**: Horizen Mainnet, chain ID `26514`, RPC `https://horizen.calderachain.xyz/http`
 - **Python version**: 3.12 (exactly)
 - **Node version**: >=20.0.0, <21.0.0
 - **Go version**: 1.24.0 (prover)

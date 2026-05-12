@@ -3,8 +3,8 @@
 Send native ETH from a generated key to a destination address.
 
 Defaults:
-- sender/private key: scripts/generated/testnet_zenith_token_random_1764886505.txt
-- RPC URL: Horizen testnet public RPC (override with --rpc-url)
+- sender/private key: scripts/generated/mainnet_funding_wallet.txt
+- RPC URL: Horizen Mainnet public RPC (override with --rpc-url)
 """
 
 from __future__ import annotations
@@ -29,9 +29,9 @@ try:
 except ImportError:
     ExtraDataToPOAMiddleware = None  # type: ignore[assignment]
 
-DEFAULT_RPC_URL = os.getenv("NEXT_PUBLIC_RPC_URL", "https://mainnet.base.org")
-DEFAULT_EXPLORER_URL = os.getenv("NEXT_PUBLIC_BLOCK_EXPLORER_URL", "https://basescan.org")
-DEFAULT_KEYFILE = Path(__file__).resolve().parent / "generated" / "testnet_zenith_token_random_1764886505.txt"
+DEFAULT_RPC_URL = os.getenv("RM_RPC_URL", os.getenv("NEXT_PUBLIC_RPC_URL", "https://horizen.calderachain.xyz/http"))
+DEFAULT_EXPLORER_URL = os.getenv("NEXT_PUBLIC_BLOCK_EXPLORER_URL", "https://horizen.calderaexplorer.xyz")
+DEFAULT_KEYFILE = Path(__file__).resolve().parent / "generated" / "mainnet_funding_wallet.txt"
 DEFAULT_AMOUNT = ""  # noqa: S105
 # Optional default destination; leave blank to require --to.
 DEFAULT_DESTINATION = ""  # noqa: S105

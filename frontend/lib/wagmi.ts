@@ -53,7 +53,7 @@ if (!process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL) {
 export const defaultChain = defineChain({
   id: chainId,
   name: chainName,
-  nativeCurrency: { name: "Zen", symbol: "ZEN", decimals: 18 },
+  nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
   rpcUrls: {
     default: { http: [rpcUrl] },
     public: { http: [rpcUrl] },

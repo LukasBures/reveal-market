@@ -1,6 +1,6 @@
 # Contracts (Zen)
 
-Core RevealMarket contracts for the Horizen Testnet commit-and-reveal prediction market platform.
+Core RevealMarket contracts for the Horizen Mainnet commit-and-reveal prediction market platform.
 
 ## Contracts
 
@@ -295,4 +295,4 @@ forge script script/RotateVerifierKey.s.sol --rpc-url $RPC_URL --broadcast
 
 `run_deploy.sh`, `scripts/create_market.sh`, and `scripts/check_circuit_hash.sh` validate the RPC chain ID before executing. Set `EXPECTED_CHAIN_ID` (or `CHAIN_ID`) to fail fast when the RPC points at the wrong network.
 
-Default chain: Horizen Testnet, chain ID `2651420`, RPC `https://horizen-testnet.rpc.caldera.xyz/http`.
+Default chain: Horizen Mainnet, chain ID `26514`, RPC `https://horizen.calderachain.xyz/http`.

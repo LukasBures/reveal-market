@@ -21,7 +21,7 @@ Use when a critical bug is detected that requires halting all trading activity.
 
 ```bash
 # Set variables
-export RPC_URL="https://horizen-testnet.rpc.caldera.xyz/http"
+export RPC_URL="https://horizen.calderachain.xyz/http"
 export CONTRACT_ADDRESS="<REVEAL_MARKET_ADDRESS>"
 export DEPLOYER_KEY="<DEPLOYER_PRIVATE_KEY>"
 

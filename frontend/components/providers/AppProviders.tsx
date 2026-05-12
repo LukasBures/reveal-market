@@ -4,6 +4,7 @@ import { PropsWithChildren, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { WagmiProvider } from "wagmi";
 import { wagmiConfig } from "@/lib/wagmi";
+import { ZenriseJourneyTracker } from "@/components/providers/ZenriseJourneyTracker";
 
 export function AppProviders({ children }: PropsWithChildren) {
   const queryClientConfig =
@@ -19,6 +20,7 @@ export function AppProviders({ children }: PropsWithChildren) {
 
   return (
     <WagmiProvider config={wagmiConfig}>
+      <ZenriseJourneyTracker />
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     </WagmiProvider>
   );

@@ -6,7 +6,7 @@ Foundry workspaces for on-chain components.
 
 | Workspace | Description |
 |-----------|-------------|
-| `contracts/zen` | Core RevealMarket contracts deployed on Horizen Testnet (chain ID 2651420) |
+| `contracts/zen` | Core RevealMarket contracts deployed on Horizen Mainnet (chain ID 26514) |
 | `contracts/polygon` | Auxiliary hedging/LP contracts deployed on Base/Polygon |
 
 ## Build and Test

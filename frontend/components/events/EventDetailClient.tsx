@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
+import { useConnection } from "wagmi";
 import type { MarketDetail, MarketSibling } from "@/lib/api-types";
 import { MarketDetailHeader } from "@/components/markets/MarketDetailHeader";
 import { StakeQuoteCard } from "@/components/markets/StakeQuoteCard";
@@ -10,6 +11,7 @@ import { getCommitDeadline } from "@/lib/markets";
 import { formatDateTime, formatUsd, formatUsdCompact } from "@/lib/formatters";
 import { buildBreadcrumbJsonLd } from "@/lib/seo";
 import { JsonLd } from "@/components/seo/JsonLd";
+import { getZenriseMarketInspectionDwellMs, recordZenriseMarketInspection } from "@/lib/zenriseJourney";
 
 type Props = {
   initialMarket: MarketDetail;
@@ -46,6 +48,7 @@ export function EventDetailClient({
       ? initialMarket.groupMarkets
       : [initialMarket],
   );
+  const { address, status: walletStatus } = useConnection();
 
   const selectionCutoff = useMemo(() => Date.now(), []);
   const isSelectableMarket = useCallback((item: MarketDetail) => {
@@ -89,6 +92,33 @@ export function EventDetailClient({
     setRequestedOutcome(null);
     setSelectedOutcome(0);
   }, [activeEventId, groupMarkets, isSelectableMarket]);
+
+  useEffect(() => {
+    if (walletStatus !== "connected" || !address || !activeEventId) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      recordZenriseMarketInspection({
+        walletAddress: address,
+        eventId: activeEventId,
+        canonicalEventId,
+        title: market.title,
+        marketAddress: market.marketAddress ?? null,
+        conditionId: market.conditionId ?? null,
+        groupSlug: market.groupSlug ?? canonicalEventId,
+      });
+    }, getZenriseMarketInspectionDwellMs());
+    return () => window.clearTimeout(timer);
+  }, [
+    activeEventId,
+    address,
+    canonicalEventId,
+    market.conditionId,
+    market.groupSlug,
+    market.marketAddress,
+    market.title,
+    walletStatus,
+  ]);
 
   const commitDeadline = getCommitDeadline(market);
   const initialOutcomeId =

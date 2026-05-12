@@ -148,7 +148,7 @@ Flow: commit on-chain → worker builds batch Merkle root → `lockBatches` → 
 | `RM_DATABASE_URL` | api, worker | PostgreSQL connection (psycopg2, Alembic migrations) |
 | `RM_DATABASE_ASYNC_URL` | api, worker | PostgreSQL async connection (asyncpg, runtime) |
 | `RM_REDIS_URL` | api, worker | Redis connection |
-| `RM_RPC_URL` | api, worker | EVM RPC endpoint (default: Horizen Testnet) |
+| `RM_RPC_URL` | api, worker | EVM RPC endpoint (default: Horizen Mainnet) |
 | `RM_SETTLEMENT_SIGNER_PRIVATE_KEY` | worker | Oracle account for settlement transactions |
 | `RM_PRICING_SIGNER_PRIVATE_KEY` | api | Signs QUOTE_V1 EIP-712 digests |
 | `RM_INTERNAL_API_SECRET` | api | Required header `X-Internal-Secret` for `/internal/*` routes |
@@ -193,7 +193,7 @@ make test-backend    # backend/run_tests.sh (API + shared + worker + mypy)
 
 ## Infrastructure Notes
 
-**Default chain:** Horizen Testnet, chain ID `2651420`, RPC `https://horizen-testnet.rpc.caldera.xyz/http`
+**Default chain:** Horizen Mainnet, chain ID `26514`, RPC `https://horizen.calderachain.xyz/http`
 
 **IPv6 (production Docker):** The prod compose enables IPv6 on the `reveal-market-prod` bridge. Host requirements: Docker daemon IPv6 enabled, IPv6 forwarding/proxy NDP sysctls, and `ndppd` proxying the Docker IPv6 subnet to `eth0`.
 

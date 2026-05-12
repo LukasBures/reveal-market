@@ -508,17 +508,18 @@ export function ConnectWalletButton() {
                 className="relative z-10 w-full max-w-xl overflow-y-auto rounded-t-3xl border border-white/15 bg-gradient-to-b from-slate-950/95 via-slate-950/90 to-slate-900/90 p-4 pb-8 text-white shadow-[0_-20px_60px_rgba(8,15,40,0.7)] sm:rounded-3xl sm:shadow-[0_40px_160px_rgba(8,15,40,0.85)] max-h-[85dvh] min-h-[70dvh] sm:min-h-0"
                 onClick={(event) => event.stopPropagation()}
               >
-            {/* Close button — floating top-right */}
-            <button
-              type="button"
-              onClick={closeModal}
-              className="absolute right-3 top-3 rounded-md border border-white/20 bg-white/5 p-1.5 text-white/60 transition hover:border-white hover:text-white"
-              aria-label="Close wallet dialog"
-            >
-              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className="h-3.5 w-3.5">
-                <path d="M5 5l10 10m0-10L5 15" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-              </svg>
-            </button>
+            <div className="mb-3 flex justify-end">
+              <button
+                type="button"
+                onClick={closeModal}
+                className="rounded-md border border-white/20 bg-white/5 p-1.5 text-white/60 transition hover:border-white hover:text-white"
+                aria-label="Close wallet dialog"
+              >
+                <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className="h-3.5 w-3.5">
+                  <path d="M5 5l10 10m0-10L5 15" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+              </button>
+            </div>
 
             <p id={modalTitleId} className="sr-only">Connect wallet</p>
 

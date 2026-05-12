@@ -3,8 +3,8 @@
 Send ERC-20 tokens from a generated key to a destination address.
 
 Defaults:
-- sender/private key: scripts/generated/testnet_zenith_token_random_1764886505.txt
-- RPC URL: Horizen testnet public RPC (override with --rpc-url)
+- sender/private key: scripts/generated/mainnet_funding_wallet.txt
+- RPC URL: Horizen Mainnet public RPC (override with --rpc-url)
 """
 
 from __future__ import annotations
@@ -148,7 +148,7 @@ def main() -> int:
     parser.add_argument(
         "--keyfile",
         default=str(DEFAULT_KEYFILE),
-        help="Path to file containing address=<addr> private_key=<hex> (default: zenith token key).",
+        help="Path to file containing address=<addr> private_key=<hex> (default: mainnet funding wallet).",
     )
     parser.add_argument(
         "--gas-price-gwei",

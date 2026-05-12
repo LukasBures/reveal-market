@@ -1286,6 +1286,68 @@ async def _handle_sync_failure(
     return stats
 
 
+async def _persist_group_markets_cache_best_effort(
+    session: Any,
+    redis_client: Redis | None,
+    group_slugs: set[str],
+    ttl_seconds: int,
+    *,
+    context: str,
+) -> int:
+    """Refresh group market cache without failing the already-committed sync batch."""
+
+    if redis_client is None or not group_slugs:
+        return 0
+    refresh_limit = max(runtime.settings.group_markets_cache_refresh_limit, 0)
+    if refresh_limit <= 0:
+        log_event(
+            logger,
+            logging.DEBUG,
+            event="worker.cache.group_markets_refresh_skipped",
+            message="skipping eager group markets cache refresh",
+            context=context,
+            group_slug_count=len(group_slugs),
+        )
+        return 0
+    if len(group_slugs) > refresh_limit:
+        log_event(
+            logger,
+            logging.INFO,
+            event="worker.cache.group_markets_refresh_limited",
+            message="limiting eager group markets cache refresh",
+            context=context,
+            group_slug_count=len(group_slugs),
+            refresh_limit=refresh_limit,
+        )
+        group_slugs = set(sorted(group_slugs)[:refresh_limit])
+    try:
+        return await persist_group_markets_cache(session, redis_client, group_slugs, ttl_seconds)
+    except Exception as exc:  # pragma: no cover - defensive around DB/Redis timeouts
+        try:
+            await session.rollback()
+        except Exception as rollback_exc:  # pragma: no cover - defensive
+            log_event(
+                logger,
+                logging.WARNING,
+                event="worker.cache.group_markets_refresh_rollback_failed",
+                message="failed to rollback session after group cache refresh failure",
+                context=context,
+                error=str(rollback_exc),
+                error_type=type(rollback_exc).__name__,
+            )
+        log_event(
+            logger,
+            logging.WARNING,
+            event="worker.cache.group_markets_refresh_failed",
+            message="failed to refresh group markets cache",
+            context=context,
+            group_slug_count=len(group_slugs),
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        return 0
+
+
 async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary, int, int, float]:
     """Ingest paginated Polymarket data."""
     start = time.perf_counter()
@@ -1361,11 +1423,12 @@ async def _sync_polymarket_feed(redis_client: Redis | None) -> tuple[SyncSummary
                         await persist_resolution_cache_updates(redis_client, summary)
                         if group_slugs_snapshot:
                             await session.flush()
-                            await persist_group_markets_cache(
+                            summary.group_cache_refreshes += await _persist_group_markets_cache_best_effort(
                                 session,
                                 redis_client,
                                 group_slugs_snapshot,
                                 runtime.settings.markets_cache_ttl_seconds,
+                                context="polymarket_sync",
                             )
                         await enqueue_proof_jobs(redis_client, summary)
                         summary.proof_jobs = []
@@ -1836,7 +1899,8 @@ async def process_once(
         proofs=summary.proofs_generated,
         lock_batches=summary.lock_batches_submitted,
         gamma_metadata_updates=summary.gamma_metadata_updates,
-        group_slugs_refreshed=summary.changed_group_slugs_total,
+        group_slugs_changed=summary.changed_group_slugs_total,
+        group_cache_refreshes=summary.group_cache_refreshes,
         latency_ms=round(latency_ms, 2),
         cache_invalidations=summary.cache_invalidations,
         market_errors=summary.failed_markets,
@@ -1951,11 +2015,12 @@ async def _reconcile_closed_markets(session, redis_client: Redis | None) -> dict
             await persist_resolution_cache_updates(redis_client, summary_obj)
             if group_slugs_snapshot:
                 await session.flush()
-                await persist_group_markets_cache(
+                summary_obj.group_cache_refreshes += await _persist_group_markets_cache_best_effort(
                     session,
                     redis_client,
                     group_slugs_snapshot,
                     runtime.settings.markets_cache_ttl_seconds,
+                    context="closed_reconcile",
                 )
             proofs_enqueued += len(summary_obj.proof_jobs)
             await enqueue_proof_jobs(redis_client, summary_obj)

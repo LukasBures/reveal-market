@@ -380,6 +380,32 @@ async def test_polymarket_client_derives_grouping_fields():
 
 
 @pytest.mark.asyncio
+async def test_polymarket_client_drops_group_position_outside_postgres_int32():
+    payload = [
+        {
+            "id": "grp-large",
+            "slug": "large-threshold-market",
+            "question": "Will the threshold exceed 3B?",
+            "groupItemTitle": ">$3B",
+            "groupItemThreshold": "3000000000",
+            "outcomes": ["Yes", "No"],
+            "outcomePrices": [0.5, 0.5],
+        }
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status_code=200, json=payload)
+
+    transport = httpx.MockTransport(handler)
+    client = AsyncPolymarketClient("https://example.com", timeout=1.0, transport=transport)
+    markets = await client.fetch_markets(page_size=1, max_pages=1)
+
+    assert len(markets) == 1
+    assert markets[0].group_position is None
+    assert markets[0].group_item_threshold == 3000000000
+
+
+@pytest.mark.asyncio
 async def test_polymarket_client_derives_group_slug_from_embedded_range():
     payload = [
         {

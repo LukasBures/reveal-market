@@ -120,6 +120,82 @@ async def test_sync_market_reuses_prefetched_instance(monkeypatch):
         await engine.dispose()
 
 
+async def test_collect_market_changes_refetches_after_rollback(monkeypatch):
+    engine, session_factory = await create_async_in_memory_db()
+    future_close = datetime.now(UTC) + timedelta(hours=6)
+    calls: list[tuple[str, bool, bool]] = []
+
+    try:
+        async with session_factory() as session:
+            session.add(
+                Market(
+                    event_id="evt-existing",
+                    title="Existing",
+                    oracle="polymarket",
+                    status="commit",
+                    closes_at=future_close,
+                )
+            )
+            await session.commit()
+
+        payloads = [
+            MarketPayload(
+                event_id="evt-bad",
+                title="Bad",
+                slug="bad",
+                category="sports",
+                oracle="polymarket",
+                status="commit",
+                closes_at=future_close,
+            ),
+            MarketPayload(
+                event_id="evt-existing",
+                title="Existing Updated",
+                slug="existing",
+                category="sports",
+                oracle="polymarket",
+                status="commit",
+                closes_at=future_close,
+            ),
+        ]
+
+        async def fake_sync_market(session, market, **kwargs):
+            calls.append((market.event_id, kwargs["batch_checked"], kwargs["existing_market"] is not None))
+            if market.event_id == "evt-bad":
+                raise RuntimeError("simulated failed market")
+            existing = kwargs["existing_market"]
+            if existing is None:
+                stmt = select(Market).where(Market.event_id == market.event_id)
+                existing = (await session.execute(stmt)).scalar_one()
+            existing.title = market.title
+            return existing, market_sync.SyncOutcome(
+                market_changed=True,
+                resolution_changed=False,
+                category_slug="sports",
+                condition_id=None,
+                resolution_cache_payload=None,
+                market_updated=True,
+            )
+
+        monkeypatch.setattr(market_sync, "sync_market", fake_sync_market)
+
+        async with session_factory() as session:
+            summary = await market_sync.collect_market_changes_with_summary(session, payloads, redis_client=None)
+            await session.commit()
+
+        assert summary.failed_markets == 1
+        assert calls == [
+            ("evt-bad", True, False),
+            ("evt-existing", False, False),
+        ]
+
+        async with session_factory() as session:
+            stored = (await session.execute(select(Market).where(Market.event_id == "evt-existing"))).scalar_one()
+            assert stored.title == "Existing Updated"
+    finally:
+        await engine.dispose()
+
+
 async def test_sync_market_preserves_onchain_fields():
     """Ensure worker sync does not wipe stored market address/onchain ids when payload omits them."""
 

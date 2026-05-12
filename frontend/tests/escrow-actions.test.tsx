@@ -8,7 +8,7 @@ const mockDefaultChain = vi.hoisted(
     ({
       id: 26514,
       name: "Horizen",
-      nativeCurrency: { name: "Zen", symbol: "ZEN", decimals: 18 },
+      nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
       rpcUrls: {
         default: { http: ["https://horizen.calderachain.xyz/http"] },
         public: { http: ["https://horizen.calderachain.xyz/http"] },

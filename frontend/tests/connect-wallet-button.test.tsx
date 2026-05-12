@@ -228,4 +228,21 @@ describe("ConnectWalletButton", () => {
     expect(screen.getByRole("button", { name: /okx wallet/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /^walletconnect/i })).toBeInTheDocument();
   });
+
+  it("keeps the wallet dialog close button outside wallet option buttons", () => {
+    currentConnectorsState = [
+      createConnector("metaMask", "MetaMask", false),
+      createConnector("rabby", "Rabby", false),
+      walletConnectConnector,
+    ];
+
+    render(<ConnectWalletButton />);
+    fireEvent.click(screen.getByRole("button", { name: /connect wallet/i }));
+
+    const closeButton = screen.getByRole("button", { name: /close wallet dialog/i });
+    const rabbyButton = screen.getByRole("button", { name: /rabby/i });
+
+    expect(rabbyButton).not.toContainElement(closeButton);
+    expect(closeButton).not.toHaveClass("absolute");
+  });
 });

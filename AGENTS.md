@@ -40,7 +40,7 @@
 - Store real RPC URLs, wallet keys, and API keys in secret managers. `.env.example` is reference-only.
 - Verify smart-contract addresses/rake overrides before enabling auto on-chain operations.
 - API + frontend ship strong CSP/HSTS/COOP/Permissions-Policy headers. Whitelist new domains before referencing external assets.
-- Default chain is Horizen Testnet (chain id `2651420`, RPC `https://horizen-testnet.rpc.caldera.xyz/http`, explorer `https://horizen-testnet.explorer.caldera.xyz`). Keep frontend/backend/contract envs aligned when switching networks.
+- Default chain is Horizen Mainnet (chain id `26514`, RPC `https://horizen.calderachain.xyz/http`, explorer `https://horizen.calderaexplorer.xyz`). Keep frontend/backend/contract envs aligned when switching networks.
 - Streamer presets pin public/internal hosts and CORS origins; align `STREAMER_PUBLIC_BASE_URL`/`NEXT_PUBLIC_PRICE_STREAMER_URL` with your frontend origin (HTTPS for WSS) and keep CORS lists tight even in dev.
 - `RM_ENVIRONMENT=local|prod` presets override streamer public/internal URLs and CORS lists; wildcard CORS is disallowed in prod.
 

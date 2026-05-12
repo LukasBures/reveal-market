@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import app.server as api_main
 from app import models
+from app.services import markets as market_service
 
 _FUTURE = datetime.now(tz=UTC) + timedelta(hours=12)
 
@@ -49,3 +51,35 @@ def test_markets_endpoint_serves_db_when_cache_missing(client, db_session, monke
     resp = client.get("/events", params={"limit": 1})
     assert resp.status_code == 200
     assert resp.json()[0]["event_id"] == "evt-nocache"
+
+
+def test_expand_event_groups_loads_events_sequentially(monkeypatch):
+    active = 0
+    max_active = 0
+
+    async def _fake_load(*_args, **_kwargs):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0)
+        active -= 1
+        return []
+
+    monkeypatch.setattr(market_service, "_load_group_markets_for_event", _fake_load)
+    events = [SimpleNamespace(markets=[]) for _ in range(3)]
+
+    result = asyncio.run(
+        market_service.expand_event_groups_for_list(
+            object(),
+            events,
+            status=None,
+            category=None,
+            oracle=None,
+            featured=None,
+            closes_after=None,
+            closes_before=None,
+        )
+    )
+
+    assert result == events
+    assert max_active == 1

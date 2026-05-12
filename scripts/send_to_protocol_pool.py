@@ -153,12 +153,12 @@ def main() -> int:
     parser.add_argument(
         "--pool",
         default=DEFAULT_POOL_ADDRESS,
-        help="ProtocolPool address (defaults to RM_PROTOCOL_POOL_ADDRESS or known testnet pool).",
+        help="ProtocolPool address (defaults to RM_PROTOCOL_POOL_ADDRESS or known mainnet pool).",
     )
     parser.add_argument(
         "--token",
         default=DEFAULT_TOKEN_ADDRESS,
-        help="ERC-20 collateral token address (defaults to ZEN on Horizen testnet).",
+        help="ERC-20 collateral token address (defaults to ZEN on Horizen Mainnet).",
     )
     parser.add_argument(
         "--amount",
@@ -168,7 +168,7 @@ def main() -> int:
     parser.add_argument(
         "--keyfile",
         default=str(DEFAULT_KEYFILE),
-        help="Path to file containing address=<addr> private_key=<hex> (default: zenith token key).",
+        help="Path to file containing address=<addr> private_key=<hex> (default: mainnet funding wallet).",
     )
     parser.add_argument(
         "--gas-price-gwei",

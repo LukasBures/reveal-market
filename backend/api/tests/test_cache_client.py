@@ -23,6 +23,32 @@ class _FakeRedis:
 
 
 @pytest.mark.asyncio
+async def test_get_cache_client_uses_configured_pool_size(monkeypatch):
+    created: list[dict[str, float | int]] = []
+
+    def _fake_get_client(url: str, **kwargs):
+        created.append({"url": url, **kwargs})
+        return _FakeRedis()
+
+    monkeypatch.setattr(cache_client_service, "get_client", _fake_get_client)
+    monkeypatch.setattr(runtime_module.settings, "redis_url", "redis://cache", raising=False)
+    monkeypatch.setattr(runtime_module.settings, "cache_max_connections", 77, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "cache_connect_retries", 1, raising=False)
+    monkeypatch.setattr(runtime_module.settings, "cache_connect_retry_delay_seconds", 0.0, raising=False)
+    monkeypatch.setattr(runtime_module, "cache_client", None, raising=False)
+    monkeypatch.setattr(runtime_module, "blocking_cache_client", None, raising=False)
+
+    client = await cache_client_service.get_cache_client()
+
+    assert client is not None
+    assert len(created) == 1
+    assert created[0]["url"] == "redis://cache"
+    assert created[0]["max_connections"] == 77
+
+    await cache_client_service.close_cache_client()
+
+
+@pytest.mark.asyncio
 async def test_get_blocking_cache_client_uses_longer_socket_timeout(monkeypatch):
     created: list[dict[str, float | int]] = []
 

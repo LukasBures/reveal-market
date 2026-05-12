@@ -8,7 +8,7 @@ Next.js 15 + TypeScript + Tailwind app for the marketing site and event browsing
 - **Language**: TypeScript, Node >=20.0.0 <21.0.0
 - **Styling**: Tailwind CSS
 - **Web3**: wagmi + viem, WalletConnect, Coinbase Wallet, MetaMask, Rabby, OKX Wallet
-- **Chain**: Horizen Testnet (chain ID `2651420`, native currency ZEN)
+- **Chain**: Horizen Mainnet (chain ID `26514`, native currency ZEN)
 
 ## Development
 
@@ -112,14 +112,14 @@ Server-only utilities (never imported in client components).
 
 Defined in `lib/wagmi.ts`.
 
-**Chain**: Horizen Testnet
+**Chain**: Horizen Mainnet
 
 | Field | Default | Override |
 |-------|---------|----------|
-| Chain ID | `2651420` | `NEXT_PUBLIC_CHAIN_ID` |
-| Chain name | `Horizen` | `NEXT_PUBLIC_CHAIN_NAME` |
-| RPC URL | `https://horizen-testnet.rpc.caldera.xyz/http` | `NEXT_PUBLIC_RPC_URL` |
-| Block explorer | `https://horizen-testnet.explorer.caldera.xyz` | `NEXT_PUBLIC_BLOCK_EXPLORER_URL` |
+| Chain ID | `26514` | `NEXT_PUBLIC_CHAIN_ID` |
+| Chain name | `Horizen Mainnet` | `NEXT_PUBLIC_CHAIN_NAME` |
+| RPC URL | `https://horizen.calderachain.xyz/http` | `NEXT_PUBLIC_RPC_URL` |
+| Block explorer | `https://horizen.calderaexplorer.xyz` | `NEXT_PUBLIC_BLOCK_EXPLORER_URL` |
 | Native currency | ZEN (18 decimals) | — |
 
 **Connectors**: MetaMask (injected), Rabby (injected), OKX Wallet (injected), generic injected, Coinbase Wallet, WalletConnect (when `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` is set).
@@ -154,9 +154,9 @@ When adding new external origins, whitelist them in **both** `next.config.mjs` a
 | `STREAMER_PUBLIC_BASE_URL` | No | Docker-internal streamer public URL (used when `RUNNING_IN_DOCKER=true`) |
 | `STREAMER_INTERNAL_URL` | No | Streamer internal URL (server components only) |
 | `RUNNING_IN_DOCKER` | No | Set to `true` to use Docker-internal API/streamer URLs |
-| `NEXT_PUBLIC_CHAIN_ID` | No | Chain ID (default: `2651420`) |
-| `NEXT_PUBLIC_CHAIN_NAME` | No | Chain display name (default: `Horizen`) |
-| `NEXT_PUBLIC_RPC_URL` | No | JSON-RPC URL (default: Horizen Testnet Caldera) |
+| `NEXT_PUBLIC_CHAIN_ID` | No | Chain ID (default: `26514`) |
+| `NEXT_PUBLIC_CHAIN_NAME` | No | Chain display name (default: `Horizen Mainnet`) |
+| `NEXT_PUBLIC_RPC_URL` | No | JSON-RPC URL (default: Horizen Mainnet Caldera) |
 | `NEXT_PUBLIC_BLOCK_EXPLORER_URL` | No | Block explorer URL |
 | `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | No | WalletConnect project ID (disables WC if absent) |
 | `NEXT_PUBLIC_ZEN_TOKEN_ADDRESS` | No | ZEN token contract address |

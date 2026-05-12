@@ -1,6 +1,6 @@
 # Reveal Market MVP – Implementation Summary
 
-This MVP ships an end-to-end, testnet-ready stack for fixed-size commit/reveal markets on Horizen testnet (chain id `2651420`). It includes FastAPI backend + worker, relayer, streamer, prover, frontend, and Solidity contracts. Circuits/keys live in `prover/circuits/build`; verifier/circuit hash must match everywhere.
+This MVP ships an end-to-end, mainnet-ready stack for fixed-size commit/reveal markets on Horizen Mainnet (chain id `26514`). It includes FastAPI backend + worker, relayer, streamer, prover, frontend, and Solidity contracts. Circuits/keys live in `prover/circuits/build`; verifier/circuit hash must match everywhere.
 
 ## What Works Today
 - **Contracts (Zen workspace)**: MarketFactory deploys clone-based markets (fixed ticket, rake, caps). RelayerEscrow holds collateral and forwards commits with backend-signed authorizations. RevealMarket stores commitments, locks Poseidon batch roots (BATCH_SIZE=256, MERKLE_DEPTH=8), verifies Groth16 proofs (`verifyAndSettleBatched` or single-batch), pays claims directly to users, and enforces protocol cap via ProtocolPool. Refund + pause paths exist.
@@ -11,7 +11,7 @@ This MVP ships an end-to-end, testnet-ready stack for fixed-size commit/reveal m
 - **Prover**: Go microservice wrapping rapidsnark + Circom witness generation (Node or C++). No mock mode—startup fails if artifacts are missing or invalid. `/healthz` + `/metrics` show readiness and circuit hash; proof endpoint returns calldata/public signals/metadata with optional SSE.
 - **Frontend**: Next.js 15 App Router site (marketing + trading + dashboard + proofs). Uses backend fetchers with cache tags, streams prices/FX from streamer (WS/SSE with HTTP fallback), enforces chain guards, and drives the quote → commit → status polling flow. Dashboard surfaces escrow/positions/claims; `/proofs` lists receipts with filters.
 
-## Typical User Journey (Testnet)
+## Typical User Journey (Mainnet)
 1. Fund escrow (approve + deposit ZEN to RelayerEscrow).
 2. Browse markets (`/markets`, `/markets/{event}`) served from cached API data.
 3. Request `/pricing/preview` (optional) then `/pricing/quote` (FX from streamer, caps enforced).
@@ -20,7 +20,7 @@ This MVP ships an end-to-end, testnet-ready stack for fixed-size commit/reveal m
 6. Claims: wallets call `claim` directly (or relayed claim via API → relayer). Dashboard shows claimable tickets; `/proofs` surfaces receipts.
 
 ## Defaults & Alignment
-- Chain: Horizen testnet (`2651420`), RPC `https://horizen-testnet.rpc.caldera.xyz/http`.
+- Chain: Horizen Mainnet (`26514`), RPC `https://horizen.calderachain.xyz/http`, explorer `https://horizen.calderaexplorer.xyz`.
 - Caches: Redis JSON with tag-based invalidation; resolved markets expire 12h after `resolved_at`.
 - Caps: server-side caps on stake per quote/user/market; ticket size fixed per market in contracts.
 - Circuit/hash: `prover/circuits/build/settlement_hashes.json` is the source of truth; keep on-chain verifier, backend envs, and frontend displays aligned.
@@ -36,4 +36,4 @@ This MVP ships an end-to-end, testnet-ready stack for fixed-size commit/reveal m
 - Contracts: `contracts/run_tests.sh` (runs `zen` then `polygon` workspaces; `run_local.sh full` adds fuzz/coverage).
 - Streamer/Relayer/Hedger/Prover: `./run_tests.sh` in each service or `go test ./prover/...` for prover.
 
-This MVP is wired end-to-end for a zk-proof settlement demo on testnet; remaining work is tracked in the service-specific `TODO.md` files.
+This MVP is wired end-to-end for zk-proof settlement on mainnet; remaining work is tracked in the service-specific `TODO.md` files.

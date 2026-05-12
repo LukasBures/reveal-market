@@ -144,6 +144,11 @@ class Settings(BaseSettings):
     cache_refresh_lock_key: str = Field(default="reveal_market:markets_cache_refresh:lock")
     cache_refresh_lock_ttl_seconds: int = Field(default=300, ge=15)
     cache_hydrate_page_size: int = Field(default=30, ge=1, le=250)
+    cache_max_connections: int = Field(
+        default=100,
+        ge=1,
+        description="Maximum Redis connections for the API shared cache client.",
+    )
     cache_connect_retries: int = Field(default=5, ge=1)
     cache_connect_retry_delay_seconds: float = Field(default=2.0, ge=0)
     claim_bundles_cache_ttl_seconds: int = Field(default=300, ge=5, description="Cache TTL for claim bundle responses")

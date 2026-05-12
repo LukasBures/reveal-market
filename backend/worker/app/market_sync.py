@@ -91,6 +91,7 @@ class SyncSummary:
     changed_conditions_total: int = 0
     changed_categories_total: int = 0
     changed_group_slugs_total: int = 0
+    group_cache_refreshes: int = 0
     resolution_cache_updates: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     proof_jobs: list[tuple[dict[str, Any], MarketPayload, str | None]] = field(default_factory=list)
     stats_dirty: bool = False
@@ -410,6 +411,7 @@ async def collect_market_changes_with_summary(
     if not markets:
         return summary
     existing_records = await _load_existing_markets(session, markets)
+    existing_records_valid = True
     # Skip new markets that have no closes_at — they can't have a valid commit deadline
     # and should not appear on the frontend.  Already-persisted markets are kept so that
     # updates (e.g. CLOB overlay adding closes_at later) can still be applied.
@@ -522,7 +524,7 @@ async def collect_market_changes_with_summary(
                 total=total_markets,
             )
         try:
-            prefetched = existing_records.get(market.event_id)
+            prefetched = existing_records.get(market.event_id) if existing_records_valid else None
             db_market, outcome = await sync_market(
                 session,
                 market,
@@ -530,7 +532,7 @@ async def collect_market_changes_with_summary(
                 prefetched_state=prefetched_state,
                 resolution_summaries=resolution_summaries,
                 allow_resolution_fetch=allow_resolution_fetch.get(market.event_id, True),
-                batch_checked=True,
+                batch_checked=existing_records_valid,
             )
         except Exception as exc:  # pragma: no cover - defensive
             log_event(
@@ -557,7 +559,10 @@ async def collect_market_changes_with_summary(
                 raise
             summary.failed_markets += 1
             # Drop prefetched rows so later iterations do not reuse expired instances after a rollback.
+            # The map is no longer authoritative after rollback, so a missing key must not mean
+            # "new market" for the rest of this batch.
             existing_records = {}
+            existing_records_valid = False
             prefetched_state = PrefetchedMarketState()
             continue
         if db_market and isinstance(db_market.event_id, str):

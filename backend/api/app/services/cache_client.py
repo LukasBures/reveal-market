@@ -107,7 +107,9 @@ async def get_cache_client() -> Redis | None:
         return runtime.cache_client
     async with runtime.cache_lock:
         if runtime.cache_client is None:
-            runtime.cache_client = await _connect_cache_with_retry()
+            runtime.cache_client = await _connect_cache_with_retry(
+                max_connections=runtime.settings.cache_max_connections,
+            )
             if runtime.cache_client is not None:
                 try:
                     import app.server as api_server  # lazy import to avoid cycles

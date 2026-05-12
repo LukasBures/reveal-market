@@ -267,6 +267,14 @@ class Settings(BaseSettings):
     markets_cache_order_by: str | None = Field(default="volume")
     markets_cache_prime_pages: int = Field(default=5, ge=1, le=1000)
     markets_cache_ttl_seconds: int = Field(default=300, ge=1)
+    group_markets_cache_refresh_limit: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Maximum changed group slugs to eagerly refresh per worker flush. "
+            "0 disables eager group cache refresh; invalidation still lets the API rebuild on demand."
+        ),
+    )
     market_stats_ttl_seconds: int = Field(
         default=900,
         ge=0,

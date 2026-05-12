@@ -127,7 +127,7 @@ All settings use the `RM_` prefix (pydantic-settings, `backend/api/app/config.py
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `RM_ENVIRONMENT` | `development` | Controls presets, rate limiting, load shedding defaults |
-| `RM_RPC_URL` | Horizen Testnet | EVM RPC endpoint |
+| `RM_RPC_URL` | Horizen Mainnet | EVM RPC endpoint |
 | `RM_RELAYER_BASE_URL` | — | Relayer service base URL |
 | `RM_RELAYER_BEARER_TOKEN` | — | Bearer token for relayer auth |
 | `RM_HEDGER_BASE_URL` | — | Hedger service base URL |
