@@ -31,7 +31,16 @@ def test_markets_endpoint_uses_cache(client, db_session, monkeypatch):
     response = client.get("/events", params={"limit": 10})
     assert response.status_code == 200
 
-    cache_key = markets_list_cache_key(None, None, None, None, 10, 0, closes_within_hours=None)
+    cache_key = markets_list_cache_key(
+        "active",
+        None,
+        None,
+        None,
+        10,
+        0,
+        order_by="volume",
+        closes_within_hours=24,
+    )
     cache_store = getattr(api_main.cache_client, "store", None)
     assert cache_store is not None and cache_key in cache_store
 
@@ -61,10 +70,10 @@ def test_market_cache_stores_event_ids_and_records(client, db_session):
     db_session.add(shared_models.MarketGammaMetadata(market_id=market_id, description="Lightweight"))
     db_session.commit()
 
-    response = client.get("/events", params={"limit": 5})
+    response = client.get("/events", params={"limit": 5, "status": "all"})
     assert response.status_code == 200
 
-    cache_key = markets_list_cache_key(None, None, None, None, 5, 0, closes_within_hours=None)
+    cache_key = markets_list_cache_key("all", None, None, None, 5, 0, closes_within_hours=None)
     cache_store = getattr(api_main.cache_client, "store", {})
     assert cache_key in cache_store
     cached_raw = _json_loads_compressed(cache_store[cache_key])
@@ -101,6 +110,59 @@ def test_slim_market_cache_hit_does_not_reenrich_from_db(client, db_session, mon
     second = client.get("/events", params={"limit": 5, "view": "list"})
     assert second.status_code == 200
     assert second.json()[0]["event_id"] == "evt-slim-cache"
+
+
+def test_slim_volume_cache_miss_skips_group_expansion(client, db_session, monkeypatch):
+    market = models.Market(
+        event_id="evt-slim-miss",
+        title="Slim Miss",
+        category="sports",
+        oracle="0xabc",
+        status="commit",
+        closes_at=_FUTURE,
+    )
+    db_session.add(market)
+    db_session.commit()
+
+    async def fail(*args, **kwargs):  # pragma: no cover - defensive
+        raise AssertionError("Slim volume list misses should not expand groups one-by-one")
+
+    monkeypatch.setattr(market_svc, "expand_event_groups_for_list", fail)
+
+    response = client.get(
+        "/events",
+        params={"limit": 5, "view": "list", "status": "active", "order_by": "volume", "closes_within_hours": 24},
+    )
+    assert response.status_code == 200
+    assert response.json()[0]["event_id"] == "evt-slim-miss"
+
+
+def test_bare_events_use_public_card_defaults(client, db_session):
+    active = models.Market(
+        event_id="evt-public-active",
+        title="Public Active",
+        category="sports",
+        oracle="0xabc",
+        status="commit",
+        closes_at=_FUTURE,
+    )
+    settled = models.Market(
+        event_id="evt-public-settled",
+        title="Public Settled",
+        category="sports",
+        oracle="0xabc",
+        status="settled",
+        closes_at=_FUTURE,
+    )
+    db_session.add_all([active, settled])
+    db_session.commit()
+
+    response = client.get("/events", params={"limit": 5})
+
+    assert response.status_code == 200
+    event_ids = {item["event_id"] for item in response.json()}
+    assert "evt-public-active" in event_ids
+    assert "evt-public-settled" not in event_ids
 
 
 def test_market_detail_cached(client, db_session, monkeypatch):

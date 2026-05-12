@@ -104,7 +104,17 @@ async def list_markets(
 ) -> list[schemas.EventResponse]:
     """List events with optional filters and heavy reliance on Redis caches."""
 
-    slim_mode = (view or "").strip().lower() == "list"
+    requested_view = (view or "").strip().lower()
+    has_explicit_filter = any(
+        value is not None
+        for value in (status, category, oracle, search, order_by, trending, featured, closes_within_hours)
+    )
+    apply_public_card_default = not requested_view and not has_explicit_filter
+    if apply_public_card_default:
+        status = "active"
+        order_by = "volume"
+        closes_within_hours = 24
+    slim_mode = requested_view == "list" or apply_public_card_default
 
     if category:
         resolved = canonical_category_from_slug(category)
@@ -219,24 +229,7 @@ async def list_markets(
         MARKETS_CACHE_COUNTER.labels(outcome="bypass", status=status or "*").inc()
         update_cache_context(request, cache_key=None, hit=False, source="markets:list")
 
-    query_limit = limit
-    if popularity_mode:
-        query_limit = min(settings.max_page_size, max(limit * 4, settings.default_page_size))
-    elif volume_mode:
-        if total_volume_mode:
-            query_limit = min(settings.max_page_size, max(limit * 3, settings.default_page_size))
-        else:
-            query_limit = min(settings.max_page_size, max(limit * 3, settings.default_page_size))
-    # P4 optimisation: reduced multiplier from 3→2 to cut over-fetching.
-    multiplier = 1 if total_volume_mode else 2
-    query_limit = min(settings.max_page_size, max(query_limit, limit * multiplier))
-    target_events = offset + limit
-    batch_limit = query_limit
-    batch_offset = 0
-    collected: list[schemas.MarketResponse] = []
-    seen_groups: set[str] = set()
-    max_pagination_rounds = 20
-    for _round in range(max_pagination_rounds):
+    if slim_mode and normalized_order_by == "volume" and not popularity_mode:
         batch = await crud.get_markets(
             session,
             status=status,
@@ -244,25 +237,58 @@ async def list_markets(
             oracle=oracle,
             search=normalized_search,
             featured=featured,
-            limit=batch_limit,
-            offset=batch_offset,
+            limit=limit,
+            offset=offset,
             order_by=normalized_order_by,
+            coalesce_groups=True,
             closes_after=closes_after,
             closes_before=closes_before,
         )
-        if not batch:
-            break
-        for item in batch:
-            model = schemas.MarketResponse.model_validate(item)
-            collected.append(model)
-            key = market_svc.derive_group_key(model)[0]
-            seen_groups.add(key)
-        if len(seen_groups) >= target_events:
-            break
-        if len(batch) < batch_limit:
-            break
-        batch_offset += batch_limit
-    markets = collected
+        markets = [schemas.MarketResponse.model_validate(item) for item in batch]
+    else:
+        query_limit = limit
+        if popularity_mode:
+            query_limit = min(settings.max_page_size, max(limit * 4, settings.default_page_size))
+        elif volume_mode:
+            if total_volume_mode:
+                query_limit = min(settings.max_page_size, max(limit * 3, settings.default_page_size))
+            else:
+                query_limit = min(settings.max_page_size, max(limit * 3, settings.default_page_size))
+        multiplier = 1 if total_volume_mode else 2
+        query_limit = min(settings.max_page_size, max(query_limit, limit * multiplier))
+        target_events = offset + limit
+        batch_limit = query_limit
+        batch_offset = 0
+        collected: list[schemas.MarketResponse] = []
+        seen_groups: set[str] = set()
+        max_pagination_rounds = 20
+        for _round in range(max_pagination_rounds):
+            batch = await crud.get_markets(
+                session,
+                status=status,
+                category=category,
+                oracle=oracle,
+                search=normalized_search,
+                featured=featured,
+                limit=batch_limit,
+                offset=batch_offset,
+                order_by=normalized_order_by,
+                closes_after=closes_after,
+                closes_before=closes_before,
+            )
+            if not batch:
+                break
+            for item in batch:
+                model = schemas.MarketResponse.model_validate(item)
+                collected.append(model)
+                key = market_svc.derive_group_key(model)[0]
+                seen_groups.add(key)
+            if len(seen_groups) >= target_events:
+                break
+            if len(batch) < batch_limit:
+                break
+            batch_offset += batch_limit
+        markets = collected
     market_models = await market_svc.enrich_market_models(session, markets, slim=slim_mode)
     market_models = market_svc.filter_markets_for_visibility(
         market_models, hide_settled=(status or "").lower() == "active"
@@ -309,17 +335,18 @@ async def list_markets(
             trending=bool(trending),
         )
     events = market_svc.build_event_responses(market_models)
-    page_events = events[offset : offset + limit]
-    page_events = await market_svc.expand_event_groups_for_list(
-        session,
-        page_events,
-        status=status,
-        category=category,
-        oracle=oracle,
-        featured=featured,
-        closes_after=closes_after,
-        closes_before=closes_before,
-    )
+    page_events = events[:limit] if slim_mode and normalized_order_by == "volume" else events[offset : offset + limit]
+    if not slim_mode:
+        page_events = await market_svc.expand_event_groups_for_list(
+            session,
+            page_events,
+            status=status,
+            category=category,
+            oracle=oracle,
+            featured=featured,
+            closes_after=closes_after,
+            closes_before=closes_before,
+        )
     # Extract the actual MarketResponse models from the EventResponse objects.
     # EventResponse.event_id is the *group key* (from derive_group_key), which
     # may differ from MarketResponse.event_id — so we pull from .markets instead.
