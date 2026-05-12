@@ -15,16 +15,29 @@ export async function GET(request: Request) {
   const searchQuery = params.get("search") ?? undefined;
   const category = params.get("category") ?? undefined;
   const status = params.get("status") ?? undefined;
+  const orderByParam = params.get("order_by");
+  const orderBy =
+    orderByParam === "recent" || orderByParam === "popularity" || orderByParam === "volume"
+      ? orderByParam
+      : undefined;
+  const parsedClosesWithinHours = Number(params.get("closes_within_hours"));
+  const closesWithinHours =
+    Number.isFinite(parsedClosesWithinHours) && parsedClosesWithinHours > 0 ? parsedClosesWithinHours : undefined;
   const trending = params.get("trending");
   const trendingFlag = trending === "1" || trending?.toLowerCase() === "true";
 
-  const { data: events } = await fetchFeaturedEvents(limit, {
+  const { data: events, error } = await fetchFeaturedEvents(limit, {
     searchQuery,
     category,
     offset,
     status,
     trending: trendingFlag,
+    orderBy,
+    closesWithinHours,
   });
+  if (error) {
+    return NextResponse.json({ error }, { status: 502 });
+  }
 
   return NextResponse.json(events);
 }

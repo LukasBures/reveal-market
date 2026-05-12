@@ -418,11 +418,15 @@ async def hydrate_cached_market_list(cache: Redis | None, cached_payload: Any) -
         event_ids = cached_payload.get("event_ids")
         if not isinstance(event_ids, list):
             return None
-        markets: list[schemas.MarketResponse] = []
+        record_keys: list[str] = []
         for event_id in event_ids:
             if not isinstance(event_id, str):
                 return None
-            record = await get_json(cache, market_record_cache_key(event_id))
+            record_keys.append(market_record_cache_key(event_id))
+        records = await get_json_many(cache, record_keys)
+        markets: list[schemas.MarketResponse] = []
+        for record_key in record_keys:
+            record = records.get(record_key)
             if record is None:
                 return None
             markets.append(schemas.MarketResponse.model_validate(record))

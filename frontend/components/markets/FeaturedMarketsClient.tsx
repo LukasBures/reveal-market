@@ -11,10 +11,10 @@ import { categorySlugFromLabel } from "@/lib/slugs";
 import { MARKET_CATEGORY_FILTERS, type MarketSortOption } from "@/lib/markets";
 
 /**
- * We auto-load up to five batches via IntersectionObserver to give users a lazy-loading feel
+ * We auto-load up to two batches via IntersectionObserver to give users a lazy-loading feel
  * before they need to press the button. After that the CTA becomes the explicit interaction.
  */
-export const AUTO_LOAD_BATCHES = 5;
+export const AUTO_LOAD_BATCHES = 2;
 
 type ClientProps = {
   initialMarkets: EventSummary[];

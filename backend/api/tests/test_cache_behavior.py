@@ -6,6 +6,7 @@ from typing import Any
 
 import app.server as api_main
 from app import crud, models
+from app.services import markets as market_svc
 from app.services.markets import market_detail_cache_key
 from shared import models as shared_models
 from shared.cache_async import _json_loads_compressed
@@ -75,6 +76,31 @@ def test_market_cache_stores_event_ids_and_records(client, db_session):
     record = _json_loads_compressed(cache_store[record_key])
     assert record["event_id"] == "evt-cache-trim"
     assert record["description"] == "Lightweight"
+
+
+def test_slim_market_cache_hit_does_not_reenrich_from_db(client, db_session, monkeypatch):
+    market = models.Market(
+        event_id="evt-slim-cache",
+        title="Slim Cache",
+        category="sports",
+        oracle="0xabc",
+        status="commit",
+        closes_at=_FUTURE,
+    )
+    db_session.add(market)
+    db_session.commit()
+
+    first = client.get("/events", params={"limit": 5, "view": "list"})
+    assert first.status_code == 200
+
+    async def fail(*args, **kwargs):  # pragma: no cover - defensive
+        raise AssertionError("Slim cache hits should not re-enrich from the database")
+
+    monkeypatch.setattr(market_svc, "enrich_market_models", fail)
+
+    second = client.get("/events", params={"limit": 5, "view": "list"})
+    assert second.status_code == 200
+    assert second.json()[0]["event_id"] == "evt-slim-cache"
 
 
 def test_market_detail_cached(client, db_session, monkeypatch):

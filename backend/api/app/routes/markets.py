@@ -171,7 +171,10 @@ async def list_markets(
             # Trigger background refresh when PER signals near-expiry (stampede protection)
             if per_result is not None and per_result.should_refresh:
                 asyncio.create_task(market_svc.hydrate_markets_cache(source="per_refresh"))
-            hydrated = await market_svc.enrich_market_models(session, hydrated, slim=slim_mode)
+            if slim_mode:
+                hydrated = market_svc.augment_market_models(hydrated)
+            else:
+                hydrated = await market_svc.enrich_market_models(session, hydrated, slim=slim_mode)
             update_cache_context(request, cache_key=cache_key, hit=True, source="markets:list")
             MARKETS_CACHE_COUNTER.labels(outcome="hit", status=status or "*").inc()
             duration = (time.perf_counter() - start) * 1000
