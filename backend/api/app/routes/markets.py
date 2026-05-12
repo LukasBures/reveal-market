@@ -631,6 +631,7 @@ async def get_event_by_key(
     normalized_key = (event_key or "").strip().lower()
     request_key = normalized_key or event_key
     requested_market_event_id: str | None = None
+    include_detail_siblings = False
 
     async def _load_inferred_group_models(group_key: str) -> list[schemas.MarketResponse]:
         if "-" not in group_key:
@@ -674,21 +675,25 @@ async def get_event_by_key(
                     market_models_cached = await market_svc.enrich_market_models(
                         session,
                         [schemas.MarketResponse.model_validate(m) for m in group_markets],
-                        include_siblings=True,
+                        include_siblings=False,
                     )
                     event = market_svc.build_event_responses(market_models_cached)[0]
                     if len(event.markets) > _MAX_DETAIL_MARKETS:
                         event.markets = event.markets[:_MAX_DETAIL_MARKETS]
                     return event
-            await market_svc.enrich_market_models(session, [model], include_siblings=True)
+            await market_svc.enrich_market_models(session, [model], include_siblings=False)
             return market_svc.build_event_responses([model])[0]
     markets = []
     market_models: list[schemas.MarketResponse] | None = None
     # Try public_event_id lookup first (8-char hex IDs)
     if normalized_key:
         markets = await crud.get_markets_by_public_event_id(session, normalized_key)
+        if markets:
+            include_detail_siblings = True
     if not markets and normalized_key:
         markets = await crud.get_markets_by_group_slug(session, normalized_key, limit=500)
+        if markets:
+            include_detail_siblings = True
         if markets and market_svc._is_temporal_series_slug(normalized_key):
             ref_closes = getattr(markets[0], "closes_at", None)
             if ref_closes is not None:
@@ -701,10 +706,13 @@ async def get_event_by_key(
         if market is None:
             if normalized_key:
                 markets = await crud.get_markets_by_event_key(session, normalized_key)
+                if markets:
+                    include_detail_siblings = True
             if not markets and normalized_key:
                 market_models = await _load_inferred_group_models(normalized_key)
                 if market_models:
                     markets = []
+                    include_detail_siblings = True
             if not markets and not market_models:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="event_not_found")
         else:
@@ -730,7 +738,9 @@ async def get_event_by_key(
                 markets = [market]
     if market_models is None:
         market_models = await market_svc.enrich_market_models(
-            session, [schemas.MarketResponse.model_validate(m) for m in markets], include_siblings=True
+            session,
+            [schemas.MarketResponse.model_validate(m) for m in markets],
+            include_siblings=include_detail_siblings,
         )
     if requested_market_event_id:
         selected_market = next(
