@@ -1,6 +1,6 @@
 "use client";
 
-import { PropsWithChildren, useState } from "react";
+import { PropsWithChildren, Suspense, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { WagmiProvider } from "wagmi";
 import { wagmiConfig } from "@/lib/wagmi";
@@ -21,7 +21,9 @@ export function AppProviders({ children }: PropsWithChildren) {
 
   return (
     <WagmiProvider config={wagmiConfig}>
-      <NavigationFeedback />
+      <Suspense fallback={null}>
+        <NavigationFeedback />
+      </Suspense>
       <ZenriseJourneyTracker />
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     </WagmiProvider>
