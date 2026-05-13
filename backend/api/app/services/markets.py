@@ -685,7 +685,9 @@ async def _write_group_markets_cache(
     cache_key = group_markets_cache_key(normalized)
     try:
         schema_tag = await get_schema_tag(cache, settings.schema_version_key)
-        await set_json(cache, cache_key, [market.model_dump(mode="json") for market in markets], settings.cache_ttl_seconds)
+        await set_json(
+            cache, cache_key, [market.model_dump(mode="json") for market in markets], settings.cache_ttl_seconds
+        )
         await add_tag(cache, schema_tag, cache_key)
         await add_tag(cache, "markets:group", cache_key)
         await add_tag(cache, f"group:{normalized}", cache_key)
