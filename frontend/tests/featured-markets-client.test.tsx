@@ -6,6 +6,12 @@ import { FeaturedEventsClient, AUTO_LOAD_BATCHES } from "@/components/markets/Fe
 import { fetchFeaturedEvents } from "@/lib/api";
 import type { EventSummary, MarketSummary } from "@/lib/api-types";
 
+const routerPrefetchMock = vi.hoisted(() => vi.fn());
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ prefetch: routerPrefetchMock }),
+}));
+
 vi.mock("@/lib/api", () => ({
   fetchFeaturedEvents: vi.fn(),
 }));
@@ -42,10 +48,12 @@ describe("FeaturedEventsClient", () => {
 
   beforeEach(() => {
     vi.mocked(fetchFeaturedEvents).mockReset();
+    routerPrefetchMock.mockClear();
     delete (globalThis as any).IntersectionObserver;
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     delete (globalThis as any).IntersectionObserver;
     queryClient?.clear();
     queryClient = null;
@@ -119,6 +127,31 @@ describe("FeaturedEventsClient", () => {
         orderBy: "volume",
       }),
     );
+  });
+
+  it("prefetches event detail routes added by lazy pagination", async () => {
+    const nextEvent = buildEvent({
+      eventId: "evt-2",
+      title: "Second Event",
+      category: "Sports",
+    });
+    vi.mocked(fetchFeaturedEvents).mockResolvedValue({ data: [nextEvent] });
+
+    renderWithClient(
+      <FeaturedEventsClient
+        initialMarkets={[sampleEvent]}
+        pageSize={1}
+        maxItems={10}
+      />,
+    );
+
+    const button = await screen.findByRole("button", { name: /load more events/i });
+    fireEvent.click(button);
+
+    await screen.findByText("Second Event");
+    await waitFor(() => {
+      expect(routerPrefetchMock).toHaveBeenCalledWith("/events/evt-2");
+    });
   });
 
   it("keeps the load more button when a short page arrives mid-pagination", async () => {

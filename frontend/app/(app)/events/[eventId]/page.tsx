@@ -22,7 +22,6 @@ type MarketDetailPageProps = {
 
 const MARKET_CONTEXT_FALLBACK =
   "This market mirrors Reveal Event’s commit/reveal rails. Settlement proofs are recorded on-chain and mirrored in the backend resolution ledger.";
-const MARKET_DESCRIPTION_MAX_LENGTH = 320;
 const DEFAULT_EVENT_STATUS = "https://schema.org/EventScheduled";
 const SCHEMA_EVENT_STATUS_MAP: Record<string, string> = {
   commit: DEFAULT_EVENT_STATUS,
@@ -37,7 +36,7 @@ const SCHEMA_EVENT_STATUS_MAP: Record<string, string> = {
 };
 
 const loadEvent = cache(async (eventId: string) => {
-  const { data, error } = await fetchMarketByEventId(eventId);
+  const { data, error } = await fetchMarketByEventId(eventId, null, { enrichSubgraph: false });
   // Only treat a confirmed "not_found" as a missing event. Transient errors
   // (timeouts, API overload) should throw so Next.js does not cache a 404.
   if (data === null && error !== "not_found") {
@@ -61,9 +60,6 @@ const selectEventCopy = (market: MarketDetail): string => {
     MARKET_CONTEXT_FALLBACK
   );
 };
-
-const clampDescription = (copy: string, maxLength = MARKET_DESCRIPTION_MAX_LENGTH): string =>
-  copy.length > maxLength ? `${copy.slice(0, maxLength - 1).trim()}...` : copy;
 
 const resolveEventImage = (market: MarketDetail): string | undefined => {
   const extraData = (market.extraData && typeof market.extraData === "object" ? market.extraData : null) as
@@ -190,26 +186,11 @@ export const generateStaticParams: GenerateStaticParams = async () => {
 
 export async function generateMetadata({ params }: MarketDetailPageProps): Promise<Metadata> {
   const { eventId } = await params;
-  const fallbackPath = buildEventPath(eventId);
-  const market = await loadEvent(eventId);
-  if (!market) {
-    return buildMetadata({
-      title: "Event unavailable | Reveal Event",
-      description: "This market could not be located or is no longer visible.",
-      path: fallbackPath,
-      robots: { index: false, follow: false },
-    });
-  }
-  const canonicalEventId = getCanonicalEventId(market, eventId);
-  const canonicalPath = buildEventPath(canonicalEventId);
-  const baseDescription = clampDescription(selectEventCopy(market));
-  const description = `${baseDescription} Private prediction market with fixed ticket size and claims after settlement.`;
   return buildMetadata({
-    title: `${market.title} | Reveal Event`,
-    description,
-    path: canonicalPath,
-    keywords: extractEventKeywords(market),
-    image: resolveEventImage(market),
+    title: "Prediction Event | Reveal Event",
+    description:
+      "Review a private prediction event with fixed ticket size, private entries while markets are live, and settlement receipts after resolution.",
+    path: buildEventPath(eventId),
     type: "article",
   });
 }

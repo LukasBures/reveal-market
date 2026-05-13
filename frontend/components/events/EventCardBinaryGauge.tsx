@@ -1,9 +1,9 @@
 import type { EventSummary, MarketSummary } from "@/lib/api-types";
 import type { Route } from "next";
-import Link from "next/link";
 import { MarketArtwork } from "@/components/markets/MarketArtwork";
 import { getMarketVolume } from "@/lib/markets";
 import { formatUsdCompact } from "@/lib/formatters";
+import { EventCardLink } from "@/components/events/EventCardLink";
 
 type Props = {
   event: EventSummary;
@@ -36,9 +36,9 @@ export function EventCardBinaryGauge({ event, market, priority = false }: Props)
     <div className="group relative flex h-auto cursor-pointer flex-col gap-3 overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-3 shadow-[0_25px_60px_rgba(1,3,20,0.65)] transition duration-200 will-change-transform [backface-visibility:hidden] [transform:translateZ(0)] hover:-translate-y-1.5 hover:border-brand-400/60 hover:bg-white/10 sm:h-[256px]">
       <div className="pointer-events-none absolute -top-12 right-0 h-40 w-40 rounded-full bg-gradient-to-b from-white/10 to-transparent opacity-80 blur-3xl transition duration-200 group-hover:opacity-100" />
       <div className="pointer-events-none absolute inset-0 border border-white/5 opacity-0 transition duration-200 group-hover:opacity-70" />
-      <Link
+      <EventCardLink
         href={href}
-        prefetch={false}
+        prefetchOnView
         aria-label={`Open ${event.title}`}
         className="absolute inset-0 z-10 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
       />
@@ -58,9 +58,9 @@ export function EventCardBinaryGauge({ event, market, priority = false }: Props)
       </div>
       <div className="relative z-30 mt-auto grid grid-cols-2 gap-2">
         {outcomes.slice(0, 2).map((label, idx) => (
-          <a
+          <EventCardLink
             key={label}
-            href={`${href}?outcome=${idx}#trade-panel`}
+            href={`${href}?outcome=${idx}#trade-panel` as Route}
             className={
               idx === 0
                 ? "rounded-lg bg-emerald-500/15 px-3 py-2.5 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-500 hover:text-white sm:py-2"
@@ -68,7 +68,7 @@ export function EventCardBinaryGauge({ event, market, priority = false }: Props)
             }
           >
             <span>{label}</span>
-          </a>
+          </EventCardLink>
         ))}
       </div>
       <div className="pointer-events-none relative z-20 mt-2 flex items-center justify-between text-xs text-white/60">

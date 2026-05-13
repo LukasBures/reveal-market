@@ -1,5 +1,7 @@
 "use client";
 
+import type { Route } from "next";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import type { EventSummary } from "@/lib/api-types";
@@ -15,6 +17,7 @@ import { MARKET_CATEGORY_FILTERS, type MarketSortOption } from "@/lib/markets";
  * before they need to press the button. After that the CTA becomes the explicit interaction.
  */
 export const AUTO_LOAD_BATCHES = 2;
+const EVENT_ROUTE_PREFETCH_STAGGER_MS = 35;
 
 type ClientProps = {
   initialMarkets: EventSummary[];
@@ -46,6 +49,7 @@ export function FeaturedEventsClient({
   sortBy = "totalVolume",
   closesWithinHours,
 }: ClientProps) {
+  const router = useRouter();
   const [autoLoadCount, setAutoLoadCount] = useState(0);
   const [showLoadingState, setShowLoadingState] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -54,8 +58,18 @@ export function FeaturedEventsClient({
   const [intersectionSupported, setIntersectionSupported] = useState(false);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
+  const prefetchedEventIdsRef = useRef<Set<string>>(new Set());
+  const prefetchTimersRef = useRef<number[]>([]);
   const setSentinel = useCallback((node: HTMLDivElement | null) => {
     sentinelRef.current = node;
+  }, []);
+  const clearPrefetchTimers = useCallback(() => {
+    if (typeof window !== "undefined") {
+      for (const timer of prefetchTimersRef.current) {
+        window.clearTimeout(timer);
+      }
+    }
+    prefetchTimersRef.current = [];
   }, []);
 
   const batchSize = Math.max(pageSize, 1);
@@ -152,6 +166,34 @@ export function FeaturedEventsClient({
     const flattened = pages.flatMap((page) => page);
     return normalizeEvents(flattened);
   }, [data?.pages, normalizeEvents]);
+
+  useEffect(() => () => clearPrefetchTimers(), [clearPrefetchTimers]);
+
+  useEffect(() => {
+    prefetchedEventIdsRef.current.clear();
+    clearPrefetchTimers();
+  }, [clearPrefetchTimers, filterSignature]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const unseenEvents = events.filter((event) => {
+      if (!event.eventId || prefetchedEventIdsRef.current.has(event.eventId)) {
+        return false;
+      }
+      prefetchedEventIdsRef.current.add(event.eventId);
+      return true;
+    });
+
+    for (const [index, event] of unseenEvents.entries()) {
+      // SAFETY: event detail pages are rooted under the typed /events route and event ids are URL-encoded.
+      const href = `/events/${encodeURIComponent(event.eventId)}` as Route;
+      const timer = window.setTimeout(() => {
+        router.prefetch(href);
+        prefetchTimersRef.current = prefetchTimersRef.current.filter((activeTimer) => activeTimer !== timer);
+      }, index * EVENT_ROUTE_PREFETCH_STAGGER_MS);
+      prefetchTimersRef.current.push(timer);
+    }
+  }, [events, router]);
 
   useEffect(() => {
     // Always kick off a refresh when the component mounts so SSR payloads stay current.

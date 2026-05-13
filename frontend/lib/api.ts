@@ -889,7 +889,15 @@ export async function fetchProofReceipts(
   }
 }
 
-export async function fetchMarketByEventId(eventId: string, eventKey?: string | null): Promise<ApiResult<MarketDetail>> {
+type FetchMarketByEventIdOptions = {
+  enrichSubgraph?: boolean;
+};
+
+export async function fetchMarketByEventId(
+  eventId: string,
+  eventKey?: string | null,
+  options: FetchMarketByEventIdOptions = {},
+): Promise<ApiResult<MarketDetail>> {
   if (maybeShortCircuitOffline("fetchMarketByEventId")) {
     return { data: null, error: "offline" };
   }
@@ -943,49 +951,51 @@ export async function fetchMarketByEventId(eventId: string, eventKey?: string | 
         latencyMs: coerceNumber(hb.latency_ms ?? hb.latencyMs),
       };
     }
-    // Enrich with subgraph orderbook + OI when available (best-effort).
-    // Fetch tokens (if needed) and OI in parallel, then fetch aggregates once token IDs are known.
-    const enrichmentResults = await Promise.allSettled([
-      !detail.clobTokenIds?.length && detail.conditionId
-        ? fetchMarketTokens(detail.conditionId, { first: 40 })
-        : Promise.resolve(null),
-      detail.conditionId ? fetchOpenInterest(detail.conditionId) : Promise.resolve(null),
-    ]);
+    if (options.enrichSubgraph ?? true) {
+      // Enrich with subgraph orderbook + OI when available (best-effort).
+      // Fetch tokens (if needed) and OI in parallel, then fetch aggregates once token IDs are known.
+      const enrichmentResults = await Promise.allSettled([
+        !detail.clobTokenIds?.length && detail.conditionId
+          ? fetchMarketTokens(detail.conditionId, { first: 40 })
+          : Promise.resolve(null),
+        detail.conditionId ? fetchOpenInterest(detail.conditionId) : Promise.resolve(null),
+      ]);
 
-    const [tokensResult, oiResult] = enrichmentResults;
+      const [tokensResult, oiResult] = enrichmentResults;
 
-    if (tokensResult.status === "fulfilled" && Array.isArray(tokensResult.value) && tokensResult.value.length) {
-      detail.clobTokenIds = tokensResult.value;
-    }
-    if (oiResult.status === "fulfilled" && oiResult.value !== null && oiResult.value !== undefined) {
-      detail.openInterestUsd = oiResult.value;
-    }
-    if (tokensResult.status === "rejected") {
-      logger.warn("fetchMarketByEventId:subgraph_enrich_failed", { eventId, error: (tokensResult.reason as Error).message });
-    }
-    if (oiResult.status === "rejected") {
-      logger.warn("fetchMarketByEventId:subgraph_enrich_failed", { eventId, error: (oiResult.reason as Error).message });
-    }
+      if (tokensResult.status === "fulfilled" && Array.isArray(tokensResult.value) && tokensResult.value.length) {
+        detail.clobTokenIds = tokensResult.value;
+      }
+      if (oiResult.status === "fulfilled" && oiResult.value !== null && oiResult.value !== undefined) {
+        detail.openInterestUsd = oiResult.value;
+      }
+      if (tokensResult.status === "rejected") {
+        logger.warn("fetchMarketByEventId:subgraph_enrich_failed", { eventId, error: (tokensResult.reason as Error).message });
+      }
+      if (oiResult.status === "rejected") {
+        logger.warn("fetchMarketByEventId:subgraph_enrich_failed", { eventId, error: (oiResult.reason as Error).message });
+      }
 
-    if (detail.clobTokenIds && detail.clobTokenIds.length > 0) {
-      try {
-        const aggregates = await fetchOrderbookAggregates(detail.clobTokenIds);
-        const matching = detail.clobTokenIds.map((id) => aggregates[id]).filter(Boolean);
-        if (matching.length) {
-          const volume = matching.reduce(
-            (acc, curr) => acc + (curr.scaledCollateralVolume ?? curr.collateralVolume ?? 0),
-            0,
-          );
-          const trades = matching.reduce((acc, curr) => acc + (curr.tradesQuantity ?? 0), 0);
-          detail.orderbookVolumeUsd = volume;
-          detail.tradesQuantity = trades;
-          const volume24h = matching.reduce((acc, curr) => acc + (curr.volume24h ?? 0), 0);
-          if (!detail.volume24hUsd && volume24h > 0) {
-            detail.volume24hUsd = volume24h;
+      if (detail.clobTokenIds && detail.clobTokenIds.length > 0) {
+        try {
+          const aggregates = await fetchOrderbookAggregates(detail.clobTokenIds);
+          const matching = detail.clobTokenIds.map((id) => aggregates[id]).filter(Boolean);
+          if (matching.length) {
+            const volume = matching.reduce(
+              (acc, curr) => acc + (curr.scaledCollateralVolume ?? curr.collateralVolume ?? 0),
+              0,
+            );
+            const trades = matching.reduce((acc, curr) => acc + (curr.tradesQuantity ?? 0), 0);
+            detail.orderbookVolumeUsd = volume;
+            detail.tradesQuantity = trades;
+            const volume24h = matching.reduce((acc, curr) => acc + (curr.volume24h ?? 0), 0);
+            if (!detail.volume24hUsd && volume24h > 0) {
+              detail.volume24hUsd = volume24h;
+            }
           }
+        } catch (err) {
+          logger.warn("fetchMarketByEventId:subgraph_enrich_failed", { eventId, error: (err as Error).message });
         }
-      } catch (err) {
-        logger.warn("fetchMarketByEventId:subgraph_enrich_failed", { eventId, error: (err as Error).message });
       }
     }
     logger.info("fetchMarketByEventId:success", { eventId });

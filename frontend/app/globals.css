@@ -331,3 +331,15 @@ a {
     transform: translateY(0);
   }
 }
+
+@keyframes navigation-progress {
+  0% {
+    transform: translateX(-110%);
+  }
+  50% {
+    transform: translateX(40%);
+  }
+  100% {
+    transform: translateX(210%);
+  }
+}

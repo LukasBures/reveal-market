@@ -1,8 +1,22 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { EventCard } from "@/components/events/EventCard";
 
+const prefetchMock = vi.hoisted(() => vi.fn());
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    prefetch: prefetchMock,
+  }),
+}));
+
 describe("EventCard", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    prefetchMock.mockClear();
+  });
+
   it("renders the binary gauge card for yes/no markets", () => {
     render(
       <EventCard
@@ -46,6 +60,32 @@ describe("EventCard", () => {
     );
 
     expect(screen.getByRole("link", { name: /will it rain/i })).toHaveAttribute("href", "/events/evt-route-specific");
+  });
+
+  it("prefetches the visible event detail route before click", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("IntersectionObserver", undefined);
+    prefetchMock.mockClear();
+    render(
+      <EventCard
+        event={{
+          eventId: "evt-visible",
+          title: "Visible market",
+          markets: [
+            {
+              eventId: "evt-visible",
+              title: "Visible market",
+              outcomes: ["Yes", "No"],
+              outcomePrices: [0.62, 0.38],
+            },
+          ],
+        }}
+      />,
+    );
+
+    vi.advanceTimersByTime(300);
+
+    expect(prefetchMock).toHaveBeenCalledWith("/events/evt-visible");
   });
 
   it("renders the head-to-head card for non-yes/no binary markets", () => {
