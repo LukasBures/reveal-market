@@ -67,7 +67,7 @@ def test_list_markets_supports_filters(client, db_session):
     )
     db_session.commit()
 
-    all_markets = client.get("/events").json()
+    all_markets = client.get("/events", params={"status": "all"}).json()
     assert {m["event_id"] for m in all_markets} == {"evt-1", "evt-2", "evt-3"}
 
     filtered_status = client.get("/events", params={"status": "commit"}).json()
@@ -955,16 +955,16 @@ def test_markets_cache_metrics_track_hits_and_misses(client, db_session):
     db_session.add(market)
     db_session.commit()
 
-    miss_before = _cache_metric("miss")
-    hit_before = _cache_metric("hit")
+    miss_before = _cache_metric("miss", status="active")
+    hit_before = _cache_metric("hit", status="active")
 
     response_one = client.get("/events", params={"limit": 10})
     assert response_one.status_code == 200
-    assert _cache_metric("miss") == miss_before + 1
+    assert _cache_metric("miss", status="active") == miss_before + 1
 
     response_two = client.get("/events", params={"limit": 10})
     assert response_two.status_code == 200
-    assert _cache_metric("hit") == hit_before + 1
+    assert _cache_metric("hit", status="active") == hit_before + 1
 
 
 def test_category_endpoint_caches_results(client, db_session):
