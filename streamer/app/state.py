@@ -11,7 +11,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 from urllib.parse import urlparse
 
 import httpx
@@ -30,6 +30,7 @@ logger = logging.getLogger("reveal_market.streamer")
 
 shared_http_clients: dict[float, httpx.AsyncClient] = {}
 shared_http_lock = asyncio.Lock()
+_TrackingValue = TypeVar("_TrackingValue")
 
 
 async def get_http_client(timeout: float) -> httpx.AsyncClient:
@@ -121,7 +122,7 @@ class StreamState:
 
     async def startup(self) -> None:
         try:
-            self.redis = Redis.from_url(
+            redis = Redis.from_url(
                 self.settings.redis_url,
                 decode_responses=True,
                 max_connections=30,
@@ -130,7 +131,8 @@ class StreamState:
                 retry_on_timeout=True,
                 health_check_interval=30,
             )
-            await self.redis.ping()
+            await redis.ping()
+            self.redis = redis
             self.redis_error = None
         except Exception as exc:
             self.redis = None
@@ -147,6 +149,17 @@ class StreamState:
 
     def evict_stale_entries(self) -> int:
         """Remove entries older than 1 hour from tracking dicts. Returns eviction count."""
+
+        def cap_by_size(mapping: dict[str, _TrackingValue]) -> int:
+            if len(mapping) <= self._MAX_TRACKING_ENTRIES:
+                return 0
+            excess = len(mapping) - self._MAX_TRACKING_ENTRIES
+            evicted_count = 0
+            for key in list(mapping)[:excess]:
+                mapping.pop(key, None)
+                evicted_count += 1
+            return evicted_count
+
         now = datetime.now(UTC)
         cutoff = now - self._STALE_ENTRY_TTL
         evicted = 0
@@ -156,12 +169,8 @@ class StreamState:
                 d.pop(k, None)
                 evicted += 1
         # Cap non-timestamped dicts by size
-        for sized_d in (self.tick_sizes, self.market_tokens):
-            if len(sized_d) > self._MAX_TRACKING_ENTRIES:
-                excess = len(sized_d) - self._MAX_TRACKING_ENTRIES
-                for k in list(sized_d)[:excess]:
-                    sized_d.pop(k, None)
-                    evicted += 1
+        evicted += cap_by_size(self.tick_sizes)
+        evicted += cap_by_size(self.market_tokens)
         return evicted
 
     async def shutdown(self) -> None:
