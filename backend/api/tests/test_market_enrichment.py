@@ -62,7 +62,7 @@ def test_market_metadata_enrichment_applies_description_and_tokens(client, db_se
     )
     db_session.commit()
 
-    response = client.get("/events")
+    response = client.get("/events", params={"status": "commit"})
     assert response.status_code == 200
     payload = {item["event_id"]: item for item in response.json()}
     enriched = payload["evt-meta"]["markets"][0]
