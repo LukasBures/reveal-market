@@ -1277,6 +1277,15 @@ export function DashboardClient() {
               Wrong network
             </span>
           )}
+          {chainMismatch && canRequestChainSwitch && (
+            <button
+              type="button"
+              onClick={() => switchChainAsync?.({ chainId: defaultChain.id })}
+              className="rounded-full border border-white/30 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-white/90 transition hover:border-white hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Switch to {defaultChain.name}
+            </button>
+          )}
         </div>
         <div className="mt-3 grid gap-2 md:grid-cols-2">
           <div className="rounded-2xl border border-[#7bf05e]/20 bg-gradient-to-br from-[#7bf05e]/10 via-black/60 to-black/80 p-4 shadow-[inset_0_1px_0_rgba(123,240,94,0.12),0_0_24px_rgba(123,240,94,0.07)]">
