@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Deposit ERC-20 collateral into the ProtocolPool via its `deposit(uint256)` function.
+Deposit ERC-20 collateral into the ProtocolPool or withdraw unlocked LP shares.
 
 Defaults:
 - sender/private key: scripts/generated/mainnet_funding_wallet.txt
@@ -93,7 +93,35 @@ PROTOCOL_POOL_ABI: list[dict[str, Any]] = [
         "outputs": [],
         "stateMutability": "nonpayable",
         "type": "function",
-    }
+    },
+    {
+        "inputs": [{"name": "sharesToRedeem", "type": "uint256"}, {"name": "minAssets", "type": "uint256"}],
+        "name": "lpWithdraw",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
+        "inputs": [{"name": "lp", "type": "address"}],
+        "name": "lpShareBalance",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [{"name": "lp", "type": "address"}],
+        "name": "unlockedShares",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "idleLiquidity",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
 ]
 
 
@@ -147,7 +175,13 @@ def prepare_contract(web3: Web3, address: str, abi: list[dict[str, Any]]) -> Con
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Deposit ERC-20 collateral into the ProtocolPool.")
+    parser = argparse.ArgumentParser(description="Deposit collateral into, or withdraw LP shares from, the ProtocolPool.")
+    parser.add_argument(
+        "--action",
+        choices=("deposit", "withdraw"),
+        default="deposit",
+        help="ProtocolPool action to send.",
+    )
     parser.add_argument("--rpc-url", default=DEFAULT_RPC_URL, help="EVM RPC endpoint.")
     parser.add_argument("--explorer-base", default=DEFAULT_EXPLORER_URL, help="Block explorer base URL for logging.")
     parser.add_argument(
@@ -163,7 +197,12 @@ def main() -> int:
     parser.add_argument(
         "--amount",
         default=DEFAULT_TOKEN_AMOUNT,
-        help="Human-readable token amount to deposit (defaults to DEFAULT_TOKEN_AMOUNT at top of file).",
+        help="Human-readable token/share amount to deposit or withdraw.",
+    )
+    parser.add_argument(
+        "--min-assets",
+        default="0",
+        help="Minimum assets for lpWithdraw, human-readable. Defaults to 0.",
     )
     parser.add_argument(
         "--keyfile",
@@ -223,36 +262,15 @@ def main() -> int:
 
     try:
         amount_int = to_base_units(args.amount, int(decimals))
+        min_assets_int = to_base_units(args.min_assets, int(decimals)) if args.min_assets != "0" else 0
     except ValueError as exc:
         log.error("%s", exc)
         return 1
-
-    if not args.skip_balance_check:
-        try:
-            balance = token.functions.balanceOf(sender_address).call()
-            if amount_int > int(balance):
-                log.error(
-                    "Insufficient token balance: requested %s %s (%s base units), available %s",
-                    args.amount,
-                    symbol,
-                    amount_int,
-                    balance,
-                )
-                return 1
-        except Web3Exception as exc:
-            log.error("Balance check failed; rerun with --skip-balance-check to ignore: %s", exc)
-            return 1
 
     nonce = web3.eth.get_transaction_count(sender_address, "pending")
     gas_price = web3.eth.gas_price
     if args.gas_price_gwei is not None:
         gas_price = web3.to_wei(Decimal(str(args.gas_price_gwei)), "gwei")
-
-    try:
-        allowance = token.functions.allowance(sender_address, pool_address).call()
-    except Web3Exception as exc:
-        log.error("Failed to read allowance: %s", exc)
-        return 1
 
     def send_and_wait(tx_dict):
         signed_tx = account.sign_transaction(tx_dict)
@@ -272,6 +290,75 @@ def main() -> int:
             receipt.get("gasUsed"),
         )
         return tx_hex, receipt
+
+    if args.action == "withdraw":
+        try:
+            shares = pool.functions.lpShareBalance(sender_address).call()
+            unlocked = pool.functions.unlockedShares(sender_address).call()
+            idle = pool.functions.idleLiquidity().call()
+        except Web3Exception as exc:
+            log.error("Withdrawal pre-flight failed: %s", exc)
+            return 1
+        if amount_int > int(shares):
+            log.error("Insufficient LP shares: requested %s, available %s", amount_int, shares)
+            return 1
+        if amount_int > int(unlocked):
+            log.error("Insufficient unlocked shares: requested %s, unlocked %s", amount_int, unlocked)
+            return 1
+        if amount_int > int(idle):
+            log.error("Insufficient idle liquidity: requested %s, idle %s", amount_int, idle)
+            return 1
+        try:
+            est = pool.functions.lpWithdraw(amount_int, min_assets_int).estimate_gas({"from": sender_address})
+        except Web3Exception as exc:
+            log.error("Gas estimation for lpWithdraw failed: %s", exc)
+            return 1
+
+        withdraw_tx = pool.functions.lpWithdraw(amount_int, min_assets_int).build_transaction(
+            {
+                "from": sender_address,
+                "nonce": nonce,
+                "gas": int(est * 1.2),
+                "gasPrice": gas_price,
+                "chainId": web3.eth.chain_id,
+            }
+        )
+        log.info(
+            "Withdrawing %s LP shares from ProtocolPool %s with minAssets=%s",
+            args.amount,
+            pool_address,
+            args.min_assets,
+        )
+        try:
+            tx_hash, _ = send_and_wait(withdraw_tx)
+        except Exception as exc:  # pragma: no cover - CLI path
+            log.error("Withdrawal failed: %s", exc)
+            return 1
+
+        log.info("Done. Withdrawal tx: %s", tx_hash)
+        return 0
+
+    if not args.skip_balance_check:
+        try:
+            balance = token.functions.balanceOf(sender_address).call()
+            if amount_int > int(balance):
+                log.error(
+                    "Insufficient token balance: requested %s %s (%s base units), available %s",
+                    args.amount,
+                    symbol,
+                    amount_int,
+                    balance,
+                )
+                return 1
+        except Web3Exception as exc:
+            log.error("Balance check failed; rerun with --skip-balance-check to ignore: %s", exc)
+            return 1
+
+    try:
+        allowance = token.functions.allowance(sender_address, pool_address).call()
+    except Web3Exception as exc:
+        log.error("Failed to read allowance: %s", exc)
+        return 1
 
     # Approve if needed (always approve MAX so future deposits need no re-approval)
     max_uint256 = 2**256 - 1
