@@ -130,7 +130,7 @@ jobs:
         run: gitleaks detect --source . --no-git --verbose --redact
 
       - name: Trivy FS scan
-        uses: aquasecurity/trivy-action@97e0b3872f55f89b95b2f65b3dbab56962816478  # 0.34.2
+        uses: aquasecurity/trivy-action@6abccf398f78b4c337599c0656f933d91efb91a0  # 0.34.2
         with:
           scan-type: fs
           scan-ref: .
