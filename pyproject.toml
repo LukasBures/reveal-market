@@ -10,7 +10,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "pre-commit>=4.5.1",
     "web3>=7.14.1",
-    "ruff==0.15.1",
+    "ruff==0.17.1",
     "httpx>=0.28.1",
 ]
 
