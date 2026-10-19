@@ -940,6 +940,14 @@ contracts/cache/
 .claude/worktrees/
 .aider*
 
+# Local-only project artifacts
+project/
+.tokensave/
+*.db
+*.sqlite
+*.sqlite3
+log.txt
+
 # Production DB backups downloaded locally (folder and scripts are tracked; dumps are not)
 prod_db_backups/*.gz
 prod_db_backups/*.dump
