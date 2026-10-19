@@ -27,7 +27,7 @@
     "asyncstorage-down": "^4.1.0",
     "clsx": "^2.1.0",
     "ioredis": "^5.4.1",
-    "next": "^15.5.10",
+    "next": "^16.4.2",
     "nodemailer": "^7.0.11",
     "pino-pretty": "^11.2.0",
     "porto": "^0.2.37",
