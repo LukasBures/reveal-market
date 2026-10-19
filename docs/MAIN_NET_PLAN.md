@@ -1063,7 +1063,7 @@ No DNS changes needed — `revealmarket.xyz` and subdomains stay the same. The c
 ### Communication
 
 - [ ] Update any public docs that mention "testnet"
-- [ ] Update `MVP.md`, `AGENTS.md`, `MVP.md` references to chain ID / RPC
+- [ ] Update `MVP.md` and `AGENTS.md` references to chain ID / RPC
 - [ ] Remove or update `CLAUDE.md` "Default chain" line:
   ```
   - **Default chain**: Horizen Mainnet, chain ID `26514`, RPC `https://horizen.calderachain.xyz/http`
@@ -1244,7 +1244,6 @@ Adjust in `docker-compose.yml` and/or `docker-compose.prod.yml` `deploy.resource
 | `CLAUDE.md` | Default chain reference |
 | `MVP.md` | Chain ID + RPC references |
 | `AGENTS.md` | Chain ID reference |
-| `MVP.md` | Chain ID + RPC references |
 | `scripts/e2e/DEPLOYMENT_GUIDE.md` | Testnet chain ID, RPC URLs, contract addresses throughout |
 
 ---

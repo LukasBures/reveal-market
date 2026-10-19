@@ -942,6 +942,8 @@ contracts/cache/
 
 # Local-only project artifacts
 project/
+M1.md
+M2.md
 .tokensave/
 *.db
 *.sqlite
